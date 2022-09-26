@@ -47,7 +47,7 @@ where
 }
 
 #[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-enum Kind {
+pub enum Kind {
     None,       // 0
     Call,       // 1
     Reply,      // 2
@@ -94,7 +94,7 @@ impl Default for Kind {
 
 bitflags! {
     #[derive(Default)]
-    struct Flags: u8 {
+    pub struct Flags: u8 {
         const DYNAMIC_PAYLOAD = 0b00000001;
         const RETURN_TYPE = 0b00000010;
     }
@@ -119,7 +119,7 @@ impl Flags {
 }
 
 #[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-enum ServerAction {
+pub enum ServerAction {
     Connect = 4,
     Authenticate = 8,
 }
@@ -141,7 +141,7 @@ const ACTION_ID_SD_SERVICE_REMOVED: u32 = 107;
 const ACTION_ID_SD_MACHINE_ID: u32 = 108;
 
 #[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-enum ServiceDirectoryAction {
+pub enum ServiceDirectoryAction {
     Service = ACTION_ID_SD_SERVICE as isize,
     Services = ACTION_ID_SD_SERVICES as isize,
     RegisterService = ACTION_ID_SD_REGISTER_SERVICE as isize,
@@ -169,7 +169,7 @@ const ACTION_ID_PROPERTIES: u32 = 7;
 const ACTION_ID_REGISTER_EVENT_WITH_SIGNATURE: u32 = 8;
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-enum BoundObjectAction {
+pub enum BoundObjectAction {
     RegisterEvent,
     UnregisterEvent,
     Metaobject,
@@ -244,7 +244,7 @@ const OBJECT_ID_NONE: u32 = 0;
 const OBJECT_ID_SERVICE_MAIN: u32 = 1;
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-enum Target {
+pub enum Target {
     // service = server, object = none
     Server(ServerAction),
     // service = sd, object = service main
@@ -353,6 +353,26 @@ pub enum ReadError {
 impl Message {
     const VERSION: u16 = 0;
     const MAGIC_COOKIE: u32 = 0x42dead42;
+
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    pub fn kind(&self) -> &Kind {
+        &self.kind
+    }
+
+    pub fn flags(&self) -> &Flags {
+        &self.flags
+    }
+
+    pub fn target(&self) -> &Target {
+        &self.target
+    }
+
+    pub fn payload(&self) -> &[u8] {
+        &self.payload
+    }
 
     pub async fn write<W>(&self, writer: &mut W) -> Result<(), WriteError>
     where
