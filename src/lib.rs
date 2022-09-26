@@ -1,12 +1,46 @@
 pub mod message {
     use bitflags::bitflags;
-    use byteorder::{BigEndian, LittleEndian, ReadBytesExt, WriteBytesExt};
     use num_derive::{FromPrimitive, ToPrimitive};
     use num_traits::{FromPrimitive, ToPrimitive};
-    use std::{
-        io::{Error as IoError, ErrorKind as IoErrorKind, Read, Result as IoResult, Write},
-        ops::RangeInclusive,
-    };
+    use std::io::{Error as IoError, ErrorKind as IoErrorKind, Read, Result as IoResult, Write};
+    use thiserror::Error;
+
+    fn read_bytes<R, const N: usize>(reader: &mut R) -> IoResult<[u8; N]>
+    where
+        R: Read,
+    {
+        let mut buf = [0u8; N];
+        reader.read_exact(&mut buf)?;
+        Ok(buf)
+    }
+
+    fn read_u8<R>(reader: &mut R) -> IoResult<u8>
+    where
+        R: Read,
+    {
+        Ok(u8::from_ne_bytes(read_bytes(reader)?))
+    }
+
+    fn read_u32_le<R>(reader: &mut R) -> IoResult<u32>
+    where
+        R: Read,
+    {
+        Ok(u32::from_le_bytes(read_bytes(reader)?))
+    }
+
+    fn read_u16_le<R>(reader: &mut R) -> IoResult<u16>
+    where
+        R: Read,
+    {
+        Ok(u16::from_le_bytes(read_bytes(reader)?))
+    }
+
+    fn read_u32_be<R>(reader: &mut R) -> IoResult<u32>
+    where
+        R: Read,
+    {
+        Ok(u32::from_be_bytes(read_bytes(reader)?))
+    }
 
     #[derive(
         FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy,
@@ -23,12 +57,30 @@ pub mod message {
         Canceled,   // 8
     }
 
+    #[derive(Error, Debug)]
+    pub enum FieldReadError {
+        #[error("io error")]
+        Io(#[from] IoError),
+
+        #[error("invalid value")]
+        InvalidValue,
+    }
+
     impl Kind {
         fn write<W>(&self, writer: &mut W) -> IoResult<()>
         where
             W: Write,
         {
-            writer.write_u8(self.to_u8().unwrap())
+            let bytes = &self.to_u8().unwrap().to_le_bytes();
+            writer.write_all(bytes)
+        }
+
+        fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
+        where
+            R: Read,
+        {
+            let val = read_u8(reader)?;
+            Kind::from_u8(val).ok_or(FieldReadError::InvalidValue)
         }
     }
 
@@ -51,7 +103,16 @@ pub mod message {
         where
             W: Write,
         {
-            writer.write_u8(self.bits())
+            let bytes = &self.bits().to_le_bytes();
+            writer.write_all(bytes)
+        }
+
+        fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
+        where
+            R: Read,
+        {
+            let val = read_u8(reader)?;
+            Flags::from_bits(val).ok_or(FieldReadError::InvalidValue)
         }
     }
 
@@ -249,9 +310,20 @@ pub mod message {
         where
             W: Write,
         {
-            writer.write_u32::<LittleEndian>(self.service())?;
-            writer.write_u32::<LittleEndian>(self.object())?;
-            writer.write_u32::<LittleEndian>(self.action())
+            writer.write_all(&self.service().to_le_bytes())?;
+            writer.write_all(&self.object().to_le_bytes())?;
+            writer.write_all(&self.action().to_le_bytes())
+        }
+
+        fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
+        where
+            R: Read,
+        {
+            let service = read_u32_le(reader)?;
+            let object = read_u32_le(reader)?;
+            let action = read_u32_le(reader)?;
+
+            Self::from_values(service, object, action).ok_or(FieldReadError::InvalidValue)
         }
     }
 
@@ -264,16 +336,32 @@ pub mod message {
         payload: Vec<u8>,
     }
 
+    type WriteError = IoError;
+
+    #[derive(Error, Debug)]
+    pub enum ReadError {
+        #[error("bad message magic cookie")]
+        BadMagicCookie,
+        #[error("unsupported protocol version")]
+        UnsupportedVersion,
+        #[error("payload size too large")]
+        PayloadSizeTooLarge,
+        #[error("field read error")]
+        FieldReadError(#[from] FieldReadError),
+        #[error("io error")]
+        Io(#[from] IoError),
+    }
+
     impl Message {
         const VERSION: u16 = 0;
         const MAGIC_COOKIE: u32 = 0x42dead42;
 
-        pub fn write<W>(&self, writer: &mut W) -> IoResult<()>
+        pub fn write<W>(&self, writer: &mut W) -> Result<(), WriteError>
         where
             W: Write,
         {
             let payload_size = self.payload.len();
-            let payload_size_u32 = match payload_size.try_into() {
+            let payload_size: u32 = match payload_size.try_into() {
                 Ok(size) => size,
                 Err(err) => {
                     return Err(IoError::new(
@@ -283,23 +371,58 @@ pub mod message {
                 }
             };
 
-            writer.write_u32::<BigEndian>(Self::MAGIC_COOKIE)?;
-            writer.write_u32::<LittleEndian>(self.id)?;
-            writer.write_u32::<LittleEndian>(payload_size_u32)?;
-            writer.write_u16::<LittleEndian>(Self::VERSION)?;
+            writer.write_all(&Self::MAGIC_COOKIE.to_be_bytes())?;
+            writer.write_all(&self.id.to_le_bytes())?;
+            writer.write_all(&payload_size.to_le_bytes())?;
+            writer.write_all(&Self::VERSION.to_le_bytes())?;
             self.kind.write(writer)?;
             self.flags.write(writer)?;
             self.target.write(writer)?;
             writer.write_all(&self.payload)
+        }
+
+        pub fn read<R>(reader: &mut R) -> Result<Self, ReadError>
+        where
+            R: Read,
+        {
+            let magic_cookie = read_u32_be(reader)?;
+            if magic_cookie != Self::MAGIC_COOKIE {
+                return Err(ReadError::BadMagicCookie);
+            }
+
+            let id = read_u32_le(reader)?;
+            let payload_size = read_u32_le(reader)?;
+            let payload_size = payload_size
+                .try_into()
+                .map_err(|_| ReadError::PayloadSizeTooLarge)?;
+            let version = read_u16_le(reader)?;
+            if version != Self::VERSION {
+                return Err(ReadError::UnsupportedVersion);
+            }
+            let kind = Kind::read(reader)?;
+            let flags = Flags::read(reader)?;
+            let target = Target::read(reader)?;
+            let mut payload = Vec::with_capacity(payload_size);
+            payload.resize(payload_size, 0u8);
+            reader.read_exact(&mut payload)?;
+
+            Ok(Self {
+                id,
+                kind,
+                flags,
+                target,
+                payload,
+            })
         }
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
+        use assert_matches::assert_matches;
 
         #[test]
-        fn message_write() -> IoResult<()> {
+        fn message_write() {
             let msg = Message {
                 id: 329,
                 kind: Kind::Capability,
@@ -308,7 +431,7 @@ pub mod message {
                 payload: vec![23u8, 43u8, 230u8, 1u8, 95u8],
             };
             let mut buf = Vec::new();
-            msg.write(&mut buf)?;
+            msg.write(&mut buf).expect("write error");
             let expected = vec![
                 0x42, 0xde, 0xad, 0x42, // cookie
                 0x49, 0x01, 0x00, 0x00, // id
@@ -320,9 +443,73 @@ pub mod message {
                 0x17, 0x2b, 0xe6, 0x01, 0x5f, // payload
             ];
             assert_eq!(buf, expected);
-            Ok(())
+        }
+
+        #[test]
+        fn message_read() {
+            let input = &[
+                0x42, 0xde, 0xad, 0x42, 0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x02, 0x00, 0x27, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00,
+                0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
+                0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
+                0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
+                // garbage at the end, should be ignored
+                0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
+                0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
+            ];
+            let msg = Message::read(input.as_slice().by_ref()).expect("read error");
+            let expected = Message {
+                id: 39608,
+                kind: Kind::Reply,
+                flags: Flags::empty(),
+                target: Target::BoundObject {
+                    service: 39,
+                    object: 9,
+                    action: BoundObjectAction::BoundFunction(104),
+                },
+                payload: vec![
+                    0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d,
+                    0x65, 0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35,
+                    0x32, 0x2d, 0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30,
+                    0x33,
+                ],
+            };
+            assert_eq!(msg, expected);
+        }
+
+        #[test]
+        fn message_read_bad_cookie() {
+            let input = &[
+                0x42, 0xde, 0xad, 0x00, 0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x02, 0x00, 0x27, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00,
+                0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
+                0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
+                0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
+                // garbage at the end, should be ignored
+                0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
+                0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
+            ];
+            let res = Message::read(input.as_slice().by_ref());
+            assert_matches!(res, Err(ReadError::BadMagicCookie));
+        }
+
+        #[test]
+        fn message_write_read_invariant() {
+            let msg = Message {
+                id: 9323982,
+                kind: Kind::Error,
+                flags: Flags::DYNAMIC_PAYLOAD | Flags::RETURN_TYPE,
+                target: Target::BoundObject {
+                    service: 984398294,
+                    object: 87438426,
+                    action: BoundObjectAction::SetProperty,
+                },
+                payload: vec![0x10, 0x11, 0x12, 0x13, 0x15],
+            };
+            let mut buffer = Vec::new();
+            msg.write(&mut buffer).expect("write error");
+            let msg2 = Message::read(buffer.as_slice().by_ref()).expect("read error");
+            assert_eq!(msg, msg2);
         }
     }
 }
-
-use message::Message;
