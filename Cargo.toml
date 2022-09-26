@@ -12,3 +12,4 @@ thiserror = "1.0.36"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
+futures-test = "0.3.24"

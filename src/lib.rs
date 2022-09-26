@@ -1,45 +1,50 @@
 pub mod message {
     use bitflags::bitflags;
+    use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
     use num_derive::{FromPrimitive, ToPrimitive};
     use num_traits::{FromPrimitive, ToPrimitive};
-    use std::io::{Error as IoError, ErrorKind as IoErrorKind, Read, Result as IoResult, Write};
+    use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
     use thiserror::Error;
 
-    fn read_bytes<R, const N: usize>(reader: &mut R) -> IoResult<[u8; N]>
+    async fn read_bytes<R, const N: usize>(reader: &mut R) -> IoResult<[u8; N]>
     where
-        R: Read,
+        R: AsyncRead + Unpin,
     {
         let mut buf = [0u8; N];
-        reader.read_exact(&mut buf)?;
+        reader.read_exact(&mut buf).await?;
         Ok(buf)
     }
 
-    fn read_u8<R>(reader: &mut R) -> IoResult<u8>
+    async fn read_u8<R>(reader: &mut R) -> IoResult<u8>
     where
-        R: Read,
+        R: AsyncRead + Unpin,
     {
-        Ok(u8::from_ne_bytes(read_bytes(reader)?))
+        let bytes = read_bytes(reader).await?;
+        Ok(u8::from_ne_bytes(bytes))
     }
 
-    fn read_u32_le<R>(reader: &mut R) -> IoResult<u32>
+    async fn read_u32_le<R>(reader: &mut R) -> IoResult<u32>
     where
-        R: Read,
+        R: AsyncRead + Unpin,
     {
-        Ok(u32::from_le_bytes(read_bytes(reader)?))
+        let bytes = read_bytes(reader).await?;
+        Ok(u32::from_le_bytes(bytes))
     }
 
-    fn read_u16_le<R>(reader: &mut R) -> IoResult<u16>
+    async fn read_u16_le<R>(reader: &mut R) -> IoResult<u16>
     where
-        R: Read,
+        R: AsyncRead + Unpin,
     {
-        Ok(u16::from_le_bytes(read_bytes(reader)?))
+        let bytes = read_bytes(reader).await?;
+        Ok(u16::from_le_bytes(bytes))
     }
 
-    fn read_u32_be<R>(reader: &mut R) -> IoResult<u32>
+    async fn read_u32_be<R>(reader: &mut R) -> IoResult<u32>
     where
-        R: Read,
+        R: AsyncRead + Unpin,
     {
-        Ok(u32::from_be_bytes(read_bytes(reader)?))
+        let bytes = read_bytes(reader).await?;
+        Ok(u32::from_be_bytes(bytes))
     }
 
     #[derive(
@@ -67,19 +72,19 @@ pub mod message {
     }
 
     impl Kind {
-        fn write<W>(&self, writer: &mut W) -> IoResult<()>
+        async fn write<W>(&self, writer: &mut W) -> IoResult<()>
         where
-            W: Write,
+            W: AsyncWrite + Unpin,
         {
             let bytes = &self.to_u8().unwrap().to_le_bytes();
-            writer.write_all(bytes)
+            writer.write_all(bytes).await
         }
 
-        fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
+        async fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
         where
-            R: Read,
+            R: AsyncRead + Unpin,
         {
-            let val = read_u8(reader)?;
+            let val = read_u8(reader).await?;
             Kind::from_u8(val).ok_or(FieldReadError::InvalidValue)
         }
     }
@@ -99,19 +104,19 @@ pub mod message {
     }
 
     impl Flags {
-        fn write<W>(&self, writer: &mut W) -> IoResult<()>
+        async fn write<W>(&self, writer: &mut W) -> IoResult<()>
         where
-            W: Write,
+            W: AsyncWrite + Unpin,
         {
             let bytes = &self.bits().to_le_bytes();
-            writer.write_all(bytes)
+            writer.write_all(bytes).await
         }
 
-        fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
+        async fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
         where
-            R: Read,
+            R: AsyncRead + Unpin,
         {
-            let val = read_u8(reader)?;
+            let val = read_u8(reader).await?;
             Flags::from_bits(val).ok_or(FieldReadError::InvalidValue)
         }
     }
@@ -306,22 +311,22 @@ pub mod message {
             .unwrap()
         }
 
-        fn write<W>(&self, writer: &mut W) -> IoResult<()>
+        async fn write<W>(&self, writer: &mut W) -> IoResult<()>
         where
-            W: Write,
+            W: AsyncWrite + Unpin,
         {
-            writer.write_all(&self.service().to_le_bytes())?;
-            writer.write_all(&self.object().to_le_bytes())?;
-            writer.write_all(&self.action().to_le_bytes())
+            writer.write_all(&self.service().to_le_bytes()).await?;
+            writer.write_all(&self.object().to_le_bytes()).await?;
+            writer.write_all(&self.action().to_le_bytes()).await
         }
 
-        fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
+        async fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
         where
-            R: Read,
+            R: AsyncRead + Unpin,
         {
-            let service = read_u32_le(reader)?;
-            let object = read_u32_le(reader)?;
-            let action = read_u32_le(reader)?;
+            let service = read_u32_le(reader).await?;
+            let object = read_u32_le(reader).await?;
+            let action = read_u32_le(reader).await?;
 
             Self::from_values(service, object, action).ok_or(FieldReadError::InvalidValue)
         }
@@ -356,9 +361,9 @@ pub mod message {
         const VERSION: u16 = 0;
         const MAGIC_COOKIE: u32 = 0x42dead42;
 
-        pub fn write<W>(&self, writer: &mut W) -> Result<(), WriteError>
+        pub async fn write<W>(&self, writer: &mut W) -> Result<(), WriteError>
         where
-            W: Write,
+            W: AsyncWrite + Unpin,
         {
             let payload_size = self.payload.len();
             let payload_size: u32 = match payload_size.try_into() {
@@ -371,40 +376,40 @@ pub mod message {
                 }
             };
 
-            writer.write_all(&Self::MAGIC_COOKIE.to_be_bytes())?;
-            writer.write_all(&self.id.to_le_bytes())?;
-            writer.write_all(&payload_size.to_le_bytes())?;
-            writer.write_all(&Self::VERSION.to_le_bytes())?;
-            self.kind.write(writer)?;
-            self.flags.write(writer)?;
-            self.target.write(writer)?;
-            writer.write_all(&self.payload)
+            writer.write_all(&Self::MAGIC_COOKIE.to_be_bytes()).await?;
+            writer.write_all(&self.id.to_le_bytes()).await?;
+            writer.write_all(&payload_size.to_le_bytes()).await?;
+            writer.write_all(&Self::VERSION.to_le_bytes()).await?;
+            self.kind.write(writer).await?;
+            self.flags.write(writer).await?;
+            self.target.write(writer).await?;
+            writer.write_all(&self.payload).await
         }
 
-        pub fn read<R>(reader: &mut R) -> Result<Self, ReadError>
+        pub async fn read<R>(reader: &mut R) -> Result<Self, ReadError>
         where
-            R: Read,
+            R: AsyncRead + Unpin,
         {
-            let magic_cookie = read_u32_be(reader)?;
+            let magic_cookie = read_u32_be(reader).await?;
             if magic_cookie != Self::MAGIC_COOKIE {
                 return Err(ReadError::BadMagicCookie);
             }
 
-            let id = read_u32_le(reader)?;
-            let payload_size = read_u32_le(reader)?;
+            let id = read_u32_le(reader).await?;
+            let payload_size = read_u32_le(reader).await?;
             let payload_size = payload_size
                 .try_into()
                 .map_err(|_| ReadError::PayloadSizeTooLarge)?;
-            let version = read_u16_le(reader)?;
+            let version = read_u16_le(reader).await?;
             if version != Self::VERSION {
                 return Err(ReadError::UnsupportedVersion);
             }
-            let kind = Kind::read(reader)?;
-            let flags = Flags::read(reader)?;
-            let target = Target::read(reader)?;
+            let kind = Kind::read(reader).await?;
+            let flags = Flags::read(reader).await?;
+            let target = Target::read(reader).await?;
             let mut payload = Vec::with_capacity(payload_size);
             payload.resize(payload_size, 0u8);
-            reader.read_exact(&mut payload)?;
+            reader.read_exact(&mut payload).await?;
 
             Ok(Self {
                 id,
@@ -420,9 +425,10 @@ pub mod message {
     mod tests {
         use super::*;
         use assert_matches::assert_matches;
+        use futures_test::test;
 
         #[test]
-        fn message_write() {
+        async fn message_write() {
             let msg = Message {
                 id: 329,
                 kind: Kind::Capability,
@@ -431,7 +437,7 @@ pub mod message {
                 payload: vec![23u8, 43u8, 230u8, 1u8, 95u8],
             };
             let mut buf = Vec::new();
-            msg.write(&mut buf).expect("write error");
+            msg.write(&mut buf).await.expect("write error");
             let expected = vec![
                 0x42, 0xde, 0xad, 0x42, // cookie
                 0x49, 0x01, 0x00, 0x00, // id
@@ -446,18 +452,20 @@ pub mod message {
         }
 
         #[test]
-        fn message_read() {
+        async fn message_read() {
             let input = &[
-                0x42, 0xde, 0xad, 0x42, 0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x02, 0x00, 0x27, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00,
-                0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
-                0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
-                0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
-                // garbage at the end, should be ignored
+                0x42u8, 0xde, 0xad, 0x42, 0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x02, 0x00, 0x27, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00,
+                0x00, 0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d,
+                0x65, 0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32,
+                0x2d, 0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30,
+                0x33, // garbage at the end, should be ignored
                 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
                 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
             ];
-            let msg = Message::read(input.as_slice().by_ref()).expect("read error");
+            let msg = Message::read(&mut input.as_slice())
+                .await
+                .expect("read error");
             let expected = Message {
                 id: 39608,
                 kind: Kind::Reply,
@@ -478,23 +486,23 @@ pub mod message {
         }
 
         #[test]
-        fn message_read_bad_cookie() {
+        async fn message_read_bad_cookie() {
             let input = &[
                 0x42, 0xde, 0xad, 0x00, 0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x02, 0x00, 0x27, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00,
                 0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
                 0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
-                0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
-                // garbage at the end, should be ignored
+                0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30,
+                0x33, // garbage at the end, should be ignored
                 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
                 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
             ];
-            let res = Message::read(input.as_slice().by_ref());
+            let res = Message::read(&mut input.as_slice()).await;
             assert_matches!(res, Err(ReadError::BadMagicCookie));
         }
 
         #[test]
-        fn message_write_read_invariant() {
+        async fn message_write_read_invariant() {
             let msg = Message {
                 id: 9323982,
                 kind: Kind::Error,
@@ -507,8 +515,10 @@ pub mod message {
                 payload: vec![0x10, 0x11, 0x12, 0x13, 0x15],
             };
             let mut buffer = Vec::new();
-            msg.write(&mut buffer).expect("write error");
-            let msg2 = Message::read(buffer.as_slice().by_ref()).expect("read error");
+            msg.write(&mut buffer).await.expect("write error");
+            let msg2 = Message::read(&mut buffer.as_slice())
+                .await
+                .expect("read error");
             assert_eq!(msg, msg2);
         }
     }
