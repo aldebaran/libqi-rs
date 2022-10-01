@@ -5,7 +5,7 @@ use num_traits::{FromPrimitive, ToPrimitive};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use thiserror::Error;
 
-async fn read_bytes<R, const N: usize>(reader: &mut R) -> IoResult<[u8; N]>
+async fn read_bytes<R, const N: usize>(mut reader: R) -> IoResult<[u8; N]>
 where
     R: AsyncRead + Unpin,
 {
@@ -14,7 +14,7 @@ where
     Ok(buf)
 }
 
-async fn read_u8<R>(reader: &mut R) -> IoResult<u8>
+async fn read_u8<R>(reader: R) -> IoResult<u8>
 where
     R: AsyncRead + Unpin,
 {
@@ -22,7 +22,7 @@ where
     Ok(u8::from_ne_bytes(bytes))
 }
 
-async fn read_u32_le<R>(reader: &mut R) -> IoResult<u32>
+async fn read_u32_le<R>(reader: R) -> IoResult<u32>
 where
     R: AsyncRead + Unpin,
 {
@@ -30,7 +30,7 @@ where
     Ok(u32::from_le_bytes(bytes))
 }
 
-async fn read_u16_le<R>(reader: &mut R) -> IoResult<u16>
+async fn read_u16_le<R>(reader: R) -> IoResult<u16>
 where
     R: AsyncRead + Unpin,
 {
@@ -38,7 +38,7 @@ where
     Ok(u16::from_le_bytes(bytes))
 }
 
-async fn read_u32_be<R>(reader: &mut R) -> IoResult<u32>
+async fn read_u32_be<R>(reader: R) -> IoResult<u32>
 where
     R: AsyncRead + Unpin,
 {
@@ -69,7 +69,7 @@ pub enum FieldReadError {
 }
 
 impl Kind {
-    async fn write<W>(&self, writer: &mut W) -> IoResult<()>
+    async fn write<W>(&self, mut writer: W) -> IoResult<()>
     where
         W: AsyncWrite + Unpin,
     {
@@ -77,7 +77,7 @@ impl Kind {
         writer.write_all(bytes).await
     }
 
-    async fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
+    async fn read<R>(reader: R) -> Result<Self, FieldReadError>
     where
         R: AsyncRead + Unpin,
     {
@@ -101,7 +101,7 @@ bitflags! {
 }
 
 impl Flags {
-    async fn write<W>(&self, writer: &mut W) -> IoResult<()>
+    async fn write<W>(&self, mut writer: W) -> IoResult<()>
     where
         W: AsyncWrite + Unpin,
     {
@@ -109,7 +109,7 @@ impl Flags {
         writer.write_all(bytes).await
     }
 
-    async fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
+    async fn read<R>(reader: R) -> Result<Self, FieldReadError>
     where
         R: AsyncRead + Unpin,
     {
@@ -304,7 +304,7 @@ impl Target {
         .unwrap()
     }
 
-    async fn write<W>(&self, writer: &mut W) -> IoResult<()>
+    async fn write<W>(&self, mut writer: W) -> IoResult<()>
     where
         W: AsyncWrite + Unpin,
     {
@@ -313,28 +313,34 @@ impl Target {
         writer.write_all(&self.action().to_le_bytes()).await
     }
 
-    async fn read<R>(reader: &mut R) -> Result<Self, FieldReadError>
+    async fn read<R>(mut reader: R) -> Result<Self, FieldReadError>
     where
         R: AsyncRead + Unpin,
     {
-        let service = read_u32_le(reader).await?;
-        let object = read_u32_le(reader).await?;
-        let action = read_u32_le(reader).await?;
+        let service = read_u32_le(&mut reader).await?;
+        let object = read_u32_le(&mut reader).await?;
+        let action = read_u32_le(&mut reader).await?;
 
         Self::from_values(service, object, action).ok_or(FieldReadError::InvalidValue)
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub struct Message {
-    id: u32,
-    kind: Kind, // or type
-    flags: Flags,
-    target: Target,
-    payload: Vec<u8>,
+impl Default for Target {
+    fn default() -> Self {
+        Self::Server(ServerAction::default())
+    }
 }
 
-type WriteError = IoError;
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub struct Message {
+    pub id: u32,
+    pub kind: Kind, // or type
+    pub flags: Flags,
+    pub target: Target,
+    pub payload: Vec<u8>,
+}
+
+pub type WriteError = IoError;
 
 #[derive(Error, Debug)]
 pub enum ReadError {
@@ -354,27 +360,17 @@ impl Message {
     const VERSION: u16 = 0;
     const MAGIC_COOKIE: u32 = 0x42dead42;
 
-    pub fn id(&self) -> u32 {
-        self.id
+    pub fn new() -> Self {
+        Self {
+            id: 0,
+            kind: Kind::None,
+            flags: Flags::empty(),
+            target: Target::default(),
+            payload: Vec::new(),
+        }
     }
 
-    pub fn kind(&self) -> &Kind {
-        &self.kind
-    }
-
-    pub fn flags(&self) -> &Flags {
-        &self.flags
-    }
-
-    pub fn target(&self) -> &Target {
-        &self.target
-    }
-
-    pub fn payload(&self) -> &[u8] {
-        &self.payload
-    }
-
-    pub async fn write<W>(&self, writer: &mut W) -> Result<(), WriteError>
+    pub async fn write<W>(&self, mut writer: W) -> Result<(), WriteError>
     where
         W: AsyncWrite + Unpin,
     {
@@ -393,33 +389,33 @@ impl Message {
         writer.write_all(&self.id.to_le_bytes()).await?;
         writer.write_all(&payload_size.to_le_bytes()).await?;
         writer.write_all(&Self::VERSION.to_le_bytes()).await?;
-        self.kind.write(writer).await?;
-        self.flags.write(writer).await?;
-        self.target.write(writer).await?;
+        self.kind.write(&mut writer).await?;
+        self.flags.write(&mut writer).await?;
+        self.target.write(&mut writer).await?;
         writer.write_all(&self.payload).await
     }
 
-    pub async fn read<R>(reader: &mut R) -> Result<Self, ReadError>
+    pub async fn read<R>(mut reader: R) -> Result<Self, ReadError>
     where
         R: AsyncRead + Unpin,
     {
-        let magic_cookie = read_u32_be(reader).await?;
+        let magic_cookie = read_u32_be(&mut reader).await?;
         if magic_cookie != Self::MAGIC_COOKIE {
             return Err(ReadError::BadMagicCookie);
         }
 
-        let id = read_u32_le(reader).await?;
-        let payload_size = read_u32_le(reader).await?;
+        let id = read_u32_le(&mut reader).await?;
+        let payload_size = read_u32_le(&mut reader).await?;
         let payload_size = payload_size
             .try_into()
             .map_err(|_| ReadError::PayloadSizeTooLarge)?;
-        let version = read_u16_le(reader).await?;
+        let version = read_u16_le(&mut reader).await?;
         if version != Self::VERSION {
             return Err(ReadError::UnsupportedVersion);
         }
-        let kind = Kind::read(reader).await?;
-        let flags = Flags::read(reader).await?;
-        let target = Target::read(reader).await?;
+        let kind = Kind::read(&mut reader).await?;
+        let flags = Flags::read(&mut reader).await?;
+        let target = Target::read(&mut reader).await?;
         let mut payload = vec![0; payload_size];
         reader.read_exact(&mut payload).await?;
 
@@ -430,6 +426,12 @@ impl Message {
             target,
             payload,
         })
+    }
+}
+
+impl Default for Message {
+    fn default() -> Self {
+        Message::new()
     }
 }
 
@@ -475,9 +477,7 @@ mod tests {
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
         ];
-        let msg = Message::read(&mut input.as_slice())
-            .await
-            .expect("read error");
+        let msg = Message::read(input.as_slice()).await.expect("read error");
         let expected = Message {
             id: 39608,
             kind: Kind::Reply,
@@ -508,7 +508,7 @@ mod tests {
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
         ];
-        let res = Message::read(&mut input.as_slice()).await;
+        let res = Message::read(input.as_slice()).await;
         assert_matches!(res, Err(ReadError::BadMagicCookie));
     }
 
@@ -527,9 +527,7 @@ mod tests {
         };
         let mut buffer = Vec::new();
         msg.write(&mut buffer).await.expect("write error");
-        let msg2 = Message::read(&mut buffer.as_slice())
-            .await
-            .expect("read error");
+        let msg2 = Message::read(buffer.as_slice()).await.expect("read error");
         assert_eq!(msg, msg2);
     }
 }
