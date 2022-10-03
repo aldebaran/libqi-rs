@@ -1,50 +1,10 @@
+use super::utils::{read_u16_le, read_u32_be, read_u32_le, read_u8};
 use bitflags::bitflags;
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use thiserror::Error;
-
-async fn read_bytes<R, const N: usize>(mut reader: R) -> IoResult<[u8; N]>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut buf = [0u8; N];
-    reader.read_exact(&mut buf).await?;
-    Ok(buf)
-}
-
-async fn read_u8<R>(reader: R) -> IoResult<u8>
-where
-    R: AsyncRead + Unpin,
-{
-    let bytes = read_bytes(reader).await?;
-    Ok(u8::from_ne_bytes(bytes))
-}
-
-async fn read_u32_le<R>(reader: R) -> IoResult<u32>
-where
-    R: AsyncRead + Unpin,
-{
-    let bytes = read_bytes(reader).await?;
-    Ok(u32::from_le_bytes(bytes))
-}
-
-async fn read_u16_le<R>(reader: R) -> IoResult<u16>
-where
-    R: AsyncRead + Unpin,
-{
-    let bytes = read_bytes(reader).await?;
-    Ok(u16::from_le_bytes(bytes))
-}
-
-async fn read_u32_be<R>(reader: R) -> IoResult<u32>
-where
-    R: AsyncRead + Unpin,
-{
-    let bytes = read_bytes(reader).await?;
-    Ok(u32::from_be_bytes(bytes))
-}
 
 #[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Kind {
