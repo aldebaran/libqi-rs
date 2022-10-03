@@ -1,9 +1,6 @@
-mod object;
 mod proto;
-mod value;
 
 use futures::prelude::*;
-use object::Object;
 use proto::message::{self, Message};
 
 fn to_message_stream<'r, R>(reader: R) -> impl Stream<Item = Message> + 'r
