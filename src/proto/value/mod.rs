@@ -29,7 +29,7 @@ use thiserror::Error;
 //}
 
 #[derive(Debug)]
-struct TupleMember {
+pub struct TupleMember {
     name: Option<String>,
     value: Value,
 }
@@ -83,7 +83,7 @@ impl PartialEq for Value {
             (Self::List(l0), Self::List(r0)) => l0 == r0,
             (Self::Map(l0), Self::Map(r0)) => l0 == r0,
             // Objects are not comparable
-            (Self::Object(l0), Self::Object(r0)) => false,
+            (Self::Object(_), Self::Object(_)) => false,
             (
                 Self::Tuple {
                     name: l_name,
@@ -119,7 +119,7 @@ impl std::fmt::Debug for Value {
             Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
             Self::List(arg0) => f.debug_tuple("List").field(arg0).finish(),
             Self::Map(arg0) => f.debug_tuple("Map").field(arg0).finish(),
-            Self::Object(arg0) => f.write_str("Object"),
+            Self::Object(_) => f.write_str("Object"),
             Self::Tuple { name, members } => f
                 .debug_struct("Tuple")
                 .field("name", name)
