@@ -172,3 +172,66 @@ impl serde::de::Error for Error {
 }
 
 type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn map_to_value() {
+        let mut map = BTreeMap::new();
+        map.insert(1, "hello".to_string());
+        map.insert(2, "world".to_string());
+        let value = to_value(&map).expect("serialization error");
+        let expected = Value::Map(vec![
+            (Value::Int32(1), Value::String("hello".to_string())),
+            (Value::Int32(2), Value::String("world".to_string())),
+        ]);
+        assert_eq!(value, expected);
+    }
+
+    #[derive(serde::Serialize)]
+    struct S {
+        a: i32,
+        b: f32,
+        c: bool,
+        d: Vec<&'static str>,
+    }
+
+    #[test]
+    fn struct_to_value() {
+        let s = S {
+            a: 320,
+            b: 1293.32,
+            c: false,
+            d: vec!["cookies", "muffins"],
+        };
+        let value = to_value(&s).expect("serialization error");
+        let expected = Value::Tuple {
+            name: Some("S".to_string()),
+            members: vec![
+                TupleMember {
+                    name: Some("a".to_string()),
+                    value: Value::Int32(320),
+                },
+                TupleMember {
+                    name: Some("b".to_string()),
+                    value: Value::Float(1293.32),
+                },
+                TupleMember {
+                    name: Some("c".to_string()),
+                    value: Value::Bool(false),
+                },
+                TupleMember {
+                    name: Some("d".to_string()),
+                    value: Value::List(vec![
+                        Value::String("cookies".to_string()),
+                        Value::String("muffins".to_string()),
+                    ]),
+                },
+            ],
+        };
+        assert_eq!(value, expected);
+    }
+}
