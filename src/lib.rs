@@ -13,13 +13,13 @@ where
     })
 }
 
-fn to_message_sink<'w, W>(writer: W) -> impl Sink<Message, Error = message::WriteError> + 'w
+fn to_message_sink<'w, W>(writer: W) -> impl Sink<Message, Error = message::Error> + 'w
 where
     W: AsyncWrite + Unpin + 'w,
 {
     sink::unfold(writer, |mut writer, msg: Message| async move {
         msg.write(&mut writer).await?;
-        Ok::<_, message::WriteError>(writer)
+        Ok::<_, message::Error>(writer)
     })
 }
 

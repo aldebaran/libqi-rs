@@ -6,43 +6,52 @@ use num_traits::{FromPrimitive, ToPrimitive};
 use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
 use thiserror::Error;
 
-#[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub enum Kind {
-    None,       // 0
-    Call,       // 1
-    Reply,      // 2
-    Error,      // 3
-    Post,       // 4
-    Event,      // 5
-    Capability, // 6
-    Cancel,     // 7
-    Canceled,   // 8
-}
-
 #[derive(Error, Debug)]
-pub enum FieldReadError {
-    #[error("io error")]
-    Io(#[from] IoError),
-
+pub enum Error {
+    #[error("bad message magic cookie")]
+    BadMagicCookie,
+    #[error("unsupported protocol version")]
+    UnsupportedVersion,
+    #[error("payload size too large")]
+    PayloadSizeTooLarge,
     #[error("invalid value")]
     InvalidValue,
+    #[error("io error")]
+    Io(#[from] IoError),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[repr(u8)]
+pub enum Kind {
+    None = 0,
+    Call = 1,
+    Reply = 2,
+    Error = 3,
+    Post = 4,
+    Event = 5,
+    Capability = 6,
+    Cancel = 7,
+    Canceled = 8,
 }
 
 impl Kind {
-    async fn write<W>(&self, mut writer: W) -> IoResult<()>
+    async fn write<W>(&self, mut writer: W) -> Result<()>
     where
         W: AsyncWrite + Unpin,
     {
         let bytes = &self.to_u8().unwrap().to_le_bytes();
-        writer.write_all(bytes).await
+        writer.write_all(bytes).await?;
+        Ok(())
     }
 
-    async fn read<R>(reader: R) -> Result<Self, FieldReadError>
+    async fn read<R>(reader: R) -> Result<Self>
     where
         R: AsyncRead + Unpin,
     {
         let val = read_u8(reader).await?;
-        Kind::from_u8(val).ok_or(FieldReadError::InvalidValue)
+        Kind::from_u8(val).ok_or(Error::InvalidValue)
     }
 }
 
@@ -61,27 +70,32 @@ bitflags! {
 }
 
 impl Flags {
-    async fn write<W>(&self, mut writer: W) -> IoResult<()>
+    async fn write<W>(&self, mut writer: W) -> Result<()>
     where
         W: AsyncWrite + Unpin,
     {
         let bytes = &self.bits().to_le_bytes();
-        writer.write_all(bytes).await
+        writer.write_all(bytes).await?;
+        Ok(())
     }
 
-    async fn read<R>(reader: R) -> Result<Self, FieldReadError>
+    async fn read<R>(reader: R) -> Result<Self>
     where
         R: AsyncRead + Unpin,
     {
         let val = read_u8(reader).await?;
-        Flags::from_bits(val).ok_or(FieldReadError::InvalidValue)
+        Flags::from_bits(val).ok_or(Error::InvalidValue)
     }
 }
 
+const ACTION_ID_CONNECT: u32 = 4;
+const ACTION_ID_AUTHENTICATE: u32 = 8;
+
 #[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[repr(u32)]
 pub enum ServerAction {
-    Connect = 4,
-    Authenticate = 8,
+    Connect = ACTION_ID_CONNECT,
+    Authenticate = ACTION_ID_AUTHENTICATE,
 }
 
 impl Default for ServerAction {
@@ -101,16 +115,17 @@ const ACTION_ID_SD_SERVICE_REMOVED: u32 = 107;
 const ACTION_ID_SD_MACHINE_ID: u32 = 108;
 
 #[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[repr(u32)]
 pub enum ServiceDirectoryAction {
-    Service = ACTION_ID_SD_SERVICE as isize,
-    Services = ACTION_ID_SD_SERVICES as isize,
-    RegisterService = ACTION_ID_SD_REGISTER_SERVICE as isize,
-    UnregisterService = ACTION_ID_SD_UNREGISTER_SERVICE as isize,
-    ServiceReady = ACTION_ID_SD_SERVICE_READY as isize,
-    UpdateServiceInfo = ACTION_ID_SD_UPDATE_SERVICE_INFO as isize,
-    ServiceAdded = ACTION_ID_SD_SERVICE_ADDED as isize,
-    ServiceRemoved = ACTION_ID_SD_SERVICE_REMOVED as isize,
-    MachineId = ACTION_ID_SD_MACHINE_ID as isize,
+    Service = ACTION_ID_SD_SERVICE,
+    Services = ACTION_ID_SD_SERVICES,
+    RegisterService = ACTION_ID_SD_REGISTER_SERVICE,
+    UnregisterService = ACTION_ID_SD_UNREGISTER_SERVICE,
+    ServiceReady = ACTION_ID_SD_SERVICE_READY,
+    UpdateServiceInfo = ACTION_ID_SD_UPDATE_SERVICE_INFO,
+    ServiceAdded = ACTION_ID_SD_SERVICE_ADDED,
+    ServiceRemoved = ACTION_ID_SD_SERVICE_REMOVED,
+    MachineId = ACTION_ID_SD_MACHINE_ID,
 }
 
 impl Default for ServiceDirectoryAction {
@@ -129,6 +144,7 @@ const ACTION_ID_PROPERTIES: u32 = 7;
 const ACTION_ID_REGISTER_EVENT_WITH_SIGNATURE: u32 = 8;
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[repr(u32)]
 pub enum BoundObjectAction {
     RegisterEvent,
     UnregisterEvent,
@@ -264,16 +280,17 @@ impl Target {
         .unwrap()
     }
 
-    async fn write<W>(&self, mut writer: W) -> IoResult<()>
+    async fn write<W>(&self, mut writer: W) -> Result<()>
     where
         W: AsyncWrite + Unpin,
     {
         writer.write_all(&self.service().to_le_bytes()).await?;
         writer.write_all(&self.object().to_le_bytes()).await?;
-        writer.write_all(&self.action().to_le_bytes()).await
+        writer.write_all(&self.action().to_le_bytes()).await?;
+        Ok(())
     }
 
-    async fn read<R>(mut reader: R) -> Result<Self, FieldReadError>
+    async fn read<R>(mut reader: R) -> Result<Self>
     where
         R: AsyncRead + Unpin,
     {
@@ -281,7 +298,7 @@ impl Target {
         let object = read_u32_le(&mut reader).await?;
         let action = read_u32_le(&mut reader).await?;
 
-        Self::from_values(service, object, action).ok_or(FieldReadError::InvalidValue)
+        Self::from_values(service, object, action).ok_or(Error::InvalidValue)
     }
 }
 
@@ -300,22 +317,6 @@ pub struct Message {
     pub payload: Vec<u8>,
 }
 
-pub type WriteError = IoError;
-
-#[derive(Error, Debug)]
-pub enum ReadError {
-    #[error("bad message magic cookie")]
-    BadMagicCookie,
-    #[error("unsupported protocol version")]
-    UnsupportedVersion,
-    #[error("payload size too large")]
-    PayloadSizeTooLarge,
-    #[error("field read error")]
-    Field(#[from] FieldReadError),
-    #[error("io error")]
-    Io(#[from] IoError),
-}
-
 impl Message {
     const VERSION: u16 = 0;
     const MAGIC_COOKIE: u32 = 0x42dead42;
@@ -330,7 +331,7 @@ impl Message {
         }
     }
 
-    pub async fn write<W>(&self, mut writer: W) -> Result<(), WriteError>
+    pub async fn write<W>(&self, mut writer: W) -> Result<()>
     where
         W: AsyncWrite + Unpin,
     {
@@ -338,10 +339,9 @@ impl Message {
         let payload_size: u32 = match payload_size.try_into() {
             Ok(size) => size,
             Err(err) => {
-                return Err(IoError::new(
-                    IoErrorKind::Other,
-                    format!("bad payload size: {err}"),
-                ))
+                return Err(
+                    IoError::new(IoErrorKind::Other, format!("bad payload size: {err}")).into(),
+                )
             }
         };
 
@@ -352,26 +352,27 @@ impl Message {
         self.kind.write(&mut writer).await?;
         self.flags.write(&mut writer).await?;
         self.target.write(&mut writer).await?;
-        writer.write_all(&self.payload).await
+        writer.write_all(&self.payload).await?;
+        Ok(())
     }
 
-    pub async fn read<R>(mut reader: R) -> Result<Self, ReadError>
+    pub async fn read<R>(mut reader: R) -> Result<Self>
     where
         R: AsyncRead + Unpin,
     {
         let magic_cookie = read_u32_be(&mut reader).await?;
         if magic_cookie != Self::MAGIC_COOKIE {
-            return Err(ReadError::BadMagicCookie);
+            return Err(Error::BadMagicCookie);
         }
 
         let id = read_u32_le(&mut reader).await?;
         let payload_size = read_u32_le(&mut reader).await?;
         let payload_size = payload_size
             .try_into()
-            .map_err(|_| ReadError::PayloadSizeTooLarge)?;
+            .map_err(|_| Error::PayloadSizeTooLarge)?;
         let version = read_u16_le(&mut reader).await?;
         if version != Self::VERSION {
-            return Err(ReadError::UnsupportedVersion);
+            return Err(Error::UnsupportedVersion);
         }
         let kind = Kind::read(&mut reader).await?;
         let flags = Flags::read(&mut reader).await?;
@@ -428,12 +429,18 @@ mod tests {
     #[test]
     async fn message_read() {
         let input = &[
-            0x42u8, 0xde, 0xad, 0x42, 0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x02, 0x00, 0x27, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00,
+            0x42, 0xde, 0xad, 0x42, // cookie
+            0xb8, 0x9a, 0x00, 0x00, // id
+            0x28, 0x00, 0x00, 0x00, // size
+            0x00, 0x00, 0x02, 0x00, // version, type, flags
+            0x27, 0x00, 0x00, 0x00, // service
+            0x09, 0x00, 0x00, 0x00, // object
+            0x68, 0x00, 0x00, 0x00, // action
+            // payload
             0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
             0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
-            0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30,
-            0x33, // garbage at the end, should be ignored
+            0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
+            // garbage at the end, should be ignored
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
         ];
@@ -459,17 +466,18 @@ mod tests {
     #[test]
     async fn message_read_bad_cookie() {
         let input = &[
-            0x42, 0xde, 0xad, 0x00, 0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x02, 0x00, 0x27, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00,
-            0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
-            0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
-            0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30,
+            0x42, 0xde, 0xad, 0x00, // bad cookie
+            0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x27, 0x00,
+            0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00,
+            0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65, 0x30, 0x37, 0x66, 0x2d,
+            0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d, 0x39, 0x39, 0x35, 0x37,
+            0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30,
             0x33, // garbage at the end, should be ignored
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
         ];
         let res = Message::read(input.as_slice()).await;
-        assert_matches!(res, Err(ReadError::BadMagicCookie));
+        assert_matches!(res, Err(Error::BadMagicCookie));
     }
 
     #[test]
