@@ -23,10 +23,34 @@ where
     })
 }
 
+mod server {
+    use super::*;
+    use std::pin::Pin;
+
+    pub struct Remote<'a> {
+        // OPTIMIZE: See if we could avoid using boxes here.
+        stream: Pin<Box<dyn Stream<Item = Message> + Unpin + 'a>>,
+        sink: Pin<Box<dyn Sink<Message, Error = message::Error> + Unpin + 'a>>,
+    }
+
+    impl<'a> Remote<'a> {
+        pub fn from_read_write<R, W>(reader: R, writer: W) -> Self
+        where
+            R: AsyncRead + Unpin + 'a,
+            W: AsyncWrite + Unpin + 'a,
+        {
+            let _stream = Box::pin(to_message_stream(reader));
+            let _sink = Box::pin(to_message_sink(writer));
+            todo!()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use futures_test::test;
+    use pretty_assertions::assert_eq;
 
     fn examples_message() -> [Message; 3] {
         [
@@ -95,4 +119,11 @@ mod tests {
         }
         assert_eq!(actual_messages, messages);
     }
+
+    //#[test]
+    //async fn client_establish() {
+    //    let mut reader = Vec::new();
+    //    let mut writer = Vec::new();
+    //    let client = Client::establish(reader.as_slice(), writer).await;
+    //}
 }

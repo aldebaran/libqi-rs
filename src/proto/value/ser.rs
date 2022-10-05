@@ -1,4 +1,4 @@
-use super::{to_value, Error, TupleMember, Value};
+use super::{to_value, tuple, Error, Tuple, Value};
 
 pub struct Serializer;
 
@@ -7,11 +7,11 @@ impl serde::Serializer for Serializer {
     type Error = Error;
 
     type SerializeSeq = ListSerializer;
-    type SerializeTuple = TupleSerializer;
-    type SerializeTupleStruct = TupleSerializer;
+    type SerializeTuple = TupleSerializer<Value>;
+    type SerializeTupleStruct = TupleSerializer<Value>;
     type SerializeTupleVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
     type SerializeMap = MapSerializer;
-    type SerializeStruct = TupleSerializer;
+    type SerializeStruct = TupleSerializer<tuple::NamedField>;
     type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
@@ -90,10 +90,10 @@ impl serde::Serializer for Serializer {
     }
 
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Tuple {
+        Ok(Value::Tuple(Tuple {
             name: Some(name.to_string()),
-            members: vec![],
-        })
+            fields: tuple::Fields::Named(vec![]),
+        }))
     }
 
     fn serialize_unit_variant(
@@ -114,10 +114,10 @@ impl serde::Serializer for Serializer {
         T: serde::Serialize,
     {
         let value = to_value(value)?;
-        Ok(Value::Tuple {
+        Ok(Value::Tuple(Tuple {
             name: Some(name.to_string()),
-            members: vec![TupleMember { name: None, value }],
-        })
+            fields: tuple::Fields::Unnamed(vec![value]),
+        }))
     }
 
     fn serialize_newtype_variant<T: ?Sized>(
@@ -254,37 +254,54 @@ impl serde::ser::SerializeMap for MapSerializer {
     }
 }
 
-pub struct TupleSerializer {
+pub struct TupleSerializer<T> {
     name: Option<String>,
-    members: Vec<TupleMember>,
+    fields: Vec<T>,
 }
 
-impl TupleSerializer {
+impl<T> TupleSerializer<T> {
     fn new(name: Option<String>) -> Self {
         Self {
             name,
-            members: Vec::new(),
+            fields: Vec::new(),
         }
     }
 
-    fn add_member<T: ?Sized>(&mut self, name: Option<String>, value: &T) -> Result<(), Error>
+    fn into_value(self) -> Value
+    where
+        tuple::Fields: From<Vec<T>>,
+    {
+        Value::Tuple(Tuple {
+            name: self.name,
+            fields: self.fields.into(),
+        })
+    }
+}
+
+impl TupleSerializer<Value> {
+    fn add_member<T: ?Sized>(&mut self, value: &T) -> Result<(), Error>
     where
         T: serde::Serialize,
     {
         let value = to_value(value)?;
-        self.members.push(TupleMember { name, value });
+        self.fields.push(value);
         Ok(())
-    }
-
-    fn into_value(self) -> Value {
-        Value::Tuple {
-            name: self.name,
-            members: self.members,
-        }
     }
 }
 
-impl serde::ser::SerializeTuple for TupleSerializer {
+impl TupleSerializer<tuple::NamedField> {
+    fn add_field<T: ?Sized>(&mut self, name: &str, value: &T) -> Result<(), Error>
+    where
+        T: serde::Serialize,
+    {
+        let name = name.to_string();
+        let value = to_value(value)?;
+        self.fields.push(tuple::NamedField { name, value });
+        Ok(())
+    }
+}
+
+impl serde::ser::SerializeTuple for TupleSerializer<Value> {
     type Ok = Value;
     type Error = Error;
 
@@ -292,7 +309,7 @@ impl serde::ser::SerializeTuple for TupleSerializer {
     where
         T: serde::Serialize,
     {
-        self.add_member(None, value)
+        self.add_member(value)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -300,7 +317,7 @@ impl serde::ser::SerializeTuple for TupleSerializer {
     }
 }
 
-impl serde::ser::SerializeTupleStruct for TupleSerializer {
+impl serde::ser::SerializeTupleStruct for TupleSerializer<Value> {
     type Ok = Value;
     type Error = Error;
 
@@ -308,7 +325,7 @@ impl serde::ser::SerializeTupleStruct for TupleSerializer {
     where
         T: serde::Serialize,
     {
-        self.add_member(None, value)
+        self.add_member(value)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
@@ -316,7 +333,7 @@ impl serde::ser::SerializeTupleStruct for TupleSerializer {
     }
 }
 
-impl serde::ser::SerializeStruct for TupleSerializer {
+impl serde::ser::SerializeStruct for TupleSerializer<tuple::NamedField> {
     type Ok = Value;
     type Error = Error;
 
@@ -328,7 +345,7 @@ impl serde::ser::SerializeStruct for TupleSerializer {
     where
         T: serde::Serialize,
     {
-        self.add_member(Some(key.to_string()), value)
+        self.add_field(key, value)
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {

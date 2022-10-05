@@ -3,10 +3,9 @@ use bitflags::bitflags;
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
-use std::io::{Error as IoError, ErrorKind as IoErrorKind, Result as IoResult};
-use thiserror::Error;
+use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("bad message magic cookie")]
     BadMagicCookie,
@@ -401,6 +400,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use futures_test::test;
+    use pretty_assertions::assert_eq;
 
     #[test]
     async fn message_write() {

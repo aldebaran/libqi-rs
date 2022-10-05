@@ -1,5 +1,5 @@
 [package]
-name = "libqi-rs"
+name = "libqi"
 version = "0.1.0"
 edition = "2021"
 
@@ -14,6 +14,11 @@ num-traits = "0.2.15"
 serde = { version = "1.0.145", features = ["derive"] }
 thiserror = "1.0.36"
 
+# TODO: needed by qi-cli. Move this out of the crate in an dedicated one.
+tokio = { version = "1.21.1", features = ["net", "macros", "rt", "rt-multi-thread"] }
+
 [dev-dependencies]
 assert_matches = "1.5.0"
 futures-test = "0.3.24"
+pretty_assertions = "1.3.0"
+serde_bytes = "0.11.7"
