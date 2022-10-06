@@ -29,6 +29,7 @@ use tuple::Tuple;
 //}
 
 // TODO: #[non_exhaustive]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Value {
     Void,
     Bool(bool),
@@ -51,7 +52,7 @@ pub enum Value {
 }
 
 impl Value {
-    fn as_tuple(&self) -> Option<&Tuple> {
+    pub fn as_tuple(&self) -> Option<&Tuple> {
         if let Self::Tuple(tuple) = self {
             Some(tuple)
         } else {
@@ -59,7 +60,7 @@ impl Value {
         }
     }
 
-    fn as_tuple_mut(&mut self) -> Option<&mut Tuple> {
+    pub fn as_tuple_mut(&mut self) -> Option<&mut Tuple> {
         if let Self::Tuple(tuple) = self {
             Some(tuple)
         } else {
@@ -71,56 +72,6 @@ impl Value {
 impl Default for Value {
     fn default() -> Self {
         Value::Void
-    }
-}
-
-impl PartialEq for Value {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
-            (Self::Int8(l0), Self::Int8(r0)) => l0 == r0,
-            (Self::UInt8(l0), Self::UInt8(r0)) => l0 == r0,
-            (Self::Int16(l0), Self::Int16(r0)) => l0 == r0,
-            (Self::UInt16(l0), Self::UInt16(r0)) => l0 == r0,
-            (Self::Int32(l0), Self::Int32(r0)) => l0 == r0,
-            (Self::UInt32(l0), Self::UInt32(r0)) => l0 == r0,
-            (Self::Int64(l0), Self::Int64(r0)) => l0 == r0,
-            (Self::UInt64(l0), Self::UInt64(r0)) => l0 == r0,
-            (Self::Float(l0), Self::Float(r0)) => l0 == r0,
-            (Self::Double(l0), Self::Double(r0)) => l0 == r0,
-            (Self::String(l0), Self::String(r0)) => l0 == r0,
-            (Self::List(l0), Self::List(r0)) => l0 == r0,
-            (Self::Map(l0), Self::Map(r0)) => l0 == r0,
-            (Self::Tuple(l0), Self::Tuple(l1)) => l0 == l1,
-            (Self::Raw(l0), Self::Raw(r0)) => l0 == r0,
-            (Self::Optional(l0), Self::Optional(r0)) => l0 == r0,
-            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
-        }
-    }
-}
-
-impl std::fmt::Debug for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Void => write!(f, "Void"),
-            Self::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
-            Self::Int8(arg0) => f.debug_tuple("Int8").field(arg0).finish(),
-            Self::UInt8(arg0) => f.debug_tuple("UInt8").field(arg0).finish(),
-            Self::Int16(arg0) => f.debug_tuple("Int16").field(arg0).finish(),
-            Self::UInt16(arg0) => f.debug_tuple("UInt16").field(arg0).finish(),
-            Self::Int32(arg0) => f.debug_tuple("Int32").field(arg0).finish(),
-            Self::UInt32(arg0) => f.debug_tuple("UInt32").field(arg0).finish(),
-            Self::Int64(arg0) => f.debug_tuple("Int64").field(arg0).finish(),
-            Self::UInt64(arg0) => f.debug_tuple("UInt64").field(arg0).finish(),
-            Self::Float(arg0) => f.debug_tuple("Float").field(arg0).finish(),
-            Self::Double(arg0) => f.debug_tuple("Double").field(arg0).finish(),
-            Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
-            Self::List(arg0) => f.debug_tuple("List").field(arg0).finish(),
-            Self::Map(arg0) => f.debug_tuple("Map").field(arg0).finish(),
-            Self::Tuple(t) => f.debug_tuple("Tuple").field(t).finish(),
-            Self::Raw(arg0) => f.debug_tuple("Raw").field(arg0).finish(),
-            Self::Optional(arg0) => f.debug_tuple("Optional").field(arg0).finish(),
-        }
     }
 }
 
@@ -140,14 +91,14 @@ impl<'de> serde::de::IntoDeserializer<'de, Error> for Value {
     }
 }
 
-fn to_value<T>(value: &T) -> Result<Value>
+pub fn to_value<T>(value: &T) -> Result<Value>
 where
     T: serde::Serialize + ?Sized,
 {
     value.serialize(ser::Serializer)
 }
 
-fn from_value<T>(value: Value) -> Result<T>
+pub fn from_value<T>(value: Value) -> Result<T>
 where
     T: serde::de::DeserializeOwned,
 {
@@ -290,6 +241,31 @@ mod tests {
             });
             (s, v)
         }
+    }
+
+    #[test]
+    fn test_value_from_string() {
+        use std::str::FromStr;
+        let value = Value::from_str("cookies recipe").unwrap();
+        assert_eq!(value, Value::String("cookies recipe".to_string()));
+    }
+
+    #[test]
+    fn test_value_as_tuple() {
+        assert_eq!(
+            Value::Tuple(Default::default()).as_tuple(),
+            Some(&Tuple::default())
+        );
+        assert_eq!(Value::Int32(42).as_tuple(), None);
+    }
+
+    #[test]
+    fn test_value_as_tuple_mut() {
+        assert_eq!(
+            Value::Tuple(Default::default()).as_tuple_mut(),
+            Some(&mut Tuple::default())
+        );
+        assert_eq!(Value::Int32(42).as_tuple_mut(), None);
     }
 
     #[test]

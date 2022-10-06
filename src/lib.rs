@@ -1,4 +1,4 @@
-mod proto;
+pub mod proto;
 
 use futures::prelude::*;
 use proto::message::{self, Message};
@@ -23,7 +23,7 @@ where
     })
 }
 
-mod server {
+pub mod server {
     use super::*;
     use std::pin::Pin;
 

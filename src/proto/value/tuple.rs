@@ -1,6 +1,6 @@
 use super::Value;
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub struct Tuple {
     pub name: Option<String>,
     pub fields: Fields,
@@ -11,14 +11,14 @@ impl Tuple {
         matches!(self.fields, Fields::Named(..))
     }
 
-    pub fn named_fields(&self) -> Option<impl IntoIterator<Item = &NamedField>> {
+    pub fn named_fields(&self) -> Option<&Vec<NamedField>> {
         match &self.fields {
             Fields::Named(fields) => Some(fields),
             _ => None,
         }
     }
 
-    pub fn unnamed_fields(&self) -> Option<impl IntoIterator<Item = &Value>> {
+    pub fn unnamed_fields(&self) -> Option<&Vec<Value>> {
         match &self.fields {
             Fields::Unnamed(fields) => Some(fields),
             _ => None,
@@ -26,7 +26,7 @@ impl Tuple {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Fields {
     Unnamed(Vec<Value>),
     Named(Vec<NamedField>),
@@ -150,6 +150,7 @@ impl FromIterator<NamedField> for Fields {
         Self::Named(iter.into_iter().collect())
     }
 }
+
 impl From<Vec<NamedField>> for Fields {
     fn from(v: Vec<NamedField>) -> Self {
         Self::Named(v)
@@ -162,7 +163,7 @@ impl Default for Fields {
     }
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub struct NamedField {
     pub name: String,
     pub value: Value,
@@ -171,22 +172,88 @@ pub struct NamedField {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
+
+    fn sample_tuple_unnamed_fields() -> (Tuple, Vec<Value>) {
+        let fields = vec![Value::Bool(true), Value::Raw(vec![48, 49, 50])];
+        let t = Tuple {
+            name: None,
+            fields: Fields::Unnamed(fields.clone()),
+        };
+        (t, fields)
+    }
+
+    fn sample_tuple_named_fields() -> (Tuple, Vec<NamedField>) {
+        let fields = vec![
+            NamedField {
+                name: "cookies".to_string(),
+                value: Value::Int32(42),
+            },
+            NamedField {
+                name: "muffins".to_string(),
+                value: Value::String("croissants".to_string()),
+            },
+        ];
+        let t = Tuple {
+            name: None,
+            fields: Fields::Named(fields.clone()),
+        };
+        (t, fields)
+    }
 
     #[test]
     fn test_tuple_has_named_fields_unnamed() {
-        let t = Tuple {
-            name: None,
-            fields: Fields::Unnamed(vec![]),
-        };
+        let (t, _) = sample_tuple_unnamed_fields();
         assert!(!t.has_named_fields());
     }
 
     #[test]
     fn test_tuple_has_named_fields_named() {
-        let t = Tuple {
-            name: None,
-            fields: Fields::Named(vec![]),
-        };
+        let (t, _) = sample_tuple_named_fields();
         assert!(t.has_named_fields());
+    }
+
+    #[test]
+    fn test_tuple_named_fields_named() {
+        let (t, expected) = sample_tuple_named_fields();
+        assert_eq!(t.named_fields(), Some(&expected));
+    }
+
+    #[test]
+    fn test_tuple_named_fields_unnamed() {
+        let (t, _) = sample_tuple_unnamed_fields();
+        assert_eq!(t.named_fields(), None);
+    }
+
+    #[test]
+    fn test_tuple_unnamed_fields_named() {
+        let (t, _) = sample_tuple_named_fields();
+        assert_eq!(t.unnamed_fields(), None);
+    }
+
+    #[test]
+    fn test_tuple_unnamed_fields_unnamed() {
+        let (t, expected) = sample_tuple_unnamed_fields();
+        assert_eq!(t.unnamed_fields(), Some(&expected));
+    }
+
+    #[test]
+    fn test_fields_into_iterator_named() {
+        let (t, _) = sample_tuple_named_fields();
+        let fields = t.fields.into_iter().collect::<Vec<_>>();
+        assert_eq!(
+            fields,
+            vec![Value::Int32(42), Value::String("croissants".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_fields_into_iterator_unnamed() {
+        let (t, _) = sample_tuple_unnamed_fields();
+        let fields = t.fields.into_iter().collect::<Vec<_>>();
+        assert_eq!(
+            fields,
+            vec![Value::Bool(true), Value::Raw(vec![48, 49, 50])]
+        );
     }
 }
