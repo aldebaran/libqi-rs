@@ -62,9 +62,9 @@ impl<'a> IntoIterator for &'a Fields {
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            Fields::Unnamed(values) => FieldsIntoIter::unnamed(values.into_iter()),
+            Fields::Unnamed(values) => FieldsIntoIter::unnamed(values.iter()),
             Fields::Named(named_field) => {
-                FieldsIntoIter::named(named_field.into_iter(), |field| &field.value)
+                FieldsIntoIter::named(named_field.iter(), |field| &field.value)
             }
         }
     }
@@ -81,9 +81,9 @@ impl<'a> IntoIterator for &'a mut Fields {
 
     fn into_iter(self) -> Self::IntoIter {
         match self {
-            Fields::Unnamed(values) => FieldsIntoIter::unnamed(values.into_iter()),
+            Fields::Unnamed(values) => FieldsIntoIter::unnamed(values.iter_mut()),
             Fields::Named(named_field) => {
-                FieldsIntoIter::named(named_field.into_iter(), |field| &mut field.value)
+                FieldsIntoIter::named(named_field.iter_mut(), |field| &mut field.value)
             }
         }
     }

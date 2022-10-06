@@ -201,7 +201,7 @@ impl<'de> serde::Deserialize<'de> for Value {
             where
                 E: serde::de::Error,
             {
-                self.visit_byte_buf(v.into_iter().copied().collect())
+                self.visit_byte_buf(v.to_vec())
             }
 
             fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E> {
