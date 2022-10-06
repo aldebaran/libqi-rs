@@ -127,3 +127,144 @@ impl<'de> serde::Deserializer<'de> for Value {
         seq map identifier ignored_any
     }
 }
+
+impl<'de> serde::Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ValueVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ValueVisitor {
+            type Value = Value;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("any valid JSON value")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Value, E> {
+                Ok(Value::Bool(value))
+            }
+
+            fn visit_i8<E>(self, value: i8) -> Result<Value, E> {
+                Ok(Value::Int8(value))
+            }
+
+            fn visit_u8<E>(self, value: u8) -> Result<Value, E> {
+                Ok(Value::UInt8(value))
+            }
+
+            fn visit_i16<E>(self, value: i16) -> Result<Value, E> {
+                Ok(Value::Int16(value))
+            }
+
+            fn visit_u16<E>(self, value: u16) -> Result<Value, E> {
+                Ok(Value::UInt16(value))
+            }
+
+            fn visit_i32<E>(self, value: i32) -> Result<Value, E> {
+                Ok(Value::Int32(value))
+            }
+
+            fn visit_u32<E>(self, value: u32) -> Result<Value, E> {
+                Ok(Value::UInt32(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Value, E> {
+                Ok(Value::Int64(value))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Value, E> {
+                Ok(Value::UInt64(value))
+            }
+
+            fn visit_f32<E>(self, value: f32) -> Result<Value, E> {
+                Ok(Value::Float(value))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Value, E> {
+                Ok(Value::Double(value))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_string(value.to_string())
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Value, E> {
+                Ok(Value::String(value))
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                self.visit_byte_buf(v.into_iter().copied().collect())
+            }
+
+            fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E> {
+                Ok(Value::Raw(value))
+            }
+
+            fn visit_none<E>(self) -> Result<Value, E> {
+                Ok(Value::Optional(None))
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let v = serde::Deserialize::deserialize(deserializer)?;
+                Ok(Value::Optional(Some(Box::new(v))))
+            }
+
+            fn visit_unit<E>(self) -> Result<Value, E> {
+                Ok(Value::Void)
+            }
+
+            fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                Ok(Value::Tuple(serde::Deserialize::deserialize(deserializer)?))
+            }
+
+            fn visit_seq<V>(self, mut seq: V) -> Result<Value, V::Error>
+            where
+                V: serde::de::SeqAccess<'de>,
+            {
+                let mut vec = Vec::new();
+                while let Some(elem) = seq.next_element()? {
+                    vec.push(elem);
+                }
+                Ok(Value::List(vec))
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Value, V::Error>
+            where
+                V: serde::de::MapAccess<'de>,
+            {
+                let mut vec = Vec::new();
+                while let Some(pair) = map.next_entry()? {
+                    vec.push(pair);
+                }
+                Ok(Value::Map(vec))
+            }
+
+            fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::EnumAccess<'de>,
+            {
+                // TODO ?
+                let _ = data;
+                Err(serde::de::Error::invalid_type(
+                    serde::de::Unexpected::Enum,
+                    &self,
+                ))
+            }
+        }
+        deserializer.deserialize_any(ValueVisitor)
+    }
+}

@@ -1,6 +1,6 @@
 use super::Value;
 
-#[derive(Debug, PartialEq, Default, Clone)]
+#[derive(Debug, PartialEq, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Tuple {
     pub name: Option<String>,
     pub fields: Fields,
@@ -26,7 +26,7 @@ impl Tuple {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Fields {
     Unnamed(Vec<Value>),
     Named(Vec<NamedField>),
@@ -163,7 +163,7 @@ impl Default for Fields {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct NamedField {
     pub name: String,
     pub value: Value,

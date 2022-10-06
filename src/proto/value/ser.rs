@@ -352,3 +352,42 @@ impl serde::ser::SerializeStruct for TupleSerializer<tuple::NamedField> {
         Ok(self.into_value())
     }
 }
+
+impl serde::Serialize for Value {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Value::Void => serializer.serialize_unit(),
+            Value::Bool(b) => b.serialize(serializer),
+            Value::Int8(i) => i.serialize(serializer),
+            Value::UInt8(i) => i.serialize(serializer),
+            Value::Int16(i) => i.serialize(serializer),
+            Value::UInt16(i) => i.serialize(serializer),
+            Value::Int32(i) => i.serialize(serializer),
+            Value::UInt32(i) => i.serialize(serializer),
+            Value::Int64(i) => i.serialize(serializer),
+            Value::UInt64(i) => i.serialize(serializer),
+            Value::Float(f) => f.serialize(serializer),
+            Value::Double(d) => d.serialize(serializer),
+            Value::String(s) => s.serialize(serializer),
+            Value::List(l) => l.serialize(serializer),
+            Value::Map(m) => {
+                // Do not serialize the vector of pair directly, serialize it as a map instead.
+                let mut map = serializer.serialize_map(Some(m.len()))?;
+                use serde::ser::SerializeMap;
+                for (key, value) in m {
+                    map.serialize_entry(key, value)?;
+                }
+                map.end()
+            }
+            Value::Tuple(t) => t.serialize(serializer),
+            Value::Raw(r) => {
+                // Do not serializ the vector of bytes directly, serialize it as bytes instead.
+                serializer.serialize_bytes(r)
+            }
+            Value::Optional(o) => o.serialize(serializer),
+        }
+    }
+}
