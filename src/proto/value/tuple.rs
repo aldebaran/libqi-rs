@@ -26,6 +26,33 @@ impl Tuple {
     }
 }
 
+impl IntoIterator for Tuple {
+    type Item = <Fields as IntoIterator>::Item;
+    type IntoIter = <Fields as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.fields.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Tuple {
+    type Item = <&'a Fields as IntoIterator>::Item;
+    type IntoIter = <&'a Fields as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.fields).into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Tuple {
+    type Item = <&'a mut Fields as IntoIterator>::Item;
+    type IntoIter = <&'a mut Fields as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        (&mut self.fields).into_iter()
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Fields {
     Unnamed(Vec<Value>),
@@ -235,6 +262,26 @@ mod tests {
     fn test_tuple_unnamed_fields_unnamed() {
         let (t, expected) = sample_tuple_unnamed_fields();
         assert_eq!(t.unnamed_fields(), Some(&expected));
+    }
+
+    #[test]
+    fn test_tuple_into_iterator_named() {
+        let (t, _) = sample_tuple_named_fields();
+        let fields = t.into_iter().collect::<Vec<_>>();
+        assert_eq!(
+            fields,
+            vec![Value::Int32(42), Value::String("croissants".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_tuple_into_iterator_unnamed() {
+        let (t, _) = sample_tuple_unnamed_fields();
+        let fields = t.into_iter().collect::<Vec<_>>();
+        assert_eq!(
+            fields,
+            vec![Value::Bool(true), Value::Raw(vec![48, 49, 50])]
+        );
     }
 
     #[test]
