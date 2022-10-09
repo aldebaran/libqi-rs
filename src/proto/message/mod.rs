@@ -1,3 +1,41 @@
+//! # Message structure
+//! ```text
+//! ╔═══════════════╤═══════════════╤═══════════════╤═══════════════╗
+//! ║       1       │       2       │       3       │       4       ║
+//! ╟─┬─┬─┬─┬─┬─┬─┬─┼─┬─┬─┬─┬─┬─┬─┬─┼─┬─┬─┬─┬─┬─┬─┬─┼─┬─┬─┬─┬─┬─┬─┬─╢
+//! ║0│1│2│3│4│5│6│7│0│1│2│3│4│5│6│7│0│1│2│3│4│5│6│7│0│1│2│3│4│5│6│7║
+//! ╠═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╣
+//! ║                         magic cookie                          ║
+//! ╟───────────────────────────────────────────────────────────────╢
+//! ║                          identifier                           ║
+//! ╟───────────────────────────────────────────────────────────────╢
+//! ║                         payload size                          ║
+//! ╟───────────────────────────────┬───────────────┬───────────────╢
+//! ║            version            │     type      │    flags      ║
+//! ╟───────────────────────────────┴───────────────┴───────────────╢
+//! ║                            service                            ║
+//! ╟───────────────────────────────────────────────────────────────╢
+//! ║                            object                             ║
+//! ╟───────────────────────────────────────────────────────────────╢
+//! ║                            action                             ║
+//! ╟───────────────────────────────────────────────────────────────╢
+//! ║                            payload                            ║
+//! ║                            [ ... ]                            ║
+//! ╚═══════════════════════════════════════════════════════════════╝
+//! ```
+//!  - magic cookie: uint32, big endian, value = 0x42dead42
+//!  - id: uint32, little endian
+//!  - size/len: uint32, little endian, size of the payload. may be 0
+//!  - version: uint16, little endian
+//!  - type: uint8, little endian
+//!  - flags: uint8, little endian
+//!  - service: uint32, little endian
+//!  - object: uint32, little endian
+//!  - action: uint32, little endian
+//!  - payload: 'size' bytes
+pub mod kind;
+pub use kind::Kind;
+
 use super::utils::{read_u16_le, read_u32_be, read_u32_le, read_u8};
 use bitflags::bitflags;
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -20,45 +58,6 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-#[repr(u8)]
-pub enum Kind {
-    None = 0,
-    Call = 1,
-    Reply = 2,
-    Error = 3,
-    Post = 4,
-    Event = 5,
-    Capability = 6,
-    Cancel = 7,
-    Canceled = 8,
-}
-
-impl Kind {
-    async fn write<W>(&self, mut writer: W) -> Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
-        let bytes = &self.to_u8().unwrap().to_le_bytes();
-        writer.write_all(bytes).await?;
-        Ok(())
-    }
-
-    async fn read<R>(reader: R) -> Result<Self>
-    where
-        R: AsyncRead + Unpin,
-    {
-        let val = read_u8(reader).await?;
-        Kind::from_u8(val).ok_or(Error::InvalidValue)
-    }
-}
-
-impl Default for Kind {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 bitflags! {
     #[derive(Default)]
@@ -334,58 +333,60 @@ impl Message {
     where
         W: AsyncWrite + Unpin,
     {
-        let payload_size = self.payload.len();
-        let payload_size: u32 = match payload_size.try_into() {
-            Ok(size) => size,
-            Err(err) => {
-                return Err(
-                    IoError::new(IoErrorKind::Other, format!("bad payload size: {err}")).into(),
-                )
-            }
-        };
+        unimplemented!()
+        //let payload_size = self.payload.len();
+        //let payload_size: u32 = match payload_size.try_into() {
+        //    Ok(size) => size,
+        //    Err(err) => {
+        //        return Err(
+        //            IoError::new(IoErrorKind::Other, format!("bad payload size: {err}")).into(),
+        //        )
+        //    }
+        //};
 
-        writer.write_all(&Self::MAGIC_COOKIE.to_be_bytes()).await?;
-        writer.write_all(&self.id.to_le_bytes()).await?;
-        writer.write_all(&payload_size.to_le_bytes()).await?;
-        writer.write_all(&Self::VERSION.to_le_bytes()).await?;
-        self.kind.write(&mut writer).await?;
-        self.flags.write(&mut writer).await?;
-        self.target.write(&mut writer).await?;
-        writer.write_all(&self.payload).await?;
-        Ok(())
+        //writer.write_all(&Self::MAGIC_COOKIE.to_be_bytes()).await?;
+        //writer.write_all(&self.id.to_le_bytes()).await?;
+        //writer.write_all(&payload_size.to_le_bytes()).await?;
+        //writer.write_all(&Self::VERSION.to_le_bytes()).await?;
+        //self.kind.write(&mut writer).await?;
+        //self.flags.write(&mut writer).await?;
+        //self.target.write(&mut writer).await?;
+        //writer.write_all(&self.payload).await?;
+        //Ok(())
     }
 
     pub async fn read<R>(mut reader: R) -> Result<Self>
     where
         R: AsyncRead + Unpin,
     {
-        let magic_cookie = read_u32_be(&mut reader).await?;
-        if magic_cookie != Self::MAGIC_COOKIE {
-            return Err(Error::BadMagicCookie);
-        }
+        unimplemented!()
+        //let magic_cookie = read_u32_be(&mut reader).await?;
+        //if magic_cookie != Self::MAGIC_COOKIE {
+        //    return Err(Error::BadMagicCookie);
+        //}
 
-        let id = read_u32_le(&mut reader).await?;
-        let payload_size = read_u32_le(&mut reader).await?;
-        let payload_size = payload_size
-            .try_into()
-            .map_err(|_| Error::PayloadSizeTooLarge)?;
-        let version = read_u16_le(&mut reader).await?;
-        if version != Self::VERSION {
-            return Err(Error::UnsupportedVersion);
-        }
-        let kind = Kind::read(&mut reader).await?;
-        let flags = Flags::read(&mut reader).await?;
-        let target = Target::read(&mut reader).await?;
-        let mut payload = vec![0; payload_size];
-        reader.read_exact(&mut payload).await?;
+        //let id = read_u32_le(&mut reader).await?;
+        //let payload_size = read_u32_le(&mut reader).await?;
+        //let payload_size = payload_size
+        //    .try_into()
+        //    .map_err(|_| Error::PayloadSizeTooLarge)?;
+        //let version = read_u16_le(&mut reader).await?;
+        //if version != Self::VERSION {
+        //    return Err(Error::UnsupportedVersion);
+        //}
+        //let kind = Kind::read(&mut reader).await?;
+        //let flags = Flags::read(&mut reader).await?;
+        //let target = Target::read(&mut reader).await?;
+        //let mut payload = vec![0; payload_size];
+        //reader.read_exact(&mut payload).await?;
 
-        Ok(Self {
-            id,
-            kind,
-            flags,
-            target,
-            payload,
-        })
+        //Ok(Self {
+        //    id,
+        //    kind,
+        //    flags,
+        //    target,
+        //    payload,
+        //})
     }
 }
 

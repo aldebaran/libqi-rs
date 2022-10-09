@@ -1,3 +1,5 @@
+// TODO: #![warn(missing_docs)]
+
 pub mod proto;
 
 use futures::prelude::*;
