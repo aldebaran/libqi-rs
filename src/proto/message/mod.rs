@@ -19,10 +19,10 @@
 //! ╟───────────────────────────────────────────────────────────────╢
 //! ║                            action                             ║
 //! ╟───────────────────────────────────────────────────────────────╢
-//! ║                            payload                            ║
-//! ║                            [ ... ]                            ║
+//! ║                            action                             ║
 //! ╚═══════════════════════════════════════════════════════════════╝
 //! ```
+//!
 //!  - magic cookie: uint32, big endian, value = 0x42dead42
 //!  - id: uint32, little endian
 //!  - size/len: uint32, little endian, size of the payload. may be 0
@@ -32,18 +32,14 @@
 //!  - service: uint32, little endian
 //!  - object: uint32, little endian
 //!  - action: uint32, little endian
-//!  - payload: 'size' bytes
 pub mod kind;
 pub use kind::Kind;
 
 pub mod flags;
 pub use flags::Flags;
 
-use super::utils::{read_u16_le, read_u32_be, read_u32_le, read_u8};
-use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
-use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -56,7 +52,7 @@ pub enum Error {
     #[error("invalid value")]
     InvalidValue,
     #[error("io error")]
-    Io(#[from] IoError),
+    Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -253,26 +249,26 @@ impl Target {
         .unwrap()
     }
 
-    async fn write<W>(&self, mut writer: W) -> Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
-        writer.write_all(&self.service().to_le_bytes()).await?;
-        writer.write_all(&self.object().to_le_bytes()).await?;
-        writer.write_all(&self.action().to_le_bytes()).await?;
-        Ok(())
-    }
+    //async fn write<W>(&self, mut writer: W) -> Result<()>
+    //where
+    //    W: AsyncWrite + Unpin,
+    //{
+    //    writer.write_all(&self.service().to_le_bytes()).await?;
+    //    writer.write_all(&self.object().to_le_bytes()).await?;
+    //    writer.write_all(&self.action().to_le_bytes()).await?;
+    //    Ok(())
+    //}
 
-    async fn read<R>(mut reader: R) -> Result<Self>
-    where
-        R: AsyncRead + Unpin,
-    {
-        let service = read_u32_le(&mut reader).await?;
-        let object = read_u32_le(&mut reader).await?;
-        let action = read_u32_le(&mut reader).await?;
+    //async fn read<R>(mut reader: R) -> Result<Self>
+    //where
+    //    R: AsyncRead + Unpin,
+    //{
+    //    let service = read_u32_le(&mut reader).await?;
+    //    let object = read_u32_le(&mut reader).await?;
+    //    let action = read_u32_le(&mut reader).await?;
 
-        Self::from_values(service, object, action).ok_or(Error::InvalidValue)
-    }
+    //    Self::from_values(service, object, action).ok_or(Error::InvalidValue)
+    //}
 }
 
 impl Default for Target {
@@ -305,8 +301,8 @@ impl Message {
     }
 
     pub async fn write<W>(&self, mut writer: W) -> Result<()>
-    where
-        W: AsyncWrite + Unpin,
+//where
+    //    W: AsyncWrite + Unpin,
     {
         unimplemented!()
         //let payload_size = self.payload.len();
@@ -331,8 +327,8 @@ impl Message {
     }
 
     pub async fn read<R>(mut reader: R) -> Result<Self>
-    where
-        R: AsyncRead + Unpin,
+//where
+    //    R: AsyncRead + Unpin,
     {
         unimplemented!()
         //let magic_cookie = read_u32_be(&mut reader).await?;
@@ -380,98 +376,102 @@ mod tests {
 
     #[test]
     async fn message_write() {
-        let msg = Message {
-            id: 329,
-            kind: Kind::Capability,
-            flags: Flags::RETURN_TYPE,
-            target: Target::ServiceDirectory(ServiceDirectoryAction::ServiceReady),
-            payload: vec![23u8, 43u8, 230u8, 1u8, 95u8],
-        };
-        let mut buf = Vec::new();
-        msg.write(&mut buf).await.expect("write error");
-        let expected = vec![
-            0x42, 0xde, 0xad, 0x42, // cookie
-            0x49, 0x01, 0x00, 0x00, // id
-            0x05, 0x00, 0x00, 0x00, // size
-            0x00, 0x00, 0x06, 0x02, // version, type, flags
-            0x01, 0x00, 0x00, 0x00, // service
-            0x01, 0x00, 0x00, 0x00, // object
-            0x68, 0x00, 0x00, 0x00, // action
-            0x17, 0x2b, 0xe6, 0x01, 0x5f, // payload
-        ];
-        assert_eq!(buf, expected);
+        todo!()
+        //let msg = Message {
+        //    id: 329,
+        //    kind: Kind::Capability,
+        //    flags: Flags::RETURN_TYPE,
+        //    target: Target::ServiceDirectory(ServiceDirectoryAction::ServiceReady),
+        //    payload: vec![23u8, 43u8, 230u8, 1u8, 95u8],
+        //};
+        //let mut buf = Vec::new();
+        //msg.write(&mut buf).await.expect("write error");
+        //let expected = vec![
+        //    0x42, 0xde, 0xad, 0x42, // cookie
+        //    0x49, 0x01, 0x00, 0x00, // id
+        //    0x05, 0x00, 0x00, 0x00, // size
+        //    0x00, 0x00, 0x06, 0x02, // version, type, flags
+        //    0x01, 0x00, 0x00, 0x00, // service
+        //    0x01, 0x00, 0x00, 0x00, // object
+        //    0x68, 0x00, 0x00, 0x00, // action
+        //    0x17, 0x2b, 0xe6, 0x01, 0x5f, // payload
+        //];
+        //assert_eq!(buf, expected);
     }
 
     #[test]
     async fn message_read() {
-        let input = &[
-            0x42, 0xde, 0xad, 0x42, // cookie
-            0xb8, 0x9a, 0x00, 0x00, // id
-            0x28, 0x00, 0x00, 0x00, // size
-            0x00, 0x00, 0x02, 0x00, // version, type, flags
-            0x27, 0x00, 0x00, 0x00, // service
-            0x09, 0x00, 0x00, 0x00, // object
-            0x68, 0x00, 0x00, 0x00, // action
-            // payload
-            0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
-            0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
-            0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
-            // garbage at the end, should be ignored
-            0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
-            0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
-        ];
-        let msg = Message::read(input.as_slice()).await.expect("read error");
-        let expected = Message {
-            id: 39608,
-            kind: Kind::Reply,
-            flags: Flags::empty(),
-            target: Target::BoundObject {
-                service: 39,
-                object: 9,
-                action: BoundObjectAction::BoundFunction(104),
-            },
-            payload: vec![
-                0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
-                0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
-                0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
-            ],
-        };
-        assert_eq!(msg, expected);
+        todo!()
+        //let input = &[
+        //    0x42, 0xde, 0xad, 0x42, // cookie
+        //    0xb8, 0x9a, 0x00, 0x00, // id
+        //    0x28, 0x00, 0x00, 0x00, // size
+        //    0x00, 0x00, 0x02, 0x00, // version, type, flags
+        //    0x27, 0x00, 0x00, 0x00, // service
+        //    0x09, 0x00, 0x00, 0x00, // object
+        //    0x68, 0x00, 0x00, 0x00, // action
+        //    // payload
+        //    0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
+        //    0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
+        //    0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
+        //    // garbage at the end, should be ignored
+        //    0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
+        //    0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
+        //];
+        //let msg = Message::read(input.as_slice()).await.expect("read error");
+        //let expected = Message {
+        //    id: 39608,
+        //    kind: Kind::Reply,
+        //    flags: Flags::empty(),
+        //    target: Target::BoundObject {
+        //        service: 39,
+        //        object: 9,
+        //        action: BoundObjectAction::BoundFunction(104),
+        //    },
+        //    payload: vec![
+        //        0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
+        //        0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
+        //        0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
+        //    ],
+        //};
+        //assert_eq!(msg, expected);
     }
 
     #[test]
     async fn message_read_bad_cookie() {
-        let input = &[
-            0x42, 0xde, 0xad, 0x00, // bad cookie
-            0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x27, 0x00,
-            0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00,
-            0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65, 0x30, 0x37, 0x66, 0x2d,
-            0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d, 0x39, 0x39, 0x35, 0x37,
-            0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30,
-            0x33, // garbage at the end, should be ignored
-            0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
-            0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
-        ];
-        let res = Message::read(input.as_slice()).await;
-        assert_matches!(res, Err(Error::BadMagicCookie));
+        todo!()
+        //let input = &[
+        //    0x42, 0xde, 0xad, 0x00, // bad cookie
+        //    0xb8, 0x9a, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x27, 0x00,
+        //    0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00,
+        //    0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65, 0x30, 0x37, 0x66, 0x2d,
+        //    0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d, 0x39, 0x39, 0x35, 0x37,
+        //    0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30,
+        //    0x33, // garbage at the end, should be ignored
+        //    0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
+        //    0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
+        //];
+        //let res = Message::read(input.as_slice()).await;
+        //assert_matches!(res, Err(Error::BadMagicCookie));
     }
 
     #[test]
     async fn message_write_read_invariant() {
-        let msg = Message {
-            id: 9323982,
-            kind: Kind::Error,
-            flags: Flags::DYNAMIC_PAYLOAD | Flags::RETURN_TYPE,
-            target: Target::BoundObject {
-                service: 984398294,
-                object: 87438426,
-                action: BoundObjectAction::SetProperty,
-            },
-            payload: vec![0x10, 0x11, 0x12, 0x13, 0x15],
-        };
-        let mut buffer = Vec::new();
-        msg.write(&mut buffer).await.expect("write error");
-        let msg2 = Message::read(buffer.as_slice()).await.expect("read error");
-        assert_eq!(msg, msg2);
+        todo!()
+        // let msg = Message {
+        //     id: 9323982,
+        //     kind: Kind::Error,
+        //     flags: Flags::DYNAMIC_PAYLOAD | Flags::RETURN_TYPE,
+        //     target: Target::BoundObject {
+        //         service: 984398294,
+        //         object: 87438426,
+        //         action: BoundObjectAction::SetProperty,
+        //     },
+        //     payload: vec![0x10, 0x11, 0x12, 0x13, 0x15],
+        // };
+        // let mut buffer = Vec::new();
+        // msg.write(&mut buffer).await.expect("write error");
+        // let msg2 = Message::read(buffer.as_slice()).await.expect("read error");
+        // assert_eq!(msg, msg2);
     }
 }
