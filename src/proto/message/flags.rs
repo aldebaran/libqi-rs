@@ -1,31 +1,31 @@
 use bitflags::bitflags;
 
 bitflags! {
-    #[derive(Default, serde::Serialize, serde::Deserialize)]
+    #[derive(Default)]
     pub struct Flags: u8 {
         const DYNAMIC_PAYLOAD = 0b00000001;
         const RETURN_TYPE = 0b00000010;
     }
 }
 
-//impl Flags {
-//    async fn write<W>(&self, mut writer: W) -> Result<()>
-//    where
-//        W: AsyncWrite + Unpin,
-//    {
-//        let bytes = &self.bits().to_le_bytes();
-//        writer.write_all(bytes).await?;
-//        Ok(())
-//    }
-//
-//    async fn read<R>(reader: R) -> Result<Self>
-//    where
-//        R: AsyncRead + Unpin,
-//    {
-//        let val = read_u8(reader).await?;
-//        Flags::from_bits(val).ok_or(Error::InvalidValue)
-//    }
-//}
+impl serde::ser::Serialize for Flags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.bits.serialize(serializer)
+    }
+}
+
+impl<'de> serde::de::Deserialize<'de> for Flags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = serde::Deserialize::deserialize(deserializer)?;
+        Ok(Self { bits })
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -34,53 +34,12 @@ mod tests {
 
     #[test]
     pub fn test_ser_de() {
-        assert_tokens(
-            &Flags::empty(),
-            &[
-                Token::Struct {
-                    name: "Flags",
-                    len: 1,
-                },
-                Token::Str("bits"),
-                Token::U8(0),
-                Token::StructEnd,
-            ],
-        );
-        assert_tokens(
-            &Flags::DYNAMIC_PAYLOAD,
-            &[
-                Token::Struct {
-                    name: "Flags",
-                    len: 1,
-                },
-                Token::Str("bits"),
-                Token::U8(1),
-                Token::StructEnd,
-            ],
-        );
-        assert_tokens(
-            &Flags::RETURN_TYPE,
-            &[
-                Token::Struct {
-                    name: "Flags",
-                    len: 1,
-                },
-                Token::Str("bits"),
-                Token::U8(2),
-                Token::StructEnd,
-            ],
-        );
+        assert_tokens(&Flags::empty(), &[Token::U8(0)]);
+        assert_tokens(&Flags::DYNAMIC_PAYLOAD, &[Token::U8(1)]);
+        assert_tokens(&Flags::RETURN_TYPE, &[Token::U8(2)]);
         assert_tokens(
             &(Flags::RETURN_TYPE | Flags::DYNAMIC_PAYLOAD),
-            &[
-                Token::Struct {
-                    name: "Flags",
-                    len: 1,
-                },
-                Token::Str("bits"),
-                Token::U8(3),
-                Token::StructEnd,
-            ],
+            &[Token::U8(3)],
         );
     }
 }
