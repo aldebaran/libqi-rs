@@ -63,7 +63,7 @@ mod tests {
                 target: message::Target::BoundObject {
                     service: 543,
                     object: 32,
-                    action: message::BoundObjectAction::Terminate,
+                    action: message::action::BoundObject::Terminate,
                 },
                 payload: vec![1, 2, 3],
             },
@@ -74,7 +74,7 @@ mod tests {
                 target: message::Target::BoundObject {
                     service: 90934,
                     object: 178,
-                    action: message::BoundObjectAction::Metaobject,
+                    action: message::action::BoundObject::Metaobject,
                 },
                 payload: vec![],
             },
@@ -83,7 +83,7 @@ mod tests {
                 kind: message::Kind::Capability,
                 flags: message::Flags::DYNAMIC_PAYLOAD,
                 target: message::Target::ServiceDirectory(
-                    message::ServiceDirectoryAction::UnregisterService,
+                    message::action::ServiceDirectory::UnregisterService,
                 ),
                 payload: vec![100, 200, 255],
             },

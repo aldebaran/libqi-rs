@@ -1,4 +1,3 @@
-//use futures::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 
@@ -17,6 +16,8 @@ use num_traits::{FromPrimitive, ToPrimitive};
     serde::Deserialize,
 )]
 #[repr(u8)]
+#[serde(try_from = "u8")]
+#[serde(into = "u8")]
 pub enum Kind {
     None = 0,
     Call = 1,
@@ -27,11 +28,6 @@ pub enum Kind {
     Capability = 6,
     Cancel = 7,
     Canceled = 8,
-}
-
-#[derive(Debug, PartialOrd, Ord, PartialEq, Eq, Clone, Copy)]
-pub enum Error {
-    InvalidValue(u8),
 }
 
 impl Default for Kind {
@@ -52,6 +48,12 @@ impl std::convert::TryFrom<u8> for Kind {
     fn try_from(value: u8) -> Result<Self, Error> {
         Self::from_u8(value).ok_or(Error::InvalidValue(value))
     }
+}
+
+#[derive(Debug, thiserror::Error, PartialOrd, Ord, PartialEq, Eq, Clone, Copy)]
+pub enum Error {
+    #[error("invalid message type value {0}")]
+    InvalidValue(u8),
 }
 
 #[cfg(test)]
@@ -77,21 +79,7 @@ mod tests {
 
     #[test]
     pub fn test_ser_de() {
-        assert_tokens(
-            &Kind::Post,
-            &[
-                Token::Enum { name: "Kind" },
-                Token::Str("Post"),
-                Token::Unit,
-            ],
-        );
-        assert_tokens(
-            &Kind::Capability,
-            &[
-                Token::Enum { name: "Kind" },
-                Token::Str("Capability"),
-                Token::Unit,
-            ],
-        );
+        assert_tokens(&Kind::Post, &[Token::U8(4)]);
+        assert_tokens(&Kind::Capability, &[Token::U8(6)]);
     }
 }

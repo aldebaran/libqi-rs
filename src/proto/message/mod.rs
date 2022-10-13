@@ -38,8 +38,7 @@ pub use kind::Kind;
 pub mod flags;
 pub use flags::Flags;
 
-use num_derive::{FromPrimitive, ToPrimitive};
-use num_traits::{FromPrimitive, ToPrimitive};
+pub mod action;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -57,131 +56,6 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-const ACTION_ID_CONNECT: u32 = 4;
-const ACTION_ID_AUTHENTICATE: u32 = 8;
-
-#[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-#[repr(u32)]
-pub enum ServerAction {
-    Connect = ACTION_ID_CONNECT,
-    Authenticate = ACTION_ID_AUTHENTICATE,
-}
-
-impl Default for ServerAction {
-    fn default() -> Self {
-        Self::Connect
-    }
-}
-
-const ACTION_ID_SD_SERVICE: u32 = 100;
-const ACTION_ID_SD_SERVICES: u32 = 101;
-const ACTION_ID_SD_REGISTER_SERVICE: u32 = 102;
-const ACTION_ID_SD_UNREGISTER_SERVICE: u32 = 103;
-const ACTION_ID_SD_SERVICE_READY: u32 = 104;
-const ACTION_ID_SD_UPDATE_SERVICE_INFO: u32 = 105;
-const ACTION_ID_SD_SERVICE_ADDED: u32 = 106;
-const ACTION_ID_SD_SERVICE_REMOVED: u32 = 107;
-const ACTION_ID_SD_MACHINE_ID: u32 = 108;
-
-#[derive(FromPrimitive, ToPrimitive, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-#[repr(u32)]
-pub enum ServiceDirectoryAction {
-    Service = ACTION_ID_SD_SERVICE,
-    Services = ACTION_ID_SD_SERVICES,
-    RegisterService = ACTION_ID_SD_REGISTER_SERVICE,
-    UnregisterService = ACTION_ID_SD_UNREGISTER_SERVICE,
-    ServiceReady = ACTION_ID_SD_SERVICE_READY,
-    UpdateServiceInfo = ACTION_ID_SD_UPDATE_SERVICE_INFO,
-    ServiceAdded = ACTION_ID_SD_SERVICE_ADDED,
-    ServiceRemoved = ACTION_ID_SD_SERVICE_REMOVED,
-    MachineId = ACTION_ID_SD_MACHINE_ID,
-}
-
-impl Default for ServiceDirectoryAction {
-    fn default() -> Self {
-        Self::Service
-    }
-}
-
-const ACTION_ID_REGISTER_EVENT: u32 = 0;
-const ACTION_ID_UNREGISTER_EVENT: u32 = 1;
-const ACTION_ID_METAOBJECT: u32 = 2;
-const ACTION_ID_TERMINATE: u32 = 3;
-const ACTION_ID_PROPERTY: u32 = 5; // not a typo, there is no action 4
-const ACTION_ID_SET_PROPERTY: u32 = 6;
-const ACTION_ID_PROPERTIES: u32 = 7;
-const ACTION_ID_REGISTER_EVENT_WITH_SIGNATURE: u32 = 8;
-
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-#[repr(u32)]
-pub enum BoundObjectAction {
-    RegisterEvent,
-    UnregisterEvent,
-    Metaobject,
-    Terminate,
-    Property,
-    SetProperty,
-    Properties,
-    RegisterEventWithSignature,
-    BoundFunction(u32),
-}
-
-impl Default for BoundObjectAction {
-    fn default() -> Self {
-        Self::RegisterEvent
-    }
-}
-
-impl FromPrimitive for BoundObjectAction {
-    fn from_u32(n: u32) -> Option<Self> {
-        Some(match n {
-            ACTION_ID_REGISTER_EVENT => Self::RegisterEvent,
-            ACTION_ID_UNREGISTER_EVENT => Self::UnregisterEvent,
-            ACTION_ID_METAOBJECT => Self::Metaobject,
-            ACTION_ID_TERMINATE => Self::Terminate,
-            ACTION_ID_PROPERTY => Self::Property,
-            ACTION_ID_SET_PROPERTY => Self::SetProperty,
-            ACTION_ID_PROPERTIES => Self::Properties,
-            ACTION_ID_REGISTER_EVENT_WITH_SIGNATURE => Self::RegisterEventWithSignature,
-            _ => Self::BoundFunction(n),
-        })
-    }
-
-    fn from_i64(n: i64) -> Option<Self> {
-        Self::from_u32(n.try_into().ok()?)
-    }
-
-    fn from_u64(n: u64) -> Option<Self> {
-        Self::from_u32(n.try_into().ok()?)
-    }
-}
-
-impl ToPrimitive for BoundObjectAction {
-    fn to_u32(&self) -> Option<u32> {
-        Some(match self {
-            BoundObjectAction::RegisterEvent => ACTION_ID_REGISTER_EVENT,
-            BoundObjectAction::UnregisterEvent => ACTION_ID_UNREGISTER_EVENT,
-            BoundObjectAction::Metaobject => ACTION_ID_METAOBJECT,
-            BoundObjectAction::Terminate => ACTION_ID_TERMINATE,
-            BoundObjectAction::Property => ACTION_ID_PROPERTY,
-            BoundObjectAction::SetProperty => ACTION_ID_SET_PROPERTY,
-            BoundObjectAction::Properties => ACTION_ID_PROPERTIES,
-            BoundObjectAction::RegisterEventWithSignature => {
-                ACTION_ID_REGISTER_EVENT_WITH_SIGNATURE
-            }
-            BoundObjectAction::BoundFunction(n) => *n,
-        })
-    }
-
-    fn to_i64(&self) -> Option<i64> {
-        Some(self.to_u32().unwrap().into())
-    }
-
-    fn to_u64(&self) -> Option<u64> {
-        Some(self.to_u32().unwrap().into())
-    }
-}
-
 const SERVICE_ID_SERVER: u32 = 0;
 const SERVICE_ID_SERVICE_DIRECTORY: u32 = 1;
 
@@ -191,25 +65,26 @@ const OBJECT_ID_SERVICE_MAIN: u32 = 1;
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Target {
     // service = server, object = none
-    Server(ServerAction),
+    Server(action::Server),
     // service = sd, object = service main
-    ServiceDirectory(ServiceDirectoryAction),
+    ServiceDirectory(action::ServiceDirectory),
     // other
     BoundObject {
         service: u32,
         object: u32,
-        action: BoundObjectAction,
+        action: action::BoundObject,
     },
 }
 
 impl Target {
     fn from_values(service: u32, object: u32, action: u32) -> Option<Self> {
+        use num_traits::FromPrimitive;
         match (service, object, action) {
             (SERVICE_ID_SERVER, OBJECT_ID_NONE, action) => {
-                Some(Self::Server(ServerAction::from_u32(action)?))
+                Some(Self::Server(action::Server::from_u32(action)?))
             }
             (SERVICE_ID_SERVICE_DIRECTORY, OBJECT_ID_SERVICE_MAIN, action) => Some(
-                Self::ServiceDirectory(ServiceDirectoryAction::from_u32(action)?),
+                Self::ServiceDirectory(action::ServiceDirectory::from_u32(action)?),
             ),
             (service, object, action)
                 if service != SERVICE_ID_SERVER && object != OBJECT_ID_NONE =>
@@ -217,7 +92,7 @@ impl Target {
                 Some(Self::BoundObject {
                     service,
                     object,
-                    action: BoundObjectAction::from_u32(action).unwrap(),
+                    action: action::BoundObject::from_u32(action).unwrap(),
                 })
             }
             _ => None,
@@ -241,6 +116,7 @@ impl Target {
     }
 
     fn action(&self) -> u32 {
+        use num_traits::ToPrimitive;
         match self {
             Self::Server(act) => act.to_u32(),
             Self::ServiceDirectory(act) => act.to_u32(),
@@ -273,7 +149,7 @@ impl Target {
 
 impl Default for Target {
     fn default() -> Self {
-        Self::Server(ServerAction::default())
+        Self::Server(action::Server::default())
     }
 }
 

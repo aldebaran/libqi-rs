@@ -1,29 +1,11 @@
 use bitflags::bitflags;
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Default, serde::Serialize, serde::Deserialize)]
+    #[serde(transparent)]
     pub struct Flags: u8 {
         const DYNAMIC_PAYLOAD = 0b00000001;
         const RETURN_TYPE = 0b00000010;
-    }
-}
-
-impl serde::ser::Serialize for Flags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.bits.serialize(serializer)
-    }
-}
-
-impl<'de> serde::de::Deserialize<'de> for Flags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bits = serde::Deserialize::deserialize(deserializer)?;
-        Ok(Self { bits })
     }
 }
 
