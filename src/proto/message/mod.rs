@@ -36,8 +36,10 @@
 pub mod kind;
 pub use kind::Kind;
 
+pub mod flags;
+pub use flags::Flags;
+
 use super::utils::{read_u16_le, read_u32_be, read_u32_le, read_u8};
-use bitflags::bitflags;
 use futures::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
@@ -58,33 +60,6 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-bitflags! {
-    #[derive(Default)]
-    pub struct Flags: u8 {
-        const DYNAMIC_PAYLOAD = 0b00000001;
-        const RETURN_TYPE = 0b00000010;
-    }
-}
-
-impl Flags {
-    async fn write<W>(&self, mut writer: W) -> Result<()>
-    where
-        W: AsyncWrite + Unpin,
-    {
-        let bytes = &self.bits().to_le_bytes();
-        writer.write_all(bytes).await?;
-        Ok(())
-    }
-
-    async fn read<R>(reader: R) -> Result<Self>
-    where
-        R: AsyncRead + Unpin,
-    {
-        let val = read_u8(reader).await?;
-        Flags::from_bits(val).ok_or(Error::InvalidValue)
-    }
-}
 
 const ACTION_ID_CONNECT: u32 = 4;
 const ACTION_ID_AUTHENTICATE: u32 = 8;
