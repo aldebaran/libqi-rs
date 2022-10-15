@@ -4,6 +4,7 @@ use num_traits::{FromPrimitive, ToPrimitive};
 #[derive(
     FromPrimitive,
     ToPrimitive,
+    Default,
     Debug,
     Hash,
     PartialEq,
@@ -19,6 +20,7 @@ use num_traits::{FromPrimitive, ToPrimitive};
 #[serde(try_from = "u8")]
 #[serde(into = "u8")]
 pub enum Kind {
+    #[default]
     None = 0,
     Call = 1,
     Reply = 2,
@@ -30,15 +32,9 @@ pub enum Kind {
     Canceled = 8,
 }
 
-impl Default for Kind {
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-impl std::convert::Into<u8> for Kind {
-    fn into(self) -> u8 {
-        self.to_u8().unwrap()
+impl From<Kind> for u8 {
+    fn from(kind: Kind) -> u8 {
+        kind.to_u8().unwrap()
     }
 }
 

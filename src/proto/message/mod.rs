@@ -39,6 +39,10 @@ pub mod flags;
 pub use flags::Flags;
 
 pub mod action;
+pub use action::Action;
+
+pub mod subject;
+pub use subject::Subject;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -48,117 +52,16 @@ pub enum Error {
     UnsupportedVersion,
     #[error("payload size too large")]
     PayloadSizeTooLarge,
-    #[error("invalid value")]
-    InvalidValue,
-    #[error("io error")]
-    Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-const SERVICE_ID_SERVER: u32 = 0;
-const SERVICE_ID_SERVICE_DIRECTORY: u32 = 1;
-
-const OBJECT_ID_NONE: u32 = 0;
-const OBJECT_ID_SERVICE_MAIN: u32 = 1;
-
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub enum Target {
-    // service = server, object = none
-    Server(action::Server),
-    // service = sd, object = service main
-    ServiceDirectory(action::ServiceDirectory),
-    // other
-    BoundObject {
-        service: u32,
-        object: u32,
-        action: action::BoundObject,
-    },
-}
-
-impl Target {
-    fn from_values(service: u32, object: u32, action: u32) -> Option<Self> {
-        use num_traits::FromPrimitive;
-        match (service, object, action) {
-            (SERVICE_ID_SERVER, OBJECT_ID_NONE, action) => {
-                Some(Self::Server(action::Server::from_u32(action)?))
-            }
-            (SERVICE_ID_SERVICE_DIRECTORY, OBJECT_ID_SERVICE_MAIN, action) => Some(
-                Self::ServiceDirectory(action::ServiceDirectory::from_u32(action)?),
-            ),
-            (service, object, action)
-                if service != SERVICE_ID_SERVER && object != OBJECT_ID_NONE =>
-            {
-                Some(Self::BoundObject {
-                    service,
-                    object,
-                    action: action::BoundObject::from_u32(action).unwrap(),
-                })
-            }
-            _ => None,
-        }
-    }
-
-    fn service(&self) -> u32 {
-        match self {
-            Self::Server(_) => SERVICE_ID_SERVER,
-            Self::ServiceDirectory(_) => SERVICE_ID_SERVICE_DIRECTORY,
-            Self::BoundObject { service, .. } => *service,
-        }
-    }
-
-    fn object(&self) -> u32 {
-        match self {
-            Self::Server(_) => OBJECT_ID_NONE,
-            Self::ServiceDirectory(_) => OBJECT_ID_SERVICE_MAIN,
-            Self::BoundObject { object, .. } => *object,
-        }
-    }
-
-    fn action(&self) -> u32 {
-        use num_traits::ToPrimitive;
-        match self {
-            Self::Server(act) => act.to_u32(),
-            Self::ServiceDirectory(act) => act.to_u32(),
-            Self::BoundObject { action, .. } => action.to_u32(),
-        }
-        .unwrap()
-    }
-
-    //async fn write<W>(&self, mut writer: W) -> Result<()>
-    //where
-    //    W: AsyncWrite + Unpin,
-    //{
-    //    writer.write_all(&self.service().to_le_bytes()).await?;
-    //    writer.write_all(&self.object().to_le_bytes()).await?;
-    //    writer.write_all(&self.action().to_le_bytes()).await?;
-    //    Ok(())
-    //}
-
-    //async fn read<R>(mut reader: R) -> Result<Self>
-    //where
-    //    R: AsyncRead + Unpin,
-    //{
-    //    let service = read_u32_le(&mut reader).await?;
-    //    let object = read_u32_le(&mut reader).await?;
-    //    let action = read_u32_le(&mut reader).await?;
-
-    //    Self::from_values(service, object, action).ok_or(Error::InvalidValue)
-    //}
-}
-
-impl Default for Target {
-    fn default() -> Self {
-        Self::Server(action::Server::default())
-    }
-}
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct Message {
     pub id: u32,
     pub kind: Kind, // or type
     pub flags: Flags,
-    pub target: Target,
+    pub subject: Subject,
     pub payload: Vec<u8>,
 }
 
@@ -171,7 +74,7 @@ impl Message {
             id: 0,
             kind: Kind::None,
             flags: Flags::empty(),
-            target: Target::default(),
+            subject: Subject::default(),
             payload: Vec::new(),
         }
     }
@@ -197,7 +100,7 @@ impl Message {
         //writer.write_all(&Self::VERSION.to_le_bytes()).await?;
         //self.kind.write(&mut writer).await?;
         //self.flags.write(&mut writer).await?;
-        //self.target.write(&mut writer).await?;
+        //self.subject.write(&mut writer).await?;
         //writer.write_all(&self.payload).await?;
         //Ok(())
     }
@@ -223,7 +126,7 @@ impl Message {
         //}
         //let kind = Kind::read(&mut reader).await?;
         //let flags = Flags::read(&mut reader).await?;
-        //let target = Target::read(&mut reader).await?;
+        //let subject = Subject::read(&mut reader).await?;
         //let mut payload = vec![0; payload_size];
         //reader.read_exact(&mut payload).await?;
 
@@ -231,7 +134,7 @@ impl Message {
         //    id,
         //    kind,
         //    flags,
-        //    target,
+        //    subject,
         //    payload,
         //})
     }
@@ -244,11 +147,50 @@ impl Default for Message {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use futures_test::test;
     use pretty_assertions::assert_eq;
+
+    pub fn samples() -> [Message; 3] {
+        [
+            Message {
+                id: 123,
+                kind: Kind::Post,
+                flags: Flags::RETURN_TYPE,
+                subject: subject::BoundObject::from_values_unchecked(
+                    subject::Service::Other(543.into()),
+                    subject::Object::Other(32.into()),
+                    action::BoundObject::Terminate,
+                )
+                .into(),
+                payload: vec![1, 2, 3],
+            },
+            Message {
+                id: 9034,
+                kind: Kind::Event,
+                flags: Flags::empty(),
+                subject: subject::BoundObject::from_values_unchecked(
+                    subject::Service::Other(90934.into()),
+                    subject::Object::Other(178.into()),
+                    action::BoundObject::Metaobject,
+                )
+                .into(),
+                payload: vec![],
+            },
+            Message {
+                id: 21932,
+                kind: Kind::Capability,
+                flags: Flags::DYNAMIC_PAYLOAD,
+                subject: subject::ServiceDirectory {
+                    action: action::ServiceDirectory::UnregisterService,
+                }
+                .into(),
+                payload: vec![100, 200, 255],
+            },
+        ]
+    }
 
     #[test]
     async fn message_write() {
@@ -257,7 +199,7 @@ mod tests {
         //    id: 329,
         //    kind: Kind::Capability,
         //    flags: Flags::RETURN_TYPE,
-        //    target: Target::ServiceDirectory(ServiceDirectoryAction::ServiceReady),
+        //    subject: Subject::ServiceDirectory(ServiceDirectoryAction::ServiceReady),
         //    payload: vec![23u8, 43u8, 230u8, 1u8, 95u8],
         //};
         //let mut buf = Vec::new();
@@ -299,7 +241,7 @@ mod tests {
         //    id: 39608,
         //    kind: Kind::Reply,
         //    flags: Flags::empty(),
-        //    target: Target::BoundObject {
+        //    subject: Subject::BoundObject {
         //        service: 39,
         //        object: 9,
         //        action: BoundObjectAction::BoundFunction(104),
@@ -338,7 +280,7 @@ mod tests {
         //     id: 9323982,
         //     kind: Kind::Error,
         //     flags: Flags::DYNAMIC_PAYLOAD | Flags::RETURN_TYPE,
-        //     target: Target::BoundObject {
+        //     subject: Subject::BoundObject {
         //         service: 984398294,
         //         object: 87438426,
         //         action: BoundObjectAction::SetProperty,

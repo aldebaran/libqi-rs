@@ -29,8 +29,9 @@ use tuple::Tuple;
 //}
 
 // TODO: #[non_exhaustive]
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Default, Clone, PartialEq, PartialOrd, Debug)]
 pub enum Value {
+    #[default]
     Void,
     Bool(bool),
     Int8(i8),
@@ -69,12 +70,6 @@ impl Value {
     }
 }
 
-impl Default for Value {
-    fn default() -> Self {
-        Value::Void
-    }
-}
-
 impl std::str::FromStr for Value {
     type Err = std::convert::Infallible;
 
@@ -105,7 +100,7 @@ where
     T::deserialize(value)
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Error {
     #[error("error: {0}")]

@@ -54,46 +54,10 @@ mod tests {
     use futures_test::test;
     use pretty_assertions::assert_eq;
 
-    fn examples_message() -> [Message; 3] {
-        [
-            Message {
-                id: 123,
-                kind: message::Kind::Post,
-                flags: message::Flags::RETURN_TYPE,
-                target: message::Target::BoundObject {
-                    service: 543,
-                    object: 32,
-                    action: message::action::BoundObject::Terminate,
-                },
-                payload: vec![1, 2, 3],
-            },
-            Message {
-                id: 9034,
-                kind: message::Kind::Event,
-                flags: message::Flags::empty(),
-                target: message::Target::BoundObject {
-                    service: 90934,
-                    object: 178,
-                    action: message::action::BoundObject::Metaobject,
-                },
-                payload: vec![],
-            },
-            Message {
-                id: 21932,
-                kind: message::Kind::Capability,
-                flags: message::Flags::DYNAMIC_PAYLOAD,
-                target: message::Target::ServiceDirectory(
-                    message::action::ServiceDirectory::UnregisterService,
-                ),
-                payload: vec![100, 200, 255],
-            },
-        ]
-    }
-
     #[test]
     async fn to_message_stream() {
         let mut buf = Vec::new();
-        let messages = examples_message();
+        let messages = message::tests::samples();
         for msg in &messages {
             msg.write(&mut buf).await.expect("message write error");
         }
@@ -106,7 +70,7 @@ mod tests {
     #[test]
     async fn to_message_sink() {
         let mut buf = Vec::new();
-        let messages = examples_message();
+        let messages = message::tests::samples();
 
         let mut sink = Box::pin(super::to_message_sink(&mut buf));
         for msg in &messages {
