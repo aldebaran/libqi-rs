@@ -209,11 +209,18 @@ pub struct BoundObject {
 }
 
 impl BoundObject {
-    pub fn from_values_unchecked(
+    pub(crate) fn from_values_unchecked(
         service: Service,
         object: Object,
         action: action::BoundObject,
     ) -> Self {
+        debug_assert!(
+            object != Object::None
+                && !(service == Service::ServiceDirectory && object == Object::ServiceMain),
+            "bad BoundObject subject values {:?} {:?}",
+            service,
+            object,
+        );
         Self {
             service,
             object,

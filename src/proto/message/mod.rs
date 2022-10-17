@@ -152,12 +152,12 @@ pub mod tests {
                 version: Message::CURRENT_VERSION,
                 kind: Kind::Post,
                 flags: Flags::RETURN_TYPE,
-                subject: subject::BoundObject::from_values_unchecked(
+                subject: subject::Subject::try_from_values(
                     subject::Service::Other(543.into()),
                     subject::Object::Other(32.into()),
-                    action::BoundObject::Terminate,
+                    action::BoundObject::Terminate.into(),
                 )
-                .into(),
+                .unwrap(),
                 payload: vec![1, 2, 3],
             },
             Message {
@@ -165,12 +165,12 @@ pub mod tests {
                 version: Message::CURRENT_VERSION,
                 kind: Kind::Event,
                 flags: Flags::empty(),
-                subject: subject::BoundObject::from_values_unchecked(
+                subject: subject::Subject::try_from_values(
                     subject::Service::Other(90934.into()),
                     subject::Object::Other(178.into()),
-                    action::BoundObject::Metaobject,
+                    action::BoundObject::Metaobject.into(),
                 )
-                .into(),
+                .unwrap(),
                 payload: vec![],
             },
             Message {
