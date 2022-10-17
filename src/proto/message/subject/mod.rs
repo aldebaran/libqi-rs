@@ -113,12 +113,13 @@ impl serde::Serialize for Subject {
         S: serde::Serializer,
     {
         #[derive(serde::Serialize)]
-        struct Subject {
+        #[serde(rename = "Subject")]
+        struct Repr {
             service: Service,
             object: Object,
             action: Action,
         }
-        Subject {
+        Repr {
             service: self.service(),
             object: self.object(),
             action: self.action(),
@@ -133,12 +134,13 @@ impl<'de> serde::Deserialize<'de> for Subject {
         D: serde::Deserializer<'de>,
     {
         #[derive(serde::Deserialize)]
-        struct Subject {
+        #[serde(rename = "Subject")]
+        struct Repr {
             service: Service,
             object: Object,
             action: action::Id,
         }
-        let s = Subject::deserialize(deserializer)?;
+        let s = Repr::deserialize(deserializer)?;
         Self::try_from_values(s.service, s.object, s.action)
             .map_err(|e| serde::de::Error::custom(e))
     }
