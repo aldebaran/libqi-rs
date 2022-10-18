@@ -16,7 +16,7 @@ where
     })
 }
 
-fn to_message_sink<'w, W>(writer: W) -> impl Sink<Message, Error = message::Error> + 'w
+fn to_message_sink<'w, W>(writer: W) -> impl Sink<Message, Error = proto::Error> + 'w
 where
     W: AsyncWrite + Unpin + 'w,
 {
@@ -34,7 +34,7 @@ pub mod server {
     pub struct Remote<'a> {
         // OPTIMIZE: See if we could avoid using boxes here.
         stream: Pin<Box<dyn Stream<Item = Message> + Unpin + 'a>>,
-        sink: Pin<Box<dyn Sink<Message, Error = message::Error> + Unpin + 'a>>,
+        sink: Pin<Box<dyn Sink<Message, Error = proto::Error> + Unpin + 'a>>,
     }
 
     impl<'a> Remote<'a> {

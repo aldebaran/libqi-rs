@@ -1,41 +1,5 @@
 //! # Message
 //!
-//! ## Structure
-//! ```text
-//! ╔═══════════════╤═══════════════╤═══════════════╤═══════════════╗
-//! ║       1       │       2       │       3       │       4       ║
-//! ╟─┬─┬─┬─┬─┬─┬─┬─┼─┬─┬─┬─┬─┬─┬─┬─┼─┬─┬─┬─┬─┬─┬─┬─┼─┬─┬─┬─┬─┬─┬─┬─╢
-//! ║0│1│2│3│4│5│6│7│0│1│2│3│4│5│6│7│0│1│2│3│4│5│6│7│0│1│2│3│4│5│6│7║
-//! ╠═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╧═╣
-//! ║                         magic cookie                          ║
-//! ╟───────────────────────────────────────────────────────────────╢
-//! ║                          identifier                           ║
-//! ╟───────────────────────────────────────────────────────────────╢
-//! ║                         payload size                          ║
-//! ╟───────────────────────────────┬───────────────┬───────────────╢
-//! ║            version            │     type      │    flags      ║
-//! ╟───────────────────────────────┴───────────────┴───────────────╢
-//! ║                            service                            ║
-//! ╟───────────────────────────────────────────────────────────────╢
-//! ║                            object                             ║
-//! ╟───────────────────────────────────────────────────────────────╢
-//! ║                            action                             ║
-//! ╟───────────────────────────────────────────────────────────────╢
-//! ║                            payload                            ║
-//! ║                             [...]                             ║
-//! ╚═══════════════════════════════════════════════════════════════╝
-//! ```
-//!
-//! ## Header fields
-//!  - magic cookie: uint32, big endian, value = 0x42dead42
-//!  - id: uint32, little endian
-//!  - size/len: uint32, little endian, size of the payload. may be 0
-//!  - version: uint16, little endian
-//!  - type: uint8, little endian
-//!  - flags: uint8, little endian
-//!  - service: uint32, little endian
-//!  - object: uint32, little endian
-//!  - action: uint32, little endian
 pub mod kind;
 pub use kind::Kind;
 
@@ -48,33 +12,25 @@ pub use action::Action;
 pub mod subject;
 pub use subject::Subject;
 
-#[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub enum Error {
-    #[error("bad message magic cookie")]
-    BadMagicCookie,
-    #[error("unsupported protocol version")]
-    UnsupportedVersion,
-    #[error("payload size too large")]
-    PayloadSizeTooLarge,
-}
-
-#[derive(
-    Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, serde::Serialize, serde::Deserialize,
-)]
-#[serde(rename = "qi.Message")]
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct Message {
     pub id: u32,
     pub version: u16,
-    #[serde(rename = "type")]
     pub kind: Kind,
     pub flags: Flags,
     pub subject: Subject,
-    #[serde(with = "serde_bytes")]
     pub payload: Vec<u8>,
 }
 
 impl Message {
     pub const CURRENT_VERSION: u16 = 0;
+    pub(crate) const TOKEN: &'static str = "qi.Message";
+    pub(crate) const ID_TOKEN: &'static str = "id";
+    pub(crate) const VERSION_TOKEN: &'static str = "version";
+    pub(crate) const KIND_TOKEN: &'static str = "type";
+    pub(crate) const FLAGS_TOKEN: &'static str = "flags";
+    pub(crate) const SUBJECT_TOKEN: &'static str = "subject";
+    pub(crate) const PAYLOAD_TOKEN: &'static str = "payload";
 
     pub fn new() -> Self {
         Self {
@@ -94,55 +50,158 @@ impl Default for Message {
     }
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-struct MagicCookie;
-
-impl MagicCookie {
-    const VALUE: u32 = 0x42adde42;
-}
-
-impl serde::de::Expected for MagicCookie {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self, f)
-    }
-}
-
-impl std::fmt::Display for MagicCookie {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:#x}", Self::VALUE)
-    }
-}
-
-impl serde::Serialize for MagicCookie {
+impl serde::Serialize for Message {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        Self::VALUE.serialize(serializer)
+        let mut ser = serializer.serialize_struct(Self::TOKEN, 6)?;
+        use serde::ser::SerializeStruct;
+        ser.serialize_field(Self::ID_TOKEN, &self.id)?;
+        ser.serialize_field(Self::VERSION_TOKEN, &self.version)?;
+        ser.serialize_field(Self::KIND_TOKEN, &self.kind)?;
+        ser.serialize_field(Self::FLAGS_TOKEN, &self.flags)?;
+        ser.serialize_field(Self::SUBJECT_TOKEN, &self.subject)?;
+        ser.serialize_field(Self::PAYLOAD_TOKEN, serde_bytes::Bytes::new(&self.payload))?;
+        ser.end()
     }
 }
 
-impl<'de> serde::Deserialize<'de> for MagicCookie {
+impl<'de> serde::Deserialize<'de> for Message {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = u32::deserialize(deserializer)?;
-        if value != Self::VALUE {
-            use serde::de;
-            return Err(<D::Error as de::Error>::invalid_value(
-                de::Unexpected::Unsigned(value.into()),
-                &MagicCookie,
-            ));
+        const FIELDS: &[&'static str; 6] = &[
+            Message::ID_TOKEN,
+            Message::VERSION_TOKEN,
+            Message::KIND_TOKEN,
+            Message::FLAGS_TOKEN,
+            Message::SUBJECT_TOKEN,
+            Message::PAYLOAD_TOKEN,
+        ];
+        enum Field {
+            Id,
+            Version,
+            Kind,
+            Flags,
+            Subject,
+            Payload,
         }
-        Ok(MagicCookie)
+
+        impl<'de> de::Deserialize<'de> for Field {
+            fn deserialize<D>(deserializer: D) -> Result<Field, D::Error>
+            where
+                D: de::Deserializer<'de>,
+            {
+                struct FieldVisitor;
+                impl<'de> de::Visitor<'de> for FieldVisitor {
+                    type Value = Field;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                        write!(formatter, "any of {}", FIELDS.join(" "))
+                    }
+
+                    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+                    where
+                        E: de::Error,
+                    {
+                        match value {
+                            Message::ID_TOKEN => Ok(Field::Id),
+                            Message::VERSION_TOKEN => Ok(Field::Version),
+                            Message::KIND_TOKEN => Ok(Field::Kind),
+                            Message::FLAGS_TOKEN => Ok(Field::Flags),
+                            Message::SUBJECT_TOKEN => Ok(Field::Subject),
+                            Message::PAYLOAD_TOKEN => Ok(Field::Payload),
+                            _ => Err(de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+
+                deserializer.deserialize_identifier(FieldVisitor)
+            }
+        }
+
+        struct Visitor;
+        use serde::de;
+        impl<'de> de::Visitor<'de> for Visitor {
+            type Value = Message;
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "struct {}", Message::TOKEN)
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::MapAccess<'de>,
+            {
+                let map = &mut map;
+                let mut id = None;
+                let mut version = None;
+                let mut kind = None;
+                let mut flags = None;
+                let mut subject = None;
+                let mut payload: Option<serde_bytes::ByteBuf> = None;
+                fn set_next_value<'de, A, T>(
+                    value: &mut Option<T>,
+                    map: &mut A,
+                    field: &'static str,
+                ) -> Result<(), <A as de::MapAccess<'de>>::Error>
+                where
+                    A: de::MapAccess<'de>,
+                    T: de::Deserialize<'de>,
+                {
+                    match value {
+                        None => {
+                            *value = Some(map.next_value()?);
+                            Ok(())
+                        }
+                        Some(_) => return Err(de::Error::duplicate_field(field)),
+                    }
+                }
+
+                while let Some(key) = map.next_key()? {
+                    match key {
+                        Field::Id => set_next_value(&mut id, map, Message::ID_TOKEN)?,
+                        Field::Version => {
+                            set_next_value(&mut version, map, Message::VERSION_TOKEN)?
+                        }
+                        Field::Kind => set_next_value(&mut kind, map, Message::KIND_TOKEN)?,
+                        Field::Flags => set_next_value(&mut flags, map, Message::FLAGS_TOKEN)?,
+                        Field::Subject => {
+                            set_next_value(&mut subject, map, Message::SUBJECT_TOKEN)?
+                        }
+                        Field::Payload => {
+                            set_next_value(&mut payload, map, Message::PAYLOAD_TOKEN)?
+                        }
+                    }
+                }
+                let missing_field = |field| move || de::Error::missing_field(field);
+                let id = id.ok_or_else(missing_field(Message::ID_TOKEN))?;
+                let version = version.ok_or_else(missing_field(Message::VERSION_TOKEN))?;
+                let kind = kind.ok_or_else(missing_field(Message::KIND_TOKEN))?;
+                let flags = flags.ok_or_else(missing_field(Message::FLAGS_TOKEN))?;
+                let subject = subject.ok_or_else(missing_field(Message::SUBJECT_TOKEN))?;
+                let payload = payload
+                    .ok_or_else(missing_field(Message::PAYLOAD_TOKEN))?
+                    .into_vec();
+                Ok(Message {
+                    id,
+                    version,
+                    kind,
+                    flags,
+                    subject,
+                    payload,
+                })
+            }
+        }
+
+        deserializer.deserialize_struct(Self::TOKEN, FIELDS, Visitor)
     }
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use serde_bytes::Bytes;
     use serde_test::{assert_tokens, Token};
 
     pub fn samples() -> [Message; 3] {
@@ -221,31 +280,6 @@ pub mod tests {
                 Token::Bytes(&[1, 2, 3]),
                 Token::StructEnd,
             ],
-        );
-    }
-
-    #[test]
-    fn test_message_de_bad_cookie() {
-        use serde::de::{Deserialize, IntoDeserializer};
-        #[derive(thiserror::Error, Debug, PartialEq, Eq)]
-        #[error("{0}")]
-        struct Error(String);
-
-        impl serde::de::Error for Error {
-            fn custom<T>(msg: T) -> Self
-            where
-                T: std::fmt::Display,
-            {
-                Self(msg.to_string())
-            }
-        }
-
-        let de = 0x42addf42u32.into_deserializer();
-        assert_eq!(
-            MagicCookie::deserialize(de),
-            Err(Error(
-                "invalid value: integer `1118691138`, expected 0x42adde42".into()
-            ))
         );
     }
 }

@@ -1,7 +1,9 @@
 mod de;
+pub use de::{from_bytes, from_reader, Deserializer};
 pub mod message;
 pub use message::Message;
 mod ser;
+pub use ser::{to_bytes, to_writer, Serializer};
 pub mod utils;
 pub mod value;
 
@@ -10,42 +12,47 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("size {0} conversion failed: {1}")]
+    BadSize(usize, std::num::TryFromIntError),
+
+    #[error("payload size was expected but none was found")]
+    NoPayloadSize,
+
+    #[error("list size must be known to be serialized")]
+    UnknownListSize,
+
+    #[error("unexpected message field {0}")]
+    UnexpectedMessageField(&'static str),
+
+    #[error("duplicate message field {0}")]
+    DuplicateMessageField(&'static str),
+
+    #[error("missing message field {0}")]
+    MissingMessageField(&'static str),
+
     #[error("{0}")]
     Custom(String),
 }
 
-type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error>;
 
-pub fn to_writer<W, T>(writer: W, value: &T) -> Result<W>
-where
-    W: std::io::Write,
-    T: ?Sized + serde::Serialize,
-{
-    value.serialize(ser::WriterSerializer::from_writer(writer))
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+struct MagicCookie;
+
+impl MagicCookie {
+    const VALUE: u32 = 0x42adde42;
 }
 
-pub fn to_bytes_buf<T>(value: &T) -> Result<Vec<u8>>
-where
-    T: ?Sized + serde::Serialize,
-{
-    let mut buf = Vec::new();
-    to_writer(&mut buf, value)?;
-    Ok(buf)
+impl serde::de::Expected for MagicCookie {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self, f)
+    }
 }
 
-pub fn from_reader<'r, R, T>(reader: R) -> Result<T>
-where
-    R: 'r + std::io::Read,
-    T: serde::de::Deserialize<'r>,
-{
-    T::deserialize(de::ReaderDeserializer::from_reader(reader))
-}
-
-pub fn from_bytes<'b, T>(bytes: &'b [u8]) -> Result<T>
-where
-    T: serde::de::Deserialize<'b>,
-{
-    from_reader(bytes)
+impl std::fmt::Display for MagicCookie {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#x}", Self::VALUE)
+    }
 }
 
 #[cfg(test)]
@@ -65,9 +72,9 @@ mod tests {
                 action: action::ServiceDirectory::ServiceReady,
             }
             .into(),
-            payload: vec![23u8, 43u8, 230u8, 1u8, 95u8],
+            payload: vec![0x17, 0x2b, 0xe6, 0x01, 0x5f],
         };
-        let buf = to_bytes_buf(&msg).unwrap();
+        let buf = to_bytes(&msg).unwrap();
         assert_eq!(
             buf,
             vec![
@@ -123,6 +130,25 @@ mod tests {
                     0x33,
                 ],
             }
+        );
+    }
+
+    #[test]
+    fn test_subject_to_bytes() {
+        use message::subject::*;
+        let subject = BoundObject::from_values_unchecked(
+            Service::Other(service::Id(23)),
+            Object::Other(object::Id(923)),
+            action::BoundObject::BoundFunction(action::Id(392)),
+        );
+        let buf = to_bytes(&subject).unwrap();
+        assert_eq!(
+            buf,
+            vec![
+                0x17, 0x00, 0x00, 0x00, // service
+                0x9b, 0x03, 0x00, 0x00, // object
+                0x88, 0x01, 0x00, 0x00, // action
+            ]
         );
     }
 }

@@ -1,5 +1,5 @@
-use super::action;
-use action::Action;
+pub use super::action;
+pub use action::Action;
 
 pub mod service;
 pub use service::Service;
@@ -46,12 +46,7 @@ impl Subject {
             }
             (service, object) => {
                 let action = action_id.into();
-                Ok(BoundObject {
-                    service,
-                    object,
-                    action,
-                }
-                .into())
+                Ok(BoundObject::from_values_unchecked(service, object, action).into())
             }
         }
     }
@@ -107,42 +102,45 @@ impl From<BoundObject> for Subject {
     }
 }
 
-impl serde::Serialize for Subject {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        #[derive(serde::Serialize)]
-        #[serde(rename = "Subject")]
-        struct Repr {
-            service: Service,
-            object: Object,
-            action: Action,
+mod ser {
+    use super::*;
+
+    #[doc(hidden)]
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(rename = "Subject")]
+    pub(crate) struct Repr {
+        pub(crate) service: Service,
+        pub(crate) object: Object,
+        pub(crate) action: action::Id,
+    }
+
+    impl serde::Serialize for Subject {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            Repr {
+                service: self.service(),
+                object: self.object(),
+                action: self.action().into(),
+            }
+            .serialize(serializer)
         }
-        Repr {
-            service: self.service(),
-            object: self.object(),
-            action: self.action(),
-        }
-        .serialize(serializer)
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Subject {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        #[derive(serde::Deserialize)]
-        #[serde(rename = "Subject")]
-        struct Repr {
-            service: Service,
-            object: Object,
-            action: action::Id,
+mod de {
+    use super::*;
+
+    impl<'de> serde::Deserialize<'de> for Subject {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let s = ser::Repr::deserialize(deserializer)?;
+            Self::try_from_values(s.service, s.object, s.action)
+                .map_err(|e| serde::de::Error::custom(e))
         }
-        let s = Repr::deserialize(deserializer)?;
-        Self::try_from_values(s.service, s.object, s.action)
-            .map_err(|e| serde::de::Error::custom(e))
     }
 }
 
@@ -162,7 +160,21 @@ pub enum Error {
 }
 
 // service = server, object = none
-#[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(
+    Default,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(try_from = "Subject")]
+#[serde(into = "Subject")]
 pub struct Server {
     pub action: action::Server,
 }
@@ -181,8 +193,33 @@ impl SubjectExt for Server {
     }
 }
 
+impl TryFrom<Subject> for Server {
+    type Error = TryFromSubjectError;
+
+    fn try_from(value: Subject) -> Result<Self, Self::Error> {
+        match value {
+            Subject::Server(s) => Ok(s),
+            _ => Err(TryFromSubjectError),
+        }
+    }
+}
+
 // service = service directory, object = main
-#[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(
+    Default,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(try_from = "Subject")]
+#[serde(into = "Subject")]
 pub struct ServiceDirectory {
     pub action: action::ServiceDirectory,
 }
@@ -201,7 +238,32 @@ impl SubjectExt for ServiceDirectory {
     }
 }
 
-#[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+impl TryFrom<Subject> for ServiceDirectory {
+    type Error = TryFromSubjectError;
+
+    fn try_from(value: Subject) -> Result<Self, Self::Error> {
+        match value {
+            Subject::ServiceDirectory(s) => Ok(s),
+            _ => Err(TryFromSubjectError),
+        }
+    }
+}
+
+#[derive(
+    Default,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(try_from = "Subject")]
+#[serde(into = "Subject")]
 pub struct BoundObject {
     service: Service,
     object: Object,
@@ -242,6 +304,28 @@ impl SubjectExt for BoundObject {
         self.action.into()
     }
 }
+
+impl TryFrom<Subject> for BoundObject {
+    type Error = TryFromSubjectError;
+
+    fn try_from(value: Subject) -> Result<Self, Self::Error> {
+        match value {
+            Subject::BoundObject(b) => Ok(b),
+            _ => Err(TryFromSubjectError),
+        }
+    }
+}
+
+#[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub struct TryFromSubjectError;
+
+impl std::fmt::Display for TryFromSubjectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("conversion error between subject types")
+    }
+}
+
+impl std::error::Error for TryFromSubjectError {}
 
 #[cfg(test)]
 mod tests {
