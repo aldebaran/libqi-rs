@@ -4,7 +4,6 @@ pub mod message;
 pub use message::Message;
 mod ser;
 pub use ser::{to_bytes, to_writer, Serializer};
-pub mod utils;
 pub mod value;
 
 #[derive(thiserror::Error, Debug)]
