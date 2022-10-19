@@ -1,5 +1,3 @@
-use serde::forward_to_deserialize_any;
-
 use super::{message::MagicCookie, Error, Message, Result};
 
 pub fn from_reader<'de, R, T>(reader: R) -> Result<T>
@@ -22,7 +20,7 @@ pub fn from_message<'msg, T>(msg: &'msg Message) -> Result<T>
 where
     T: serde::de::Deserialize<'msg>,
 {
-    from_reader(msg.payload.as_slice())
+    from_bytes(msg.payload.as_slice())
 }
 
 #[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
@@ -650,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    fn test_message_from_bytes_then_from_message() {
+    fn test_message_from_bytes_then_string_from_message() {
         let input = &[
             0x42, 0xde, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
@@ -659,10 +657,7 @@ mod tests {
             0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
         let msg = from_bytes::<Message>(input).unwrap();
-        use crate::proto::{
-            message::{subject::*, *},
-            Value,
-        };
+        use crate::proto::message::{subject::*, *};
         assert_eq!(
             msg,
             Message {
@@ -681,8 +676,6 @@ mod tests {
         );
         let s = from_message::<String>(&msg).unwrap();
         assert_eq!(s, "s");
-        let value = from_message::<Value>(&msg).unwrap();
-        assert_eq!(value, Value::String("The robot is not localized".into()));
     }
 
     #[test]

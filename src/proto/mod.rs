@@ -1,14 +1,11 @@
 mod de;
 use std::str::Utf8Error;
 
-pub use de::{from_bytes, from_reader, Deserializer};
-pub(crate) mod message;
-pub(crate) use message::Message;
+pub use de::{from_bytes, from_message, from_reader, Deserializer};
+pub mod message;
+pub use message::Message;
 mod ser;
-pub use ser::{to_bytes, to_writer, Serializer};
-// TODO: move value outside of proto ?
-pub mod value;
-pub use value::{from_value, to_value, Value};
+pub use ser::{to_bytes, to_message, to_writer, Serializer};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -43,7 +40,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use std::collections::BTreeMap;
@@ -66,8 +63,8 @@ mod tests {
     pub struct Serializable(S0);
 
     impl Serializable {
-        pub fn sample_and_value() -> (Self, Value) {
-            let s = Serializable(S0 {
+        pub fn sample() -> Self {
+            Self(S0 {
                 t: (-8, 8, -16, 16, -32, 32, -64, 64, 32.32, 64.64),
                 r: vec![51, 52, 53, 54],
                 o: Some(false),
@@ -79,81 +76,13 @@ mod tests {
                     m.insert(2, "world".to_string());
                     m
                 },
-            });
-            let t = Value::Tuple(value::Tuple {
-                name: None,
-                fields: value::tuple::Fields::Unnamed(vec![
-                    Value::Int8(-8),
-                    Value::UInt8(8),
-                    Value::Int16(-16),
-                    Value::UInt16(16),
-                    Value::Int32(-32),
-                    Value::UInt32(32),
-                    Value::Int64(-64),
-                    Value::UInt64(64),
-                    Value::Float(32.32),
-                    Value::Double(64.64),
-                ]),
-            });
-            let r = Value::Raw(vec![51, 52, 53, 54]);
-            let o = Value::Optional(Some(Box::new(Value::Bool(false))));
-            let s1 = Value::Tuple(value::Tuple {
-                name: Some("S1".to_string()),
-                fields: value::tuple::Fields::Unnamed(vec![
-                    Value::String("bananas".to_string()),
-                    Value::String("oranges".to_string()),
-                ]),
-            });
-            let l = Value::List(vec![
-                Value::String("cookies".to_string()),
-                Value::String("muffins".to_string()),
-            ]);
-            let m = Value::Map(vec![
-                (Value::Int32(1), Value::String("hello".to_string())),
-                (Value::Int32(2), Value::String("world".to_string())),
-            ]);
-            let s0: Value = value::Tuple {
-                name: Some("S0".to_string()),
-                fields: vec![
-                    value::tuple::NamedField {
-                        name: "t".to_string(),
-                        value: t,
-                    },
-                    value::tuple::NamedField {
-                        name: "r".to_string(),
-                        value: r,
-                    },
-                    value::tuple::NamedField {
-                        name: "o".to_string(),
-                        value: o,
-                    },
-                    value::tuple::NamedField {
-                        name: "s".to_string(),
-                        value: s1,
-                    },
-                    value::tuple::NamedField {
-                        name: "l".to_string(),
-                        value: l,
-                    },
-                    value::tuple::NamedField {
-                        name: "m".to_string(),
-                        value: m,
-                    },
-                ]
-                .into(),
-            }
-            .into();
-            let v = Value::Tuple(value::Tuple {
-                name: Some("Serializable".to_string()),
-                fields: vec![s0].into(),
-            });
-            (s, v)
+            })
         }
     }
 
     #[test]
     fn test_to_from_bytes_invariant() {
-        let (sample, _) = Serializable::sample_and_value();
+        let sample = Serializable::sample();
         let bytes = to_bytes(&sample).unwrap();
         let sample2: Serializable = from_bytes(&bytes).unwrap();
         assert_eq!(sample, sample2);

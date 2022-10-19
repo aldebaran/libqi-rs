@@ -1,6 +1,8 @@
 // TODO: #![warn(missing_docs)]
 
 pub mod proto;
+pub mod value;
+pub use value::Value;
 
 use futures::prelude::*;
 use proto::message::{self, Message};
@@ -53,10 +55,95 @@ pub mod server {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_test::test;
     use pretty_assertions::assert_eq;
 
+    pub fn sample_serializable_and_value() -> (proto::tests::Serializable, Value) {
+        let s = proto::tests::Serializable::sample();
+        let t = Value::Tuple(value::Tuple {
+            name: None,
+            fields: value::tuple::Fields::Unnamed(vec![
+                Value::Int8(-8),
+                Value::UInt8(8),
+                Value::Int16(-16),
+                Value::UInt16(16),
+                Value::Int32(-32),
+                Value::UInt32(32),
+                Value::Int64(-64),
+                Value::UInt64(64),
+                Value::Float(32.32),
+                Value::Double(64.64),
+            ]),
+        });
+        let r = Value::Raw(vec![51, 52, 53, 54]);
+        let o = Value::Optional(Some(Box::new(Value::Bool(false))));
+        let s1 = Value::Tuple(value::Tuple {
+            name: Some("S1".to_string()),
+            fields: value::tuple::Fields::Unnamed(vec![
+                Value::String("bananas".to_string()),
+                Value::String("oranges".to_string()),
+            ]),
+        });
+        let l = Value::List(vec![
+            Value::String("cookies".to_string()),
+            Value::String("muffins".to_string()),
+        ]);
+        let m = Value::Map(vec![
+            (Value::Int32(1), Value::String("hello".to_string())),
+            (Value::Int32(2), Value::String("world".to_string())),
+        ]);
+        let s0: Value = value::Tuple {
+            name: Some("S0".to_string()),
+            fields: vec![
+                value::tuple::NamedField {
+                    name: "t".to_string(),
+                    value: t,
+                },
+                value::tuple::NamedField {
+                    name: "r".to_string(),
+                    value: r,
+                },
+                value::tuple::NamedField {
+                    name: "o".to_string(),
+                    value: o,
+                },
+                value::tuple::NamedField {
+                    name: "s".to_string(),
+                    value: s1,
+                },
+                value::tuple::NamedField {
+                    name: "l".to_string(),
+                    value: l,
+                },
+                value::tuple::NamedField {
+                    name: "m".to_string(),
+                    value: m,
+                },
+            ]
+            .into(),
+        }
+        .into();
+        let v = Value::Tuple(value::Tuple {
+            name: Some("Serializable".to_string()),
+            fields: vec![s0].into(),
+        });
+        (s, v)
+    }
+
     #[test]
+    fn value_to_message() {
+        let input = vec![
+            0x42, 0xde, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
+            0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72,
+            0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
+            0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
+        ];
+        let message: Message = proto::from_reader(input.as_slice()).unwrap();
+        let value: Value = proto::from_message(&message).unwrap();
+        assert_eq!(value, Value::from("The robot is not localized"));
+    }
+
+    #[futures_test::test]
     async fn to_message_stream() {
         todo!()
         //let mut buf = Vec::new();
@@ -70,7 +157,7 @@ mod tests {
         //assert_eq!(stream_messages, messages);
     }
 
-    #[test]
+    #[futures_test::test]
     async fn to_message_sink() {
         todo!()
         //let mut buf = Vec::new();

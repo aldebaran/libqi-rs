@@ -52,6 +52,17 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn as_string(&self) -> Option<&String> {
+        match self {
+            Value::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        self.as_string().map(|s| s.as_str())
+    }
+
     pub fn as_tuple(&self) -> Option<&Tuple> {
         if let Self::Tuple(tuple) = self {
             Some(tuple)
@@ -69,11 +80,32 @@ impl Value {
     }
 }
 
-impl std::str::FromStr for Value {
-    type Err = std::convert::Infallible;
+impl From<String> for Value {
+    fn from(s: String) -> Self {
+        Value::String(s)
+    }
+}
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(Value::String(s.to_string()))
+impl TryFrom<Value> for String {
+    type Error = TryFromValueError;
+    fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
+        match value {
+            Value::String(s) => Ok(s),
+            _ => Err(TryFromValueError),
+        }
+    }
+}
+
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Value::String(s.to_string())
+    }
+}
+
+impl<'v> TryFrom<&'v Value> for &'v str {
+    type Error = TryFromValueError;
+    fn try_from(value: &'v Value) -> std::result::Result<Self, Self::Error> {
+        value.as_str().ok_or(TryFromValueError)
     }
 }
 
@@ -160,9 +192,14 @@ mod tests {
 
     #[test]
     fn test_value_from_string() {
-        use std::str::FromStr;
-        let value = Value::from_str("cookies recipe").unwrap();
-        assert_eq!(value, Value::String("cookies recipe".to_string()));
+        assert_eq!(
+            Value::from("cookies recipe"),
+            Value::String("cookies recipe".to_string())
+        );
+        assert_eq!(
+            Value::from("muffins recipe".to_string()),
+            Value::String("muffins recipe".to_string())
+        );
     }
 
     #[test]
@@ -185,21 +222,21 @@ mod tests {
 
     #[test]
     fn test_to_value() {
-        let (s, expected) = Serializable::sample_and_value();
+        let (s, expected) = crate::tests::sample_serializable_and_value();
         let value = to_value(&s).expect("serialization error");
         assert_eq!(value, expected);
     }
 
     #[test]
     fn test_from_value() {
-        let (expected, v) = Serializable::sample_and_value();
+        let (expected, v) = crate::tests::sample_serializable_and_value();
         let s: Serializable = from_value(v).expect("deserialization error");
         assert_eq!(s, expected);
     }
 
     #[test]
     fn test_to_from_value_invariant() -> Result<()> {
-        let (s, _) = Serializable::sample_and_value();
+        let (s, _) = crate::tests::sample_serializable_and_value();
         let s2: Serializable = from_value(to_value(&s)?)?;
         assert_eq!(s, s2);
         Ok(())
