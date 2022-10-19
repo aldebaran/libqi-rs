@@ -136,6 +136,8 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::collections::BTreeMap;
 
+    // TODO: move the following in the proto module.
+
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     struct S0 {
         t: (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64),

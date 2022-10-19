@@ -199,6 +199,51 @@ impl<'de> serde::Deserialize<'de> for Message {
     }
 }
 
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub(crate) struct MagicCookie;
+
+impl MagicCookie {
+    pub const VALUE: u32 = 0x42adde42;
+}
+
+impl serde::de::Expected for MagicCookie {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self, f)
+    }
+}
+
+impl std::fmt::Display for MagicCookie {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#x}", Self::VALUE)
+    }
+}
+
+impl serde::Serialize for MagicCookie {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Self::VALUE.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MagicCookie {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = u32::deserialize(deserializer)?;
+        if value != Self::VALUE {
+            use serde::de;
+            return Err(<D::Error as de::Error>::invalid_value(
+                de::Unexpected::Unsigned(value.into()),
+                &MagicCookie,
+            ));
+        }
+        Ok(MagicCookie)
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;

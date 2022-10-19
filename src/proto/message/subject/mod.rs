@@ -45,8 +45,7 @@ impl Subject {
                 Ok(ServiceDirectory { action }.into())
             }
             (service, object) => {
-                let action = action_id.into();
-                Ok(BoundObject::from_values_unchecked(service, object, action).into())
+                Ok(BoundObject::from_values_unchecked(service, object, action_id).into())
             }
         }
     }
@@ -271,11 +270,13 @@ pub struct BoundObject {
 }
 
 impl BoundObject {
-    pub(crate) fn from_values_unchecked(
-        service: Service,
-        object: Object,
-        action: action::BoundObject,
-    ) -> Self {
+    pub(crate) fn from_values_unchecked<S, O, A>(service: S, object: O, action: A) -> Self
+    where
+        S: Into<Service>,
+        O: Into<Object>,
+        A: Into<action::BoundObject>,
+    {
+        let (service, object, action) = (service.into(), object.into(), action.into());
         debug_assert!(
             object != Object::None
                 && !(service == Service::ServiceDirectory && object == Object::ServiceMain),

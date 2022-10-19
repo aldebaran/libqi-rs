@@ -1,4 +1,4 @@
-use super::{Error, MagicCookie, Message, Result};
+use super::{message::MagicCookie, Error, Message, Result};
 
 pub fn to_writer<W, T>(writer: W, value: &T) -> Result<()>
 where
@@ -17,6 +17,13 @@ where
     Ok(buf)
 }
 
+pub fn to_message<T>(msg: &mut Message, value: &T) -> Result<()>
+where
+    T: ?Sized + serde::Serialize,
+{
+    to_writer(&mut msg.payload, value)
+}
+
 #[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Serializer<W> {
     writer: W,
@@ -30,11 +37,18 @@ where
         Self { writer }
     }
 
-    pub fn write_u32(&mut self, v: u32) -> std::io::Result<()> {
+    fn write_u32(&mut self, v: u32) -> std::io::Result<()> {
         self.writer.write_all(&v.to_le_bytes())
     }
 
-    pub fn serialize<T>(&mut self, value: &T) -> Result<()>
+    fn write_size(&mut self, size: usize) -> Result<()> {
+        // Sizes are always serialized as u32 in libqi.
+        let size = size.try_into().map_err(|e| Error::BadSize(e))?;
+        self.write_u32(size)?;
+        Ok(())
+    }
+
+    fn serialize<T>(&mut self, value: &T) -> Result<()>
     where
         T: ?Sized + serde::Serialize,
     {
@@ -185,8 +199,7 @@ where
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
         let size = len.ok_or(Error::UnknownListSize)?;
-        let size = size.try_into().map_err(|e| Error::BadSize(size, e))?;
-        self.write_u32(size)?;
+        self.write_size(size)?;
         Ok(self)
     }
 
@@ -638,11 +651,78 @@ where
     }
 }
 
-impl serde::Serialize for MagicCookie {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        Self::VALUE.serialize(serializer)
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn test_message_to_bytes() {
+        use crate::proto::message::*;
+        let msg = Message {
+            id: 329,
+            version: 12,
+            kind: Kind::Capability,
+            flags: Flags::RETURN_TYPE,
+            subject: subject::ServiceDirectory {
+                action: action::ServiceDirectory::ServiceReady,
+            }
+            .into(),
+            payload: vec![0x17, 0x2b, 0xe6, 0x01, 0x5f],
+        };
+        let buf = to_bytes(&msg).unwrap();
+        assert_eq!(
+            buf,
+            vec![
+                0x42, 0xde, 0xad, 0x42, // cookie
+                0x49, 0x01, 0x00, 0x00, // id
+                0x05, 0x00, 0x00, 0x00, // size
+                0x0c, 0x00, 0x06, 0x02, // version, type, flags
+                0x01, 0x00, 0x00, 0x00, // service
+                0x01, 0x00, 0x00, 0x00, // object
+                0x68, 0x00, 0x00, 0x00, // action
+                0x17, 0x2b, 0xe6, 0x01, 0x5f, // payload
+            ]
+        );
+    }
+
+    #[test]
+    fn test_subject_to_bytes() {
+        use crate::proto::message::subject::*;
+        let subject =
+            BoundObject::from_values_unchecked(service::Id(23), object::Id(923), action::Id(392));
+        let buf = to_bytes(&subject).unwrap();
+        assert_eq!(
+            buf,
+            vec![
+                0x17, 0x00, 0x00, 0x00, // service
+                0x9b, 0x03, 0x00, 0x00, // object
+                0x88, 0x01, 0x00, 0x00, // action
+            ]
+        );
+    }
+
+    #[test]
+    fn test_string_to_message() {
+        let mut msg = Message::new();
+        let data = "sample data";
+
+        to_message(&mut msg, data).unwrap();
+        assert_eq!(
+            msg.payload,
+            vec![
+                0x0b, 0x00, 0x00, 0x00, // size
+                0x73, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x20, 0x64, 0x61, 0x74, 0x61, 0x0a
+            ]
+        );
+    }
+
+    #[test]
+    fn test_option_i32_to_bytes() {
+        assert_eq!(
+            to_bytes(&Some(42)).unwrap(),
+            vec![0x01, 0x2a, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(to_bytes(&Option::<i32>::None).unwrap(), vec![0x00]);
     }
 }
