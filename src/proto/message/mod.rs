@@ -24,13 +24,21 @@ pub struct Message {
 
 impl Message {
     pub const CURRENT_VERSION: u16 = 0;
-    pub(crate) const TOKEN: &'static str = "qi.Message";
-    pub(crate) const ID_TOKEN: &'static str = "id";
-    pub(crate) const VERSION_TOKEN: &'static str = "version";
-    pub(crate) const KIND_TOKEN: &'static str = "type";
-    pub(crate) const FLAGS_TOKEN: &'static str = "flags";
-    pub(crate) const SUBJECT_TOKEN: &'static str = "subject";
-    pub(crate) const PAYLOAD_TOKEN: &'static str = "payload";
+    pub const TOKEN: &'static str = "qi.Message";
+    pub const ID_TOKEN: &'static str = "id";
+    pub const VERSION_TOKEN: &'static str = "version";
+    pub const KIND_TOKEN: &'static str = "type";
+    pub const FLAGS_TOKEN: &'static str = "flags";
+    pub const SUBJECT_TOKEN: &'static str = "subject";
+    pub const PAYLOAD_TOKEN: &'static str = "payload";
+    pub const FIELDS: &[&'static str; 6] = &[
+        Message::ID_TOKEN,
+        Message::VERSION_TOKEN,
+        Message::KIND_TOKEN,
+        Message::FLAGS_TOKEN,
+        Message::SUBJECT_TOKEN,
+        Message::PAYLOAD_TOKEN,
+    ];
 
     pub fn new() -> Self {
         Self {
@@ -72,14 +80,6 @@ impl<'de> serde::Deserialize<'de> for Message {
     where
         D: serde::Deserializer<'de>,
     {
-        const FIELDS: &[&'static str; 6] = &[
-            Message::ID_TOKEN,
-            Message::VERSION_TOKEN,
-            Message::KIND_TOKEN,
-            Message::FLAGS_TOKEN,
-            Message::SUBJECT_TOKEN,
-            Message::PAYLOAD_TOKEN,
-        ];
         enum Field {
             Id,
             Version,
@@ -99,7 +99,7 @@ impl<'de> serde::Deserialize<'de> for Message {
                     type Value = Field;
 
                     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                        write!(formatter, "any of {}", FIELDS.join(" "))
+                        write!(formatter, "any of {}", Message::FIELDS.join(" "))
                     }
 
                     fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -113,7 +113,7 @@ impl<'de> serde::Deserialize<'de> for Message {
                             Message::FLAGS_TOKEN => Ok(Field::Flags),
                             Message::SUBJECT_TOKEN => Ok(Field::Subject),
                             Message::PAYLOAD_TOKEN => Ok(Field::Payload),
-                            _ => Err(de::Error::unknown_field(value, FIELDS)),
+                            _ => Err(de::Error::unknown_field(value, Message::FIELDS)),
                         }
                     }
                 }
@@ -195,12 +195,12 @@ impl<'de> serde::Deserialize<'de> for Message {
             }
         }
 
-        deserializer.deserialize_struct(Self::TOKEN, FIELDS, Visitor)
+        deserializer.deserialize_struct(Self::TOKEN, Self::FIELDS, Visitor)
     }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub(crate) struct MagicCookie;
+pub struct MagicCookie;
 
 impl MagicCookie {
     pub const VALUE: u32 = 0x42adde42;

@@ -1,4 +1,6 @@
-use super::{Error, Message, Result};
+use serde::forward_to_deserialize_any;
+
+use super::{message::MagicCookie, Error, Message, Result};
 
 pub fn from_reader<'de, R, T>(reader: R) -> Result<T>
 where
@@ -264,14 +266,20 @@ where
 
     fn deserialize_struct<V>(
         self,
-        _name: &'static str,
+        name: &'static str,
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,
     {
-        self.read_seq(fields.len(), visitor, false)
+        match name {
+            Message::TOKEN => {
+                debug_assert!(fields == Message::FIELDS);
+                visitor.visit_map(MessageStructDeserializer::from_reader(self.reader.by_ref()))
+            }
+            _ => self.read_seq(fields.len(), visitor, false),
+        }
     }
 
     fn deserialize_enum<V>(
@@ -312,11 +320,10 @@ where
     where
         V: serde::de::DeserializeSeed<'de>,
     {
-        use serde::de::{value::U32Deserializer, IntoDeserializer};
+        use serde::de::IntoDeserializer;
         let variant_index = read_u32(&mut self.reader)?;
-        let variant_deserializer: U32Deserializer<Error> = variant_index.into_deserializer();
-        let variant = seed.deserialize(variant_deserializer)?;
-        Ok((variant, self))
+        let variant: Result<_> = seed.deserialize(variant_index.into_deserializer());
+        Ok((variant?, self))
     }
 }
 
@@ -416,6 +423,106 @@ where
     }
 }
 
+struct MessageStructDeserializer<R> {
+    reader: R,
+    fields_iter: std::slice::Iter<'static, &'static str>,
+    current_field: Option<&'static str>,
+    payload_size: Option<usize>,
+}
+
+impl<R> MessageStructDeserializer<R>
+where
+    R: std::io::Read,
+{
+    fn from_reader(reader: R) -> Self {
+        Self {
+            reader,
+            fields_iter: Message::FIELDS.into_iter(),
+            current_field: None,
+            payload_size: None,
+        }
+    }
+}
+
+impl<'de, R> serde::de::MapAccess<'de> for MessageStructDeserializer<R>
+where
+    R: std::io::Read,
+{
+    type Error = Error;
+
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+    where
+        K: serde::de::DeserializeSeed<'de>,
+    {
+        match self.fields_iter.next() {
+            Some(&field) => {
+                use serde::de::IntoDeserializer;
+                self.current_field = Some(field);
+                let key: Result<_> = seed.deserialize(field.into_deserializer());
+                Ok(Some(key?))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
+    where
+        V: serde::de::DeserializeSeed<'de>,
+    {
+        use serde::de::{Deserialize, IntoDeserializer};
+        let mut deserializer = Deserializer::from_reader(self.reader.by_ref());
+        match self.current_field {
+            None => unreachable!(),
+            Some(field) => match field {
+                Message::ID_TOKEN => {
+                    // Before the ID comes the MagicCookie
+                    MagicCookie::deserialize(&mut deserializer)?;
+                    let id = read_u32(&mut self.reader)?;
+                    let id: Result<_> = seed.deserialize(id.into_deserializer());
+                    Ok(id?)
+                }
+                Message::VERSION_TOKEN => {
+                    // Before the version comes the payload size
+                    self.payload_size.replace(read_size(&mut self.reader)?);
+                    let version = read_u16(&mut self.reader)?;
+                    let version: Result<_> = seed.deserialize(version.into_deserializer());
+                    Ok(version?)
+                }
+                Message::KIND_TOKEN => {
+                    let kind = read_byte(&mut self.reader)?;
+                    let kind: Result<_> = seed.deserialize(kind.into_deserializer());
+                    Ok(kind?)
+                }
+                Message::FLAGS_TOKEN => {
+                    let flags = read_byte(&mut self.reader)?;
+                    let flags: Result<_> = seed.deserialize(flags.into_deserializer());
+                    Ok(flags?)
+                }
+                Message::SUBJECT_TOKEN => {
+                    let service = read_u32(&mut self.reader)?;
+                    let object = read_u32(&mut self.reader)?;
+                    let action = read_u32(&mut self.reader)?;
+                    let deser = serde::de::value::SeqDeserializer::new(
+                        [service, object, action].into_iter(),
+                    );
+                    let subject: Result<_> = seed.deserialize(deser);
+                    Ok(subject?)
+                }
+                Message::PAYLOAD_TOKEN => {
+                    let size = self
+                        .payload_size
+                        .ok_or_else(|| Error::MissingMessageField("payload_size"))?;
+                    let mut payload = vec![0; size];
+                    self.reader.read_exact(&mut payload)?;
+                    let payload: Result<_> = seed.deserialize(payload.into_deserializer());
+                    Ok(payload?)
+                }
+                _ => unreachable!(),
+            },
+        }
+    }
+}
+
 impl serde::de::Error for super::Error {
     fn custom<T>(msg: T) -> Self
     where
@@ -459,6 +566,14 @@ where
     Ok(u32::from_le_bytes(bytes))
 }
 
+fn read_u16<R>(reader: &mut R) -> std::io::Result<u16>
+where
+    R: std::io::Read,
+{
+    let bytes = read_bytes(reader)?;
+    Ok(u16::from_le_bytes(bytes))
+}
+
 fn read_size<R>(reader: &mut R) -> Result<usize>
 where
     R: std::io::Read,
@@ -492,6 +607,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -512,7 +628,7 @@ mod tests {
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
         ];
-        let msg = from_bytes::<Message>(input).unwrap();
+        let msg: Message = from_bytes(input).unwrap();
         use crate::proto::message::{subject::*, *};
         assert_eq!(
             msg,
@@ -563,10 +679,41 @@ mod tests {
                 ],
             }
         );
-        let s = from_message::<&str>(&msg).unwrap();
+        let s = from_message::<String>(&msg).unwrap();
         assert_eq!(s, "s");
         let value = from_message::<Value>(&msg).unwrap();
         assert_eq!(value, Value::String("The robot is not localized".into()));
+    }
+
+    #[test]
+    fn test_message_from_bytes_bad_cookie() {
+        let input = &[
+            0x42, 0xdf, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
+            0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72,
+            0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
+            0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
+        ];
+        let msg: Result<Message> = from_bytes(input);
+        assert_matches!(msg, Err(Error::Custom(err)) => {
+            assert!(err.starts_with("invalid value"), "error does not start with \"invalid value\": \"{}\"", err);
+            assert!(err.ends_with("0x42adde42"), "error does not end with magic cookie value: \"{}\"", err);
+        });
+    }
+
+    #[test]
+    fn test_message_from_bytes_bad_size() {
+        let input = &[
+            0x42, 0xde, 0xad, 0x42, // cookie,
+            0x84, 0x1c, 0x0f, 0x00, // id
+            0x23, 0x00, 0x00, 0x00, // size
+            0x00, 0x00, 0x03, 0x00, // version, type, flags
+            0x2f, 0x00, 0x00, 0x00, // service
+            0x01, 0x00, 0x00, 0x00, // object
+            0xb2, 0x00, 0x00, // action, 1 byte short
+        ];
+        let msg: Result<Message> = from_bytes(input);
+        assert_matches!(msg, Err(Error::Io(_)));
     }
 
     #[test]
