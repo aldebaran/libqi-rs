@@ -358,6 +358,7 @@ impl serde::Serialize for Value {
     where
         S: serde::Serializer,
     {
+        // TODO: Serialize as an enumeration.
         match self {
             Value::Void => serializer.serialize_unit(),
             Value::Bool(b) => b.serialize(serializer),

@@ -1,8 +1,7 @@
 mod de;
 mod ser;
-mod tuple;
-
-use tuple::Tuple;
+pub mod tuple;
+pub use tuple::Tuple;
 
 //pub enum Type {
 //    Void,
@@ -78,6 +77,25 @@ impl std::str::FromStr for Value {
     }
 }
 
+// TODO: Implement all conversions
+
+impl From<Tuple> for Value {
+    fn from(t: Tuple) -> Self {
+        Value::Tuple(t)
+    }
+}
+
+impl TryFrom<Value> for Tuple {
+    type Error = TryFromValueError;
+
+    fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
+        match value {
+            Value::Tuple(t) => Ok(t),
+            _ => Err(TryFromValueError),
+        }
+    }
+}
+
 impl<'de> serde::de::IntoDeserializer<'de, Error> for Value {
     type Deserializer = Self;
 
@@ -130,115 +148,15 @@ impl serde::de::Error for Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[error("value conversion failed")]
+pub struct TryFromValueError;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::tests::Serializable;
     use pretty_assertions::assert_eq;
-    use std::collections::BTreeMap;
-
-    // TODO: move the following in the proto module.
-
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-    struct S0 {
-        t: (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64),
-        #[serde(with = "serde_bytes")]
-        r: Vec<u8>,
-        o: Option<bool>,
-        s: S1,
-        l: Vec<String>,
-        m: BTreeMap<i32, String>,
-    }
-
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-    struct S1(String, String);
-
-    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-    struct S(S0);
-
-    impl S {
-        fn sample() -> (Self, Value) {
-            let s = S(S0 {
-                t: (-8, 8, -16, 16, -32, 32, -64, 64, 32.32, 64.64),
-                r: vec![51, 52, 53, 54],
-                o: Some(false),
-                s: S1("bananas".to_string(), "oranges".to_string()),
-                l: vec!["cookies".to_string(), "muffins".to_string()],
-                m: {
-                    let mut m = BTreeMap::new();
-                    m.insert(1, "hello".to_string());
-                    m.insert(2, "world".to_string());
-                    m
-                },
-            });
-            let t = Value::Tuple(Tuple {
-                name: None,
-                fields: tuple::Fields::Unnamed(vec![
-                    Value::Int8(-8),
-                    Value::UInt8(8),
-                    Value::Int16(-16),
-                    Value::UInt16(16),
-                    Value::Int32(-32),
-                    Value::UInt32(32),
-                    Value::Int64(-64),
-                    Value::UInt64(64),
-                    Value::Float(32.32),
-                    Value::Double(64.64),
-                ]),
-            });
-            let r = Value::Raw(vec![51, 52, 53, 54]);
-            let o = Value::Optional(Some(Box::new(Value::Bool(false))));
-            let s1 = Value::Tuple(Tuple {
-                name: Some("S1".to_string()),
-                fields: tuple::Fields::Unnamed(vec![
-                    Value::String("bananas".to_string()),
-                    Value::String("oranges".to_string()),
-                ]),
-            });
-            let l = Value::List(vec![
-                Value::String("cookies".to_string()),
-                Value::String("muffins".to_string()),
-            ]);
-            let m = Value::Map(vec![
-                (Value::Int32(1), Value::String("hello".to_string())),
-                (Value::Int32(2), Value::String("world".to_string())),
-            ]);
-            let s0 = Value::Tuple(Tuple {
-                name: Some("S0".to_string()),
-                fields: vec![
-                    tuple::NamedField {
-                        name: "t".to_string(),
-                        value: t,
-                    },
-                    tuple::NamedField {
-                        name: "r".to_string(),
-                        value: r,
-                    },
-                    tuple::NamedField {
-                        name: "o".to_string(),
-                        value: o,
-                    },
-                    tuple::NamedField {
-                        name: "s".to_string(),
-                        value: s1,
-                    },
-                    tuple::NamedField {
-                        name: "l".to_string(),
-                        value: l,
-                    },
-                    tuple::NamedField {
-                        name: "m".to_string(),
-                        value: m,
-                    },
-                ]
-                .into(),
-            });
-            let v = Value::Tuple(Tuple {
-                name: Some("S".to_string()),
-                fields: vec![s0].into(),
-            });
-            (s, v)
-        }
-    }
 
     #[test]
     fn test_value_from_string() {
@@ -267,22 +185,22 @@ mod tests {
 
     #[test]
     fn test_to_value() {
-        let (s, expected) = S::sample();
+        let (s, expected) = Serializable::sample_and_value();
         let value = to_value(&s).expect("serialization error");
         assert_eq!(value, expected);
     }
 
     #[test]
     fn test_from_value() {
-        let (expected, v) = S::sample();
-        let s: S = from_value(v).expect("deserialization error");
+        let (expected, v) = Serializable::sample_and_value();
+        let s: Serializable = from_value(v).expect("deserialization error");
         assert_eq!(s, expected);
     }
 
     #[test]
     fn test_to_from_value_invariant() -> Result<()> {
-        let (s, _) = S::sample();
-        let s2: S = from_value(to_value(&s)?)?;
+        let (s, _) = Serializable::sample_and_value();
+        let s2: Serializable = from_value(to_value(&s)?)?;
         assert_eq!(s, s2);
         Ok(())
     }

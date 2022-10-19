@@ -120,11 +120,13 @@ where
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok> {
-        self.serialize_u32(v as u32)
+        self.writer.write_all(&v.to_le_bytes())?;
+        Ok(())
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok> {
-        self.serialize_u64(v as u64)
+        self.writer.write_all(&v.to_le_bytes())?;
+        Ok(())
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok> {
@@ -712,7 +714,8 @@ mod tests {
             msg.payload,
             vec![
                 0x0b, 0x00, 0x00, 0x00, // size
-                0x73, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x20, 0x64, 0x61, 0x74, 0x61, 0x0a
+                0x73, 0x61, 0x6d, 0x70, 0x6c, 0x65, // 'sample'
+                0x20, 0x64, 0x61, 0x74, 0x61, // ' data'
             ]
         );
     }

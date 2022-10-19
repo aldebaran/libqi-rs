@@ -245,7 +245,7 @@ impl<'de> serde::Deserialize<'de> for MagicCookie {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
     use serde_test::{assert_tokens, Token};
 
