@@ -4,24 +4,11 @@ use serde::{
     forward_to_deserialize_any,
 };
 
-fn deserialize_tuple<'de, V>(
-    value: Value,
-    name: Option<&str>,
-    visitor: V,
-) -> Result<V::Value, Error>
+pub fn from_value<T>(value: Value) -> Result<T, Error>
 where
-    V: serde::de::Visitor<'de>,
+    T: serde::de::DeserializeOwned,
 {
-    use serde::de::Deserializer;
-    match value {
-        Value::Tuple(tuple) if tuple.name.as_deref() == name => match tuple.fields {
-            tuple::Fields::Unnamed(fields) => visitor.visit_seq(fields.into_deserializer()),
-            tuple::Fields::Named(fields) => visitor.visit_map(MapDeserializer::new(
-                fields.into_iter().map(|nf| (nf.name, nf.value)),
-            )),
-        },
-        _ => value.deserialize_any(visitor),
-    }
+    T::deserialize(value)
 }
 
 impl<'de> serde::Deserializer<'de> for Value {
@@ -266,5 +253,39 @@ impl<'de> serde::Deserialize<'de> for Value {
             }
         }
         deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
+impl<'de> serde::de::IntoDeserializer<'de, Error> for Value {
+    type Deserializer = Self;
+
+    fn into_deserializer(self) -> Self::Deserializer {
+        self
+    }
+}
+
+impl serde::de::Error for Error {
+    fn custom<T: std::fmt::Display>(msg: T) -> Self {
+        Self::Custom(msg.to_string())
+    }
+}
+
+fn deserialize_tuple<'de, V>(
+    value: Value,
+    name: Option<&str>,
+    visitor: V,
+) -> Result<V::Value, Error>
+where
+    V: serde::de::Visitor<'de>,
+{
+    use serde::de::Deserializer;
+    match value {
+        Value::Tuple(tuple) if tuple.name.as_deref() == name => match tuple.fields {
+            tuple::Fields::Unnamed(fields) => visitor.visit_seq(fields.into_deserializer()),
+            tuple::Fields::Named(fields) => visitor.visit_map(MapDeserializer::new(
+                fields.into_iter().map(|nf| (nf.name, nf.value)),
+            )),
+        },
+        _ => value.deserialize_any(visitor),
     }
 }

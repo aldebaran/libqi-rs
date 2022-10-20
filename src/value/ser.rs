@@ -1,4 +1,11 @@
-use super::{to_value, tuple, Error, Tuple, Value};
+use super::{tuple, Error, Tuple, Value};
+
+pub fn to_value<T>(value: &T) -> Result<Value, Error>
+where
+    T: serde::Serialize + ?Sized,
+{
+    value.serialize(Serializer)
+}
 
 pub struct Serializer;
 
@@ -353,6 +360,12 @@ impl serde::ser::SerializeStruct for TupleSerializer<tuple::NamedField> {
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(self.into_value())
+    }
+}
+
+impl serde::ser::Error for Error {
+    fn custom<T: std::fmt::Display>(msg: T) -> Self {
+        Self::Custom(msg.to_string())
     }
 }
 

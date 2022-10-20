@@ -1,5 +1,7 @@
 mod de;
+pub use de::from_value;
 mod ser;
+pub use ser::to_value;
 pub mod tuple;
 pub use tuple::Tuple;
 
@@ -129,28 +131,6 @@ impl TryFrom<Value> for Tuple {
     }
 }
 
-impl<'de> serde::de::IntoDeserializer<'de, Error> for Value {
-    type Deserializer = Self;
-
-    fn into_deserializer(self) -> Self::Deserializer {
-        self
-    }
-}
-
-pub fn to_value<T>(value: &T) -> Result<Value, Error>
-where
-    T: serde::Serialize + ?Sized,
-{
-    value.serialize(ser::Serializer)
-}
-
-pub fn from_value<T>(value: Value) -> Result<T, Error>
-where
-    T: serde::de::DeserializeOwned,
-{
-    T::deserialize(value)
-}
-
 #[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Error {
@@ -162,18 +142,6 @@ pub enum Error {
 
     #[error("error: {0}")]
     Custom(String),
-}
-
-impl serde::ser::Error for Error {
-    fn custom<T: std::fmt::Display>(msg: T) -> Self {
-        Self::Custom(msg.to_string())
-    }
-}
-
-impl serde::de::Error for Error {
-    fn custom<T: std::fmt::Display>(msg: T) -> Self {
-        Self::Custom(msg.to_string())
-    }
 }
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
