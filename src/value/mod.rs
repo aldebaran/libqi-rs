@@ -49,6 +49,7 @@ pub enum Value {
     Tuple(Tuple),
     Raw(Vec<u8>),
     Optional(Option<Box<Value>>),
+    // TODO: Handle enumerations
 }
 
 impl Value {
@@ -88,7 +89,7 @@ impl From<String> for Value {
 
 impl TryFrom<Value> for String {
     type Error = TryFromValueError;
-    fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
             Value::String(s) => Ok(s),
             _ => Err(TryFromValueError),
@@ -98,13 +99,13 @@ impl TryFrom<Value> for String {
 
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
-        Value::String(s.to_string())
+        Value::String(s.into())
     }
 }
 
 impl<'v> TryFrom<&'v Value> for &'v str {
     type Error = TryFromValueError;
-    fn try_from(value: &'v Value) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: &'v Value) -> Result<Self, Self::Error> {
         value.as_str().ok_or(TryFromValueError)
     }
 }
@@ -120,7 +121,7 @@ impl From<Tuple> for Value {
 impl TryFrom<Value> for Tuple {
     type Error = TryFromValueError;
 
-    fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
         match value {
             Value::Tuple(t) => Ok(t),
             _ => Err(TryFromValueError),
@@ -136,14 +137,14 @@ impl<'de> serde::de::IntoDeserializer<'de, Error> for Value {
     }
 }
 
-pub fn to_value<T>(value: &T) -> Result<Value>
+pub fn to_value<T>(value: &T) -> Result<Value, Error>
 where
     T: serde::Serialize + ?Sized,
 {
     value.serialize(ser::Serializer)
 }
 
-pub fn from_value<T>(value: Value) -> Result<T>
+pub fn from_value<T>(value: Value) -> Result<T, Error>
 where
     T: serde::de::DeserializeOwned,
 {
@@ -153,17 +154,14 @@ where
 #[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("error: {0}")]
-    Custom(String),
-
     #[error("union types are not supported in the qi type system")]
     UnionAreNotSupported,
 
-    #[error("a map key is missing")]
-    MissingMapKey,
+    #[error("unknown value type")]
+    UnknownValueType,
 
-    #[error("value cannot be deserialized")]
-    ValueCannotBeDeserialized,
+    #[error("error: {0}")]
+    Custom(String),
 }
 
 impl serde::ser::Error for Error {
@@ -178,8 +176,6 @@ impl serde::de::Error for Error {
     }
 }
 
-type Result<T> = std::result::Result<T, Error>;
-
 #[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[error("value conversion failed")]
 pub struct TryFromValueError;
@@ -193,13 +189,72 @@ mod tests {
     #[test]
     fn test_value_from_string() {
         assert_eq!(
-            Value::from("cookies recipe"),
-            Value::String("cookies recipe".to_string())
+            Value::from("muffins recipe".to_owned()),
+            Value::String("muffins recipe".into())
         );
+    }
+
+    #[test]
+    fn test_value_try_into_string() {
+        let res: Result<String, _> = Value::String("muffins recipe".into()).try_into();
+        assert_eq!(res, Ok("muffins recipe".to_owned()));
+        let res: Result<String, _> = Value::Int32(321).try_into();
+        assert_eq!(res, Err(TryFromValueError));
+    }
+
+    #[test]
+    fn test_value_from_str() {
         assert_eq!(
-            Value::from("muffins recipe".to_string()),
-            Value::String("muffins recipe".to_string())
+            Value::from("cookies recipe"),
+            Value::String("cookies recipe".into())
         );
+    }
+
+    #[test]
+    fn test_value_try_into_str() {
+        let value = Value::String("muffins recipe".into());
+        let res: Result<&str, _> = (&value).try_into();
+        assert_eq!(res, Ok("muffins recipe"));
+        let res: Result<&str, _> = (&Value::Int32(321)).try_into();
+        assert_eq!(res, Err(TryFromValueError));
+    }
+
+    #[test]
+    fn test_value_as_string() {
+        assert_eq!(
+            Value::from("muffins").as_string(),
+            Some(&"muffins".to_owned())
+        );
+        assert_eq!(Value::Int32(321).as_string(), None);
+    }
+
+    #[test]
+    fn test_value_as_str() {
+        assert_eq!(Value::from("cupcakes").as_str(), Some("cupcakes"));
+        assert_eq!(Value::Float(3.14).as_str(), None);
+    }
+
+    #[test]
+    fn test_value_from_tuple() {
+        assert_eq!(
+            Value::from(Tuple::default()),
+            Value::Tuple(Tuple {
+                name: Default::default(),
+                fields: Default::default()
+            }),
+        );
+    }
+
+    #[test]
+    fn test_value_try_into_tuple() {
+        let t: Result<Tuple, _> = Value::Tuple(Tuple {
+            name: Default::default(),
+            fields: Default::default(),
+        })
+        .try_into();
+        assert_eq!(t, Ok(Tuple::default()));
+        let t: Result<Tuple, _> = Value::from("cheesecake").try_into();
+        assert_eq!(t, Err(TryFromValueError));
     }
 
     #[test]
@@ -223,19 +278,19 @@ mod tests {
     #[test]
     fn test_to_value() {
         let (s, expected) = crate::tests::sample_serializable_and_value();
-        let value = to_value(&s).expect("serialization error");
+        let value = to_value(&s).unwrap();
         assert_eq!(value, expected);
     }
 
     #[test]
     fn test_from_value() {
         let (expected, v) = crate::tests::sample_serializable_and_value();
-        let s: Serializable = from_value(v).expect("deserialization error");
+        let s: Serializable = from_value(v).unwrap();
         assert_eq!(s, expected);
     }
 
     #[test]
-    fn test_to_from_value_invariant() -> Result<()> {
+    fn test_to_from_value_invariant() -> Result<(), Error> {
         let (s, _) = crate::tests::sample_serializable_and_value();
         let s2: Serializable = from_value(to_value(&s)?)?;
         assert_eq!(s, s2);

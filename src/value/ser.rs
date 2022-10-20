@@ -243,7 +243,10 @@ impl serde::ser::SerializeMap for MapSerializer {
     where
         T: serde::Serialize,
     {
-        let key = self.key.take().ok_or(Error::MissingMapKey)?;
+        let key = self
+            .key
+            .take()
+            .ok_or_else(|| Error::Custom("key was not serialized".into()))?;
         let value = to_value(value)?;
         self.elements.push((key, value));
         Ok(())

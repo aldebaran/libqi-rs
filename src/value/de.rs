@@ -52,7 +52,7 @@ impl<'de> serde::Deserializer<'de> for Value {
                 Some(v) => visitor.visit_some(*v),
                 None => visitor.visit_none(),
             },
-            _ => Err(Error::ValueCannotBeDeserialized),
+            _ => Err(Error::UnknownValueType),
         }
     }
 
