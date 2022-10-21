@@ -4,30 +4,8 @@ mod ser;
 pub use ser::to_value;
 pub mod tuple;
 pub use tuple::Tuple;
-
-//pub enum Type {
-//    Void,
-//    Bool,
-//    Int8,
-//    UInt8,
-//    Int16,
-//    UInt16,
-//    Int32,
-//    UInt32,
-//    Float,
-//    Double,
-//    String,
-//    List(Box<Type>),
-//    Map { key: Box<Type>, value: Box<Type> },
-//    Object,
-//    Tuple(Vec<Type>),
-//    Raw,
-//    VarArgs(Box<Type>),
-//    KwArgs(Box<Type>),
-//    Optional(Box<Type>),
-//    Dynamic,
-//    Unknown,
-//}
+pub mod r#type;
+pub use r#type::Type;
 
 // TODO: #[non_exhaustive]
 #[derive(Default, Clone, PartialEq, PartialOrd, Debug)]
