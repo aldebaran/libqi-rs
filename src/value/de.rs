@@ -1,4 +1,5 @@
-use super::{tuple, Error, Value};
+pub use super::ser::Error;
+use super::{tuple, Value};
 use serde::{
     de::{value::MapDeserializer, IntoDeserializer},
     forward_to_deserialize_any,

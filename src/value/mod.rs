@@ -110,19 +110,6 @@ impl TryFrom<Value> for Tuple {
 }
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
-pub enum Error {
-    #[error("union types are not supported in the qi type system")]
-    UnionAreNotSupported,
-
-    #[error("unknown value type")]
-    UnknownValueType,
-
-    #[error("error: {0}")]
-    Custom(String),
-}
-
-#[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[error("value conversion failed")]
 pub struct TryFromValueError;
 
@@ -236,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn test_to_from_value_invariant() -> Result<(), Error> {
+    fn test_to_from_value_invariant() -> Result<(), ser::Error> {
         let (s, _) = crate::tests::sample_serializable_and_value();
         let s2: Serializable = from_value(to_value(&s)?)?;
         assert_eq!(s, s2);

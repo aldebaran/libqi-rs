@@ -1,4 +1,4 @@
-use super::{tuple, Error, Tuple, Value};
+use super::{tuple, Tuple, Value};
 
 pub fn to_value<T>(value: &T) -> Result<Value, Error>
 where
@@ -361,6 +361,18 @@ impl serde::ser::SerializeStruct for TupleSerializer<tuple::NamedField> {
     fn end(self) -> Result<Self::Ok, Self::Error> {
         Ok(self.into_value())
     }
+}
+
+#[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Error {
+    #[error("union types are not supported in the qi type system")]
+    UnionAreNotSupported,
+
+    #[error("unknown value type")]
+    UnknownValueType,
+
+    #[error("error: {0}")]
+    Custom(String),
 }
 
 impl serde::ser::Error for Error {
