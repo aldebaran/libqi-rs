@@ -2,6 +2,15 @@
 // mod conversions;
 // pub use conversions::ToType;
 
+pub mod tuple {
+    use super::Type;
+    use crate::typesystem::tuple;
+    pub type Tuple = tuple::Tuple<Type>;
+    pub type Elements = tuple::Elements<Type>;
+    pub type Field = tuple::Field<Type>;
+}
+pub use tuple::Tuple;
+
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum Type {
     #[default]
@@ -29,11 +38,7 @@ pub enum Type {
         key: Box<Type>,
         value: Box<Type>,
     },
-    // TODO: use value::tuple::Tuple
-    Tuple {
-        name: Option<&'static str>,
-        fields: Vec<(Option<&'static str>, Type)>,
-    },
+    Tuple(Tuple),
     VarArgs(Box<Type>),
     KwArgs(Box<Type>),
 }
@@ -88,24 +93,21 @@ impl Type {
         }
     }
 
-    pub fn tuple<I>(fields: I) -> Self
+    pub fn tuple<I>(elements: I) -> Self
     where
         I: IntoIterator<Item = Self>,
     {
-        Self::Tuple {
-            name: None,
-            fields: fields.into_iter().map(|t| (None, t)).collect(),
-        }
+        Tuple::anonymous(tuple::Elements::from_iter(elements)).into()
     }
 
-    pub fn structure<I>(name: &'static str, fields: I) -> Self
+    pub fn structure<S, I, F>(name: S, fields: I) -> Self
     where
-        I: IntoIterator<Item = (&'static str, Self)>,
+        I: IntoIterator<Item = F>,
+        S: Into<String>,
+        F: Into<tuple::Field>,
     {
-        Self::Tuple {
-            name: Some(name),
-            fields: fields.into_iter().map(|(n, t)| (Some(n), t)).collect(),
-        }
+        let elements = tuple::Elements::from_iter(fields.into_iter().map(Into::into));
+        Tuple::named(name, elements).into()
     }
 
     // TODO: tuple_struct
@@ -156,7 +158,16 @@ impl Type {
             Self::CHAR_MARK_OPTION => Self::parse_option_tail(iter, input),
             Self::CHAR_LIST_BEGIN => Self::parse_list_tail(iter, input),
             Self::CHAR_MAP_BEGIN => Self::parse_map_tail(iter, input),
-            Self::CHAR_TUPLE_BEGIN => Self::parse_tuple_tail(iter, input),
+            Self::CHAR_TUPLE_BEGIN => {
+                let tuple = Self::parse_tuple_tail(iter, input)?;
+                match iter.next() {
+                    Some(Self::CHAR_ANNOTATIONS_BEGIN) => {
+                        let annotations = Self::parse_tuple_annotations_tail(iter, input);
+                        todo!()
+                    }
+                    _ => Ok(tuple),
+                }
+            }
             Self::CHAR_MARK_VARSARGS => Self::parse_varargs_tail(iter, input),
             Self::CHAR_MARK_KWARGS => Self::parse_kwargs_tail(iter, input),
             _ => Err(FromStrError::UnexpectedChar(c, input.into())),
@@ -244,6 +255,13 @@ impl Type {
             }
         }
     }
+
+    fn parse_tuple_annotations_tail(
+        iter: &mut std::str::Chars,
+        start: &str,
+    ) -> Result<Self, FromStrError> {
+        todo!()
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -281,18 +299,24 @@ impl std::fmt::Display for Type {
                 beg = Self::CHAR_MAP_BEGIN,
                 end = Self::CHAR_MAP_END
             ),
-            Type::Tuple { name, fields } => write!(
+            Type::Tuple(Tuple { name, elements }) => write!(
                 f,
                 "{beg}{ts}{end}",
                 beg = Self::CHAR_TUPLE_BEGIN,
                 end = Self::CHAR_TUPLE_END,
-                ts = fields
-                    .iter()
-                    .fold(String::new(), |s, (n, t)| s + &t.to_string())
+                ts = elements
+                    .into_iter()
+                    .fold(String::new(), |s, t| s + &t.to_string())
             ),
             Type::VarArgs(t) => write!(f, "{mark}{t}", mark = Self::CHAR_MARK_VARSARGS),
             Type::KwArgs(t) => write!(f, "{mark}{t}", mark = Self::CHAR_MARK_KWARGS),
         }
+    }
+}
+
+impl From<Tuple> for Type {
+    fn from(t: Tuple) -> Self {
+        Self::Tuple(t)
     }
 }
 
@@ -360,6 +384,18 @@ pub enum FromStrError {
 
     #[error("end of tuple starting at input \"{0}\" is missing")]
     MissingTupleEnd(String),
+
+    #[error("annotation for structure name of tuple starting at input \"{0}\" is missing")]
+    MissingTupleAnnotationStructName(String),
+
+    #[error("annotation for structure field name of tuple starting at input \"{0}\" is missing")]
+    MissingTupleAnnotationFieldName(String),
+
+    #[error("unexpected annotation for structure field name at \"{1}\" of tuple starting at input \"{2}\" (expected {0} fields)")]
+    UnexpectedTupleAnnotationFieldName(usize, String, String),
+
+    #[error("end of annotation for tuple starting at input \"{0}\" is missing")]
+    MissingTupleAnnotationEnd(String),
 }
 
 impl serde::Serialize for Type {
@@ -407,25 +443,30 @@ mod tests {
     fn test_type_tuple() {
         assert_eq!(
             Type::tuple([Type::Int32, Type::Float, Type::String]),
-            Type::Tuple {
+            Type::Tuple(Tuple {
                 name: None,
-                fields: vec![
-                    (None, Type::Int32),
-                    (None, Type::Float),
-                    (None, Type::String)
-                ],
-            }
+                elements: tuple::Elements::Raw(vec![Type::Int32, Type::Float, Type::String,]),
+            })
         );
     }
 
     #[test]
     fn test_type_structure() {
         assert_eq!(
-            Type::structure("S", [("a", Type::Int32), ("b", Type::Float)]),
-            Type::Tuple {
-                name: Some("S"),
-                fields: vec![(Some("a"), Type::Int32), (Some("b"), Type::Float)]
-            }
+            Type::structure(
+                "S",
+                [
+                    tuple::Field::new("a", Type::Int32),
+                    tuple::Field::new("b", Type::Float)
+                ]
+            ),
+            Type::Tuple(Tuple {
+                name: Some("S".into()),
+                elements: tuple::Elements::from_iter([
+                    tuple::Field::new("a", Type::Int32),
+                    tuple::Field::new("b", Type::Float)
+                ]),
+            })
         );
     }
 
@@ -491,14 +532,17 @@ mod tests {
             Type::structure(
                 "ExplorationMap",
                 [
-                    (
+                    tuple::Field::new(
                         "points",
                         Type::list(Type::structure(
                             "Point",
-                            [("x", Type::Double), ("y", Type::Double)],
+                            [
+                                tuple::Field::new("x", Type::Double),
+                                tuple::Field::new("y", Type::Double)
+                            ],
                         )),
                     ),
-                    ("timestamp", Type::UInt64),
+                    tuple::Field::new("timestamp", Type::UInt64),
                 ],
             ),
             "([(dd)<Point,x,y>]L)<ExplorationMap,points,timestamp>"
@@ -641,6 +685,31 @@ mod tests {
                 FromStrError::MissingListEnd("[i)".into())
             )))
         );
+        // Tuples annotations
+        assert_eq!(
+            "(i)<".parse::<Type>(),
+            Err(FromStrError::MissingTupleAnnotationEnd("(i)<".into()))
+        );
+        assert_eq!(
+            "(i)<>".parse::<Type>(),
+            Err(FromStrError::MissingTupleAnnotationStructName(
+                "(i)<>".into()
+            ))
+        );
+        assert_eq!(
+            "(i)<S>".parse::<Type>(),
+            Err(FromStrError::MissingTupleAnnotationFieldName(
+                "(i)<S>".into()
+            ))
+        );
+        assert_eq!(
+            "(i)<S,a,b>".parse::<Type>(),
+            Err(FromStrError::UnexpectedTupleAnnotationFieldName(
+                1,
+                "b>".into(),
+                "(i)<S,a,b>".into()
+            ))
+        );
         // The error is `UnexpectedChar` and not `MissingMapEnd` because we don't detect subtype
         // parsing.
         assert_eq!(
@@ -667,59 +736,62 @@ mod tests {
             Type::structure(
                 "MetaObject",
                 [
-                    (
+                    tuple::Field::new(
                         "methods",
                         Type::map(
                             Type::Int64,
                             Type::structure(
                                 "MetaMethod",
                                 [
-                                    ("uid", Type::Int64),
-                                    ("returnSignature", Type::String),
-                                    ("name", Type::String),
-                                    ("parametersSignature", Type::String),
-                                    ("description", Type::String),
-                                    (
+                                    tuple::Field::new("uid", Type::Int64),
+                                    tuple::Field::new("returnSignature", Type::String),
+                                    tuple::Field::new("name", Type::String),
+                                    tuple::Field::new("parametersSignature", Type::String),
+                                    tuple::Field::new("description", Type::String),
+                                    tuple::Field::new(
                                         "parameters",
                                         Type::list(Type::structure(
                                             "MetaMethodParameter",
-                                            [("name", Type::String), ("description", Type::String)]
+                                            [
+                                                tuple::Field::new("name", Type::String),
+                                                tuple::Field::new("description", Type::String)
+                                            ]
                                         ))
                                     ),
-                                    ("returnDescription", Type::String),
+                                    tuple::Field::new("returnDescription", Type::String),
                                 ]
                             )
                         )
                     ),
-                    (
+                    tuple::Field::new(
                         "signals",
                         Type::map(
                             Type::Int64,
                             Type::structure(
                                 "MetaSignal",
                                 [
-                                    ("uid", Type::Int64),
-                                    ("name", Type::String),
-                                    ("signature", Type::String),
+                                    tuple::Field::new("uid", Type::Int64),
+                                    tuple::Field::new("name", Type::String),
+                                    tuple::Field::new("signature", Type::String),
                                 ]
                             )
                         )
                     ),
-                    (
+                    tuple::Field::new(
                         "properties",
                         Type::map(
                             Type::Int64,
                             Type::structure(
                                 "MetaProperty",
                                 [
-                                    ("uid", Type::Int64),
-                                    ("name", Type::String),
-                                    ("signature", Type::String),
+                                    tuple::Field::new("uid", Type::Int64),
+                                    tuple::Field::new("name", Type::String),
+                                    tuple::Field::new("signature", Type::String),
                                 ]
                             )
                         )
                     ),
-                    ("description", Type::String)
+                    tuple::Field::new("description", Type::String)
                 ]
             )
         );
@@ -728,10 +800,13 @@ mod tests {
     #[test]
     fn test_type_ser_de() {
         assert_tokens(
-            &Type::Tuple {
-                name: Some("Point"),
-                fields: vec![(Some("x"), Type::Double), (Some("y"), Type::Double)],
-            },
+            &Type::Tuple(Tuple::named(
+                "Point",
+                tuple::Elements::from_iter([
+                    tuple::Field::new("x", Type::Double),
+                    tuple::Field::new("y", Type::Double),
+                ]),
+            )),
             &[Token::Str("(dd)<Point,x,y>")],
         )
     }

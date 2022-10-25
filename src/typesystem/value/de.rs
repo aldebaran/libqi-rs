@@ -281,10 +281,10 @@ where
 {
     use serde::de::Deserializer;
     match value {
-        Value::Tuple(tuple) if tuple.name.as_deref() == name => match tuple.fields {
-            tuple::Fields::Unnamed(fields) => visitor.visit_seq(fields.into_deserializer()),
-            tuple::Fields::Named(fields) => visitor.visit_map(MapDeserializer::new(
-                fields.into_iter().map(|nf| (nf.name, nf.value)),
+        Value::Tuple(tuple) if tuple.name.as_deref() == name => match tuple.elements {
+            tuple::Elements::Raw(fields) => visitor.visit_seq(fields.into_deserializer()),
+            tuple::Elements::Fields(fields) => visitor.visit_map(MapDeserializer::new(
+                fields.into_iter().map(|nf| (nf.name, nf.element)),
             )),
         },
         _ => value.deserialize_any(visitor),

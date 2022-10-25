@@ -18,7 +18,7 @@ impl serde::Serializer for Serializer {
     type SerializeTupleStruct = TupleSerializer<Value>;
     type SerializeTupleVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
     type SerializeMap = MapSerializer;
-    type SerializeStruct = TupleSerializer<tuple::NamedField>;
+    type SerializeStruct = TupleSerializer<tuple::Field>;
     type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
@@ -99,7 +99,7 @@ impl serde::Serializer for Serializer {
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
         Ok(Value::Tuple(Tuple {
             name: Some(name.to_string()),
-            fields: tuple::Fields::Named(vec![]),
+            elements: tuple::Elements::Fields(vec![]),
         }))
     }
 
@@ -123,7 +123,7 @@ impl serde::Serializer for Serializer {
         let value = to_value(value)?;
         Ok(Value::Tuple(Tuple {
             name: Some(name.to_string()),
-            fields: tuple::Fields::Unnamed(vec![value]),
+            elements: tuple::Elements::Raw(vec![value]),
         }))
     }
 
@@ -279,11 +279,11 @@ impl<T> TupleSerializer<T> {
 
     fn into_value(self) -> Value
     where
-        tuple::Fields: From<Vec<T>>,
+        tuple::Elements: FromIterator<T>,
     {
         Value::Tuple(Tuple {
             name: self.name,
-            fields: self.fields.into(),
+            elements: tuple::Elements::from_iter(self.fields),
         })
     }
 }
@@ -299,14 +299,17 @@ impl TupleSerializer<Value> {
     }
 }
 
-impl TupleSerializer<tuple::NamedField> {
+impl TupleSerializer<tuple::Field> {
     fn add_field<T: ?Sized>(&mut self, name: &str, value: &T) -> Result<(), Error>
     where
         T: serde::Serialize,
     {
         let name = name.to_string();
         let value = to_value(value)?;
-        self.fields.push(tuple::NamedField { name, value });
+        self.fields.push(tuple::Field {
+            name,
+            element: value,
+        });
         Ok(())
     }
 }
@@ -343,7 +346,7 @@ impl serde::ser::SerializeTupleStruct for TupleSerializer<Value> {
     }
 }
 
-impl serde::ser::SerializeStruct for TupleSerializer<tuple::NamedField> {
+impl serde::ser::SerializeStruct for TupleSerializer<tuple::Field> {
     type Ok = Value;
     type Error = Error;
 

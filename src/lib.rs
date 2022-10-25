@@ -1,8 +1,8 @@
 // TODO: #![warn(missing_docs)]
 
 pub mod proto;
-pub mod value;
-pub use value::Value;
+pub mod typesystem;
+pub use typesystem::{Type, Value};
 
 use futures::prelude::*;
 use proto::message::{self, Message};
@@ -56,12 +56,13 @@ pub mod server {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use typesystem::value;
 
     pub fn sample_serializable_and_value() -> (proto::tests::Serializable, Value) {
         let s = proto::tests::Serializable::sample();
         let t = Value::Tuple(value::Tuple {
             name: None,
-            fields: value::tuple::Fields::Unnamed(vec![
+            elements: value::tuple::Elements::Raw(vec![
                 Value::Int8(-8),
                 Value::UInt8(8),
                 Value::Int16(-16),
@@ -78,7 +79,7 @@ mod tests {
         let o = Value::Optional(Some(Box::new(Value::Bool(false))));
         let s1 = Value::Tuple(value::Tuple {
             name: Some("S1".to_string()),
-            fields: value::tuple::Fields::Unnamed(vec![
+            elements: value::tuple::Elements::Raw(vec![
                 Value::String("bananas".to_string()),
                 Value::String("oranges".to_string()),
             ]),
@@ -93,38 +94,39 @@ mod tests {
         ]);
         let s0: Value = value::Tuple {
             name: Some("S0".to_string()),
-            fields: vec![
-                value::tuple::NamedField {
+            elements: [
+                value::tuple::Field {
                     name: "t".to_string(),
-                    value: t,
+                    element: t,
                 },
-                value::tuple::NamedField {
+                value::tuple::Field {
                     name: "r".to_string(),
-                    value: r,
+                    element: r,
                 },
-                value::tuple::NamedField {
+                value::tuple::Field {
                     name: "o".to_string(),
-                    value: o,
+                    element: o,
                 },
-                value::tuple::NamedField {
+                value::tuple::Field {
                     name: "s".to_string(),
-                    value: s1,
+                    element: s1,
                 },
-                value::tuple::NamedField {
+                value::tuple::Field {
                     name: "l".to_string(),
-                    value: l,
+                    element: l,
                 },
-                value::tuple::NamedField {
+                value::tuple::Field {
                     name: "m".to_string(),
-                    value: m,
+                    element: m,
                 },
             ]
-            .into(),
+            .into_iter()
+            .collect(),
         }
         .into();
         let v = Value::Tuple(value::Tuple {
             name: Some("Serializable".to_string()),
-            fields: vec![s0].into(),
+            elements: [s0].into_iter().collect(),
         });
         (s, v)
     }

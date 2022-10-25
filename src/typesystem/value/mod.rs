@@ -1,11 +1,7 @@
 mod de;
-pub use de::from_value;
 mod ser;
+pub use de::from_value;
 pub use ser::to_value;
-pub mod tuple;
-pub use tuple::Tuple;
-pub mod r#type;
-pub use r#type::Type;
 
 // TODO: #[non_exhaustive]
 // TODO: Enable the value to borrow data from sources.
@@ -32,6 +28,15 @@ pub enum Value {
     Optional(Option<Box<Value>>),
     // TODO: Handle enumerations
 }
+
+pub mod tuple {
+    use super::Value;
+    use crate::typesystem::tuple;
+    pub type Tuple = tuple::Tuple<Value>;
+    pub type Elements = tuple::Elements<Value>;
+    pub type Field = tuple::Field<Value>;
+}
+pub use tuple::Tuple;
 
 impl Value {
     pub fn as_string(&self) -> Option<&String> {
@@ -174,7 +179,7 @@ mod tests {
             Value::from(Tuple::default()),
             Value::Tuple(Tuple {
                 name: Default::default(),
-                fields: Default::default()
+                elements: Default::default()
             }),
         );
     }
@@ -183,7 +188,7 @@ mod tests {
     fn test_value_try_into_tuple() {
         let t: Result<Tuple, _> = Value::Tuple(Tuple {
             name: Default::default(),
-            fields: Default::default(),
+            elements: Default::default(),
         })
         .try_into();
         assert_eq!(t, Ok(Tuple::default()));
