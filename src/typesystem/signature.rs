@@ -1,49 +1,13 @@
-// TODO: remove the conversions module.
-// mod conversions;
-// pub use conversions::ToType;
-
-pub mod tuple {
-    use super::Type;
-    use crate::typesystem::tuple;
-    pub type Tuple = tuple::Tuple<Type>;
-    pub type Elements = tuple::Elements<Type>;
-    pub type Field = tuple::Field<Type>;
-}
-pub use tuple::Tuple;
+use super::r#type::Type;
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-pub enum Type {
-    #[default]
-    None,
-    Unknown,
-    Void,
-    Bool,
-    Int8,
-    UInt8,
-    Int16,
-    UInt16,
-    Int32,
-    UInt32,
-    Int64,
-    UInt64,
-    Float,
-    Double,
-    String,
-    Raw,
-    Object,
-    Dynamic,
-    Option(Box<Type>),
-    List(Box<Type>),
-    Map {
-        key: Box<Type>,
-        value: Box<Type>,
-    },
-    Tuple(Tuple),
-    VarArgs(Box<Type>),
-    KwArgs(Box<Type>),
-}
+pub struct Signature(Type);
 
-impl Type {
+impl Signature {
+    pub fn into_type(self) -> Type {
+        self.0
+    }
+
     const CHAR_NONE: char = '_';
     const CHAR_UNKNOWN: char = 'X';
     const CHAR_VOID: char = 'v';
@@ -75,86 +39,28 @@ impl Type {
     const CHAR_ANNOTATIONS_SEP: char = ',';
     const CHAR_ANNOTATIONS_END: char = '>';
 
-    pub fn list<T>(t: T) -> Self
-    where
-        T: Into<Box<Self>>,
-    {
-        Self::List(t.into())
-    }
-
-    pub fn map<K, V>(key: K, value: V) -> Self
-    where
-        K: Into<Box<Self>>,
-        V: Into<Box<Self>>,
-    {
-        Self::Map {
-            key: key.into(),
-            value: value.into(),
-        }
-    }
-
-    pub fn tuple<I>(elements: I) -> Self
-    where
-        I: IntoIterator<Item = Self>,
-    {
-        Tuple::anonymous(tuple::Elements::from_iter(elements)).into()
-    }
-
-    pub fn structure<S, I, F>(name: S, fields: I) -> Self
-    where
-        I: IntoIterator<Item = F>,
-        S: Into<String>,
-        F: Into<tuple::Field>,
-    {
-        let elements = tuple::Elements::from_iter(fields.into_iter().map(Into::into));
-        Tuple::named(name, elements).into()
-    }
-
-    // TODO: tuple_struct
-
-    pub fn var_args<T>(t: T) -> Self
-    where
-        T: Into<Box<Self>>,
-    {
-        Self::VarArgs(t.into())
-    }
-
-    pub fn kw_args<T>(t: T) -> Self
-    where
-        T: Into<Box<Self>>,
-    {
-        Self::KwArgs(t.into())
-    }
-
-    pub fn option<T>(t: T) -> Self
-    where
-        T: Into<Box<Self>>,
-    {
-        Self::Option(t.into())
-    }
-
     fn parse(iter: &mut std::str::Chars) -> Result<Self, FromStrError> {
         let input = iter.as_str();
         let c = iter.next().ok_or(FromStrError::EndOfInput)?;
         match c {
-            Self::CHAR_NONE => Ok(Self::None),
-            Self::CHAR_UNKNOWN => Ok(Self::Unknown),
-            Self::CHAR_VOID => Ok(Self::Void),
-            Self::CHAR_BOOL => Ok(Self::Bool),
-            Self::CHAR_INT8 => Ok(Self::Int8),
-            Self::CHAR_UINT8 => Ok(Self::UInt8),
-            Self::CHAR_INT16 => Ok(Self::Int16),
-            Self::CHAR_UINT16 => Ok(Self::UInt16),
-            Self::CHAR_INT32 => Ok(Self::Int32),
-            Self::CHAR_UINT32 => Ok(Self::UInt32),
-            Self::CHAR_INT64 => Ok(Self::Int64),
-            Self::CHAR_UINT64 => Ok(Self::UInt64),
-            Self::CHAR_FLOAT => Ok(Self::Float),
-            Self::CHAR_DOUBLE => Ok(Self::Double),
-            Self::CHAR_STRING => Ok(Self::String),
-            Self::CHAR_RAW => Ok(Self::Raw),
-            Self::CHAR_OBJECT => Ok(Self::Object),
-            Self::CHAR_DYNAMIC => Ok(Self::Dynamic),
+            Self::CHAR_NONE => Ok(Self(Type::None)),
+            Self::CHAR_UNKNOWN => Ok(Self(Type::Unknown)),
+            Self::CHAR_VOID => Ok(Self(Type::Void)),
+            Self::CHAR_BOOL => Ok(Self(Type::Bool)),
+            Self::CHAR_INT8 => Ok(Self(Type::Int8)),
+            Self::CHAR_UINT8 => Ok(Self(Type::UInt8)),
+            Self::CHAR_INT16 => Ok(Self(Type::Int16)),
+            Self::CHAR_UINT16 => Ok(Self(Type::UInt16)),
+            Self::CHAR_INT32 => Ok(Self(Type::Int32)),
+            Self::CHAR_UINT32 => Ok(Self(Type::UInt32)),
+            Self::CHAR_INT64 => Ok(Self(Type::Int64)),
+            Self::CHAR_UINT64 => Ok(Self(Type::UInt64)),
+            Self::CHAR_FLOAT => Ok(Self(Type::Float)),
+            Self::CHAR_DOUBLE => Ok(Self(Type::Double)),
+            Self::CHAR_STRING => Ok(Self(Type::String)),
+            Self::CHAR_RAW => Ok(Self(Type::Raw)),
+            Self::CHAR_OBJECT => Ok(Self(Type::Object)),
+            Self::CHAR_DYNAMIC => Ok(Self(Type::Dynamic)),
             Self::CHAR_MARK_OPTION => Self::parse_option_tail(iter, input),
             Self::CHAR_LIST_BEGIN => Self::parse_list_tail(iter, input),
             Self::CHAR_MAP_BEGIN => Self::parse_map_tail(iter, input),
@@ -176,17 +82,18 @@ impl Type {
 
     fn parse_option_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
         match Self::parse(iter) {
-            Ok(t) => Ok(Self::option(t)),
+            Ok(sig) => Ok(Self(Type::option(sig.0))),
             Err(err) => Err(match err {
                 FromStrError::EndOfInput => FromStrError::MissingOptionValueType(start.into()),
                 _ => FromStrError::OptionValueTypeParsing(Box::new(err)),
             }),
         }
+        .into()
     }
 
     fn parse_varargs_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
         match Self::parse(iter) {
-            Ok(t) => Ok(Self::var_args(t)),
+            Ok(Self(t)) => Ok(Self(Type::var_args(t))),
             Err(err) => Err(match err {
                 FromStrError::EndOfInput => FromStrError::MissingVarArgsValueType(start.into()),
                 _ => FromStrError::VarArgsValueTypeParsing(Box::new(err)),
@@ -196,7 +103,7 @@ impl Type {
 
     fn parse_kwargs_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
         match Self::parse(iter) {
-            Ok(t) => Ok(Self::kw_args(t)),
+            Ok(Self(t)) => Ok(Self(Type::kw_args(t))),
             Err(err) => Err(match err {
                 FromStrError::EndOfInput => FromStrError::MissingKwArgsValueType(start.into()),
                 _ => FromStrError::KwArgsValueTypeParsing(Box::new(err)),
@@ -205,14 +112,15 @@ impl Type {
     }
 
     fn parse_list_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
-        let t = Self::parse(iter).map_err(|err| match err {
+        let sig = Self::parse(iter).map_err(|err| match err {
             FromStrError::UnexpectedChar(Self::CHAR_LIST_END, _) | FromStrError::EndOfInput => {
                 FromStrError::MissingListValueType(start.into())
             }
             _ => FromStrError::ListValueTypeParsing(Box::new(err)),
         })?;
+        let t = sig.into_type();
         match iter.next() {
-            Some(Self::CHAR_LIST_END) => Ok(Self::list(t)),
+            Some(Self::CHAR_LIST_END) => Ok(Self(Type::list(t))),
             _ => Err(FromStrError::MissingListEnd(start.into())),
         }
     }
@@ -224,14 +132,16 @@ impl Type {
             }
             _ => FromStrError::MapKeyTypeParsing(Box::new(err)),
         })?;
+        let key = key.into_type();
         let value = Self::parse(iter).map_err(|err| match err {
             FromStrError::UnexpectedChar(Self::CHAR_MAP_END, _) => {
                 FromStrError::MissingMapValueType(start.into())
             }
             _ => FromStrError::MapValueTypeParsing(Box::new(err)),
         })?;
+        let value = value.into_type();
         match iter.next() {
-            Some(Self::CHAR_MAP_END) => Ok(Self::map(key, value)),
+            Some(Self::CHAR_MAP_END) => Ok(Self(Type::map(key, value))),
             _ => Err(FromStrError::MissingMapEnd(start.into())),
         }
     }
@@ -240,11 +150,11 @@ impl Type {
         let mut fields = Vec::new();
         loop {
             match Self::parse(iter) {
-                Ok(t) => fields.push(t),
+                Ok(Signature(t)) => fields.push(t),
                 Err(err) => {
                     break match err {
                         FromStrError::UnexpectedChar(Self::CHAR_TUPLE_END, _) => {
-                            Ok(Self::tuple(fields))
+                            Ok(Self(Type::tuple(fields)))
                         }
                         FromStrError::EndOfInput => {
                             Err(FromStrError::MissingTupleEnd(start.into()))
@@ -264,10 +174,22 @@ impl Type {
     }
 }
 
-impl std::fmt::Display for Type {
+impl From<Type> for Signature {
+    fn from(t: Type) -> Self {
+        Self(t)
+    }
+}
+
+impl From<Signature> for Type {
+    fn from(s: Signature) -> Self {
+        s.0
+    }
+}
+
+impl std::fmt::Display for Signature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use std::fmt::Write;
-        match self {
+        match &self.0 {
             Type::None => f.write_char(Self::CHAR_NONE),
             Type::Unknown => f.write_char(Self::CHAR_UNKNOWN),
             Type::Void => f.write_char(Self::CHAR_VOID),
@@ -286,41 +208,60 @@ impl std::fmt::Display for Type {
             Type::Raw => f.write_char(Self::CHAR_RAW),
             Type::Object => f.write_char(Self::CHAR_OBJECT),
             Type::Dynamic => f.write_char(Self::CHAR_DYNAMIC),
-            Type::Option(o) => write!(f, "{mark}{o}", mark = Self::CHAR_MARK_OPTION),
+            Type::Option(o) => write!(
+                f,
+                "{mark}{o}",
+                mark = Self::CHAR_MARK_OPTION,
+                o = Self((**o).clone())
+            ),
             Type::List(t) => write!(
                 f,
                 "{beg}{t}{end}",
                 beg = Self::CHAR_LIST_BEGIN,
+                t = Self((**t).clone()),
                 end = Self::CHAR_LIST_END
             ),
             Type::Map { key, value } => write!(
                 f,
                 "{beg}{key}{value}{end}",
                 beg = Self::CHAR_MAP_BEGIN,
+                key = Self((**key).clone()),
+                value = Self((**value).clone()),
                 end = Self::CHAR_MAP_END
             ),
-            Type::Tuple(Tuple { name, elements }) => write!(
+            Type::Tuple(t) => {
+                write!(
+                    f,
+                    "{beg}{ts}{end}",
+                    beg = Self::CHAR_TUPLE_BEGIN,
+                    end = Self::CHAR_TUPLE_END,
+                    ts = t
+                        .into_iter()
+                        .fold(String::new(), |s, t| s + &Self(t.clone()).to_string())
+                )?;
+                Ok(())
+                //match t {
+                //    Tuple{ name: None, elements: Elements::Raw(_) } => Ok(()),
+
+                //}
+            }
+            Type::VarArgs(t) => write!(
                 f,
-                "{beg}{ts}{end}",
-                beg = Self::CHAR_TUPLE_BEGIN,
-                end = Self::CHAR_TUPLE_END,
-                ts = elements
-                    .into_iter()
-                    .fold(String::new(), |s, t| s + &t.to_string())
+                "{mark}{t}",
+                mark = Self::CHAR_MARK_VARSARGS,
+                t = Self(*t.clone())
             ),
-            Type::VarArgs(t) => write!(f, "{mark}{t}", mark = Self::CHAR_MARK_VARSARGS),
-            Type::KwArgs(t) => write!(f, "{mark}{t}", mark = Self::CHAR_MARK_KWARGS),
+            Type::KwArgs(t) => write!(
+                f,
+                "{mark}{t}",
+                mark = Self::CHAR_MARK_KWARGS,
+                t = Self(*t.clone())
+            ),
         }
     }
 }
 
-impl From<Tuple> for Type {
-    fn from(t: Tuple) -> Self {
-        Self::Tuple(t)
-    }
-}
-
-impl std::str::FromStr for Type {
+impl std::str::FromStr for Signature {
     type Err = FromStrError;
 
     fn from_str(src: &str) -> Result<Self, Self::Err> {
@@ -398,7 +339,7 @@ pub enum FromStrError {
     MissingTupleAnnotationEnd(String),
 }
 
-impl serde::Serialize for Type {
+impl serde::Serialize for Signature {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -407,7 +348,7 @@ impl serde::Serialize for Type {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Type {
+impl<'de> serde::Deserialize<'de> for Signature {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -420,82 +361,22 @@ impl<'de> serde::Deserialize<'de> for Type {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{super::r#type::tuple, *};
     use serde_test::{assert_tokens, Token};
 
     #[test]
-    fn test_type_list() {
-        assert_eq!(Type::list(Type::String), Type::List(Box::new(Type::String)));
-    }
-
-    #[test]
-    fn test_type_map() {
-        assert_eq!(
-            Type::map(Type::String, Type::UInt8,),
-            Type::Map {
-                key: Box::new(Type::String),
-                value: Box::new(Type::UInt8)
-            }
-        );
-    }
-
-    #[test]
-    fn test_type_tuple() {
-        assert_eq!(
-            Type::tuple([Type::Int32, Type::Float, Type::String]),
-            Type::Tuple(Tuple {
-                name: None,
-                elements: tuple::Elements::Raw(vec![Type::Int32, Type::Float, Type::String,]),
-            })
-        );
-    }
-
-    #[test]
-    fn test_type_structure() {
-        assert_eq!(
-            Type::structure(
-                "S",
-                [
-                    tuple::Field::new("a", Type::Int32),
-                    tuple::Field::new("b", Type::Float)
-                ]
-            ),
-            Type::Tuple(Tuple {
-                name: Some("S".into()),
-                elements: tuple::Elements::from_iter([
-                    tuple::Field::new("a", Type::Int32),
-                    tuple::Field::new("b", Type::Float)
-                ]),
-            })
-        );
-    }
-
-    #[test]
-    fn test_type_var_args() {
-        assert_eq!(
-            Type::var_args(Type::list(Type::String)),
-            Type::VarArgs(Box::new(Type::List(Box::new(Type::String))))
-        );
-    }
-
-    #[test]
-    fn test_type_kw_args() {
-        assert_eq!(Type::kw_args(Type::Raw), Type::KwArgs(Box::new(Type::Raw)));
-    }
-
-    #[test]
-    fn test_type_to_from_string() {
-        macro_rules! assert_to_from_str {
+    fn test_signature_to_from_string() {
+        macro_rules! assert_sig_to_from_str {
             ($t:expr, $s:expr) => {{
                 assert_eq!(
-                    $t.to_string(),
+                    Signature($t).to_string(),
                     $s,
                     "Left is {t:?}.to_string(), Right is {s:?}",
                     t = $t,
                     s = $s
                 );
                 assert_eq!(
-                    $s.parse::<Type>(),
+                    $s.parse::<Signature>().map(|s| s.into_type()),
                     Ok($t),
                     "Left is {s:?}.parse(), Right is {t:?}",
                     s = $s,
@@ -503,38 +384,55 @@ mod tests {
                 );
             }};
         }
-        assert_to_from_str!(Type::None, "_");
-        assert_to_from_str!(Type::Unknown, "X");
-        assert_to_from_str!(Type::Void, "v");
-        assert_to_from_str!(Type::Bool, "b");
-        assert_to_from_str!(Type::Int8, "c");
-        assert_to_from_str!(Type::UInt8, "C");
-        assert_to_from_str!(Type::Int16, "w");
-        assert_to_from_str!(Type::UInt16, "W");
-        assert_to_from_str!(Type::Int32, "i");
-        assert_to_from_str!(Type::UInt32, "I");
-        assert_to_from_str!(Type::Int64, "l");
-        assert_to_from_str!(Type::UInt64, "L");
-        assert_to_from_str!(Type::Float, "f");
-        assert_to_from_str!(Type::Double, "d");
-        assert_to_from_str!(Type::String, "s");
-        assert_to_from_str!(Type::Raw, "r");
-        assert_to_from_str!(Type::Object, "o");
-        assert_to_from_str!(Type::Dynamic, "m");
-        assert_to_from_str!(Type::option(Type::Void), "+v");
-        assert_to_from_str!(Type::list(Type::Int32), "[i]");
-        assert_to_from_str!(Type::map(Type::Float, Type::String), "{fs}");
-        assert_to_from_str!(
+        assert_sig_to_from_str!(Type::None, "_");
+        assert_sig_to_from_str!(Type::Unknown, "X");
+        assert_sig_to_from_str!(Type::Void, "v");
+        assert_sig_to_from_str!(Type::Bool, "b");
+        assert_sig_to_from_str!(Type::Int8, "c");
+        assert_sig_to_from_str!(Type::UInt8, "C");
+        assert_sig_to_from_str!(Type::Int16, "w");
+        assert_sig_to_from_str!(Type::UInt16, "W");
+        assert_sig_to_from_str!(Type::Int32, "i");
+        assert_sig_to_from_str!(Type::UInt32, "I");
+        assert_sig_to_from_str!(Type::Int64, "l");
+        assert_sig_to_from_str!(Type::UInt64, "L");
+        assert_sig_to_from_str!(Type::Float, "f");
+        assert_sig_to_from_str!(Type::Double, "d");
+        assert_sig_to_from_str!(Type::String, "s");
+        assert_sig_to_from_str!(Type::Raw, "r");
+        assert_sig_to_from_str!(Type::Object, "o");
+        assert_sig_to_from_str!(Type::Dynamic, "m");
+        assert_sig_to_from_str!(Type::option(Type::Void), "+v");
+        assert_sig_to_from_str!(Type::list(Type::Int32), "[i]");
+        assert_sig_to_from_str!(Type::map(Type::Float, Type::String), "{fs}");
+        assert_sig_to_from_str!(
             Type::tuple([Type::Float, Type::String, Type::UInt32]),
             "(fsI)"
         );
-        assert_to_from_str!(
-            Type::structure(
+        assert_sig_to_from_str!(
+            Type::tuple([
+                tuple::Field::new("x", Type::Float),
+                tuple::Field::new("y", Type::Float)
+            ]),
+            "(fsI)<,x,y>"
+        );
+        assert_sig_to_from_str!(
+            Type::named_tuple(
+                "ExplorationMap",
+                [
+                    Type::list(Type::tuple([Type::Double, Type::Double])),
+                    Type::UInt64,
+                ],
+            ),
+            "([(dd)]L)<ExplorationMap>"
+        );
+        assert_sig_to_from_str!(
+            Type::named_tuple(
                 "ExplorationMap",
                 [
                     tuple::Field::new(
                         "points",
-                        Type::list(Type::structure(
+                        Type::list(Type::named_tuple(
                             "Point",
                             [
                                 tuple::Field::new("x", Type::Double),
@@ -547,10 +445,10 @@ mod tests {
             ),
             "([(dd)<Point,x,y>]L)<ExplorationMap,points,timestamp>"
         );
-        assert_to_from_str!(Type::var_args(Type::Dynamic), "#m");
-        assert_to_from_str!(Type::kw_args(Type::Object), "~o");
+        assert_sig_to_from_str!(Type::var_args(Type::Dynamic), "#m");
+        assert_sig_to_from_str!(Type::kw_args(Type::Object), "~o");
         // Some complex type for fun.
-        assert_to_from_str!(
+        assert_sig_to_from_str!(
             Type::tuple([
                 Type::list(Type::map(Type::option(Type::Object), Type::Raw)),
                 Type::kw_args(Type::Double),
@@ -561,60 +459,60 @@ mod tests {
     }
 
     #[test]
-    fn test_type_from_str_errors() {
-        assert_eq!("".parse::<Type>(), Err(FromStrError::EndOfInput));
+    fn test_signature_from_str_errors() {
+        assert_eq!("".parse::<Signature>(), Err(FromStrError::EndOfInput));
         assert_eq!(
-            "u".parse::<Type>(),
+            "u".parse::<Signature>(),
             Err(FromStrError::UnexpectedChar('u', "u".into()))
         );
         // Option
         assert_eq!(
-            "+".parse::<Type>(),
+            "+".parse::<Signature>(),
             Err(FromStrError::MissingOptionValueType("+".into()))
         );
         assert_eq!(
-            "+[".parse::<Type>(),
+            "+[".parse::<Signature>(),
             Err(FromStrError::OptionValueTypeParsing(Box::new(
                 FromStrError::MissingListValueType("[".into())
             )))
         );
         // VarArgs
         assert_eq!(
-            "#".parse::<Type>(),
+            "#".parse::<Signature>(),
             Err(FromStrError::MissingVarArgsValueType("#".into()))
         );
         assert_eq!(
-            "#[".parse::<Type>(),
+            "#[".parse::<Signature>(),
             Err(FromStrError::VarArgsValueTypeParsing(Box::new(
                 FromStrError::MissingListValueType("[".into())
             )))
         );
         // KwArgs
         assert_eq!(
-            "~".parse::<Type>(),
+            "~".parse::<Signature>(),
             Err(FromStrError::MissingKwArgsValueType("~".into()))
         );
         assert_eq!(
-            "~[".parse::<Type>(),
+            "~[".parse::<Signature>(),
             Err(FromStrError::KwArgsValueTypeParsing(Box::new(
                 FromStrError::MissingListValueType("[".into())
             )))
         );
         // Lists
         assert_eq!(
-            "[".parse::<Type>(),
+            "[".parse::<Signature>(),
             Err(FromStrError::MissingListValueType("[".into()))
         );
         assert_eq!(
-            "[]".parse::<Type>(),
+            "[]".parse::<Signature>(),
             Err(FromStrError::MissingListValueType("[]".into()))
         );
         assert_eq!(
-            "[i".parse::<Type>(),
+            "[i".parse::<Signature>(),
             Err(FromStrError::MissingListEnd("[i".into()))
         );
         assert_eq!(
-            "[{i}]".parse::<Type>(),
+            "[{i}]".parse::<Signature>(),
             Err(FromStrError::ListValueTypeParsing(Box::new(
                 FromStrError::MissingMapValueType("{i}]".into())
             )))
@@ -622,7 +520,7 @@ mod tests {
         // The error is `UnexpectedChar` and not `MissingTupleEnd` because we don't detect subtype
         // parsing.
         assert_eq!(
-            "[(]".parse::<Type>(),
+            "[(]".parse::<Signature>(),
             Err(FromStrError::ListValueTypeParsing(Box::new(
                 FromStrError::TupleElementTypeParsing(Box::new(FromStrError::UnexpectedChar(
                     ']',
@@ -632,29 +530,29 @@ mod tests {
         );
         // Maps
         assert_eq!(
-            "{".parse::<Type>(),
+            "{".parse::<Signature>(),
             Err(FromStrError::MissingMapKeyType("{".into()))
         );
         assert_eq!(
-            "{}".parse::<Type>(),
+            "{}".parse::<Signature>(),
             Err(FromStrError::MissingMapKeyType("{}".into()))
         );
         assert_eq!(
-            "{i}".parse::<Type>(),
+            "{i}".parse::<Signature>(),
             Err(FromStrError::MissingMapValueType("{i}".into()))
         );
         assert_eq!(
-            "{ii".parse::<Type>(),
+            "{ii".parse::<Signature>(),
             Err(FromStrError::MissingMapEnd("{ii".into()))
         );
         assert_eq!(
-            "{[]i}".parse::<Type>(),
+            "{[]i}".parse::<Signature>(),
             Err(FromStrError::MapKeyTypeParsing(Box::new(
                 FromStrError::MissingListValueType("[]i}".into())
             )))
         );
         assert_eq!(
-            "{i[]}".parse::<Type>(),
+            "{i[]}".parse::<Signature>(),
             Err(FromStrError::MapValueTypeParsing(Box::new(
                 FromStrError::MissingListValueType("[]}".into())
             )))
@@ -662,7 +560,7 @@ mod tests {
         // The error is `UnexpectedChar` and not `MissingListEnd` because we don't detect subtype
         // parsing.
         assert_eq!(
-            "{i[}".parse::<Type>(),
+            "{i[}".parse::<Signature>(),
             Err(FromStrError::MapValueTypeParsing(Box::new(
                 FromStrError::ListValueTypeParsing(Box::new(FromStrError::UnexpectedChar(
                     '}',
@@ -672,38 +570,38 @@ mod tests {
         );
         // Tuples
         assert_eq!(
-            "(".parse::<Type>(),
+            "(".parse::<Signature>(),
             Err(FromStrError::MissingTupleEnd("(".into()))
         );
         assert_eq!(
-            "(iii".parse::<Type>(),
+            "(iii".parse::<Signature>(),
             Err(FromStrError::MissingTupleEnd("(iii".into()))
         );
         assert_eq!(
-            "(i[i)".parse::<Type>(),
+            "(i[i)".parse::<Signature>(),
             Err(FromStrError::TupleElementTypeParsing(Box::new(
                 FromStrError::MissingListEnd("[i)".into())
             )))
         );
         // Tuples annotations
         assert_eq!(
-            "(i)<".parse::<Type>(),
+            "(i)<".parse::<Signature>(),
             Err(FromStrError::MissingTupleAnnotationEnd("(i)<".into()))
         );
         assert_eq!(
-            "(i)<>".parse::<Type>(),
+            "(i)<>".parse::<Signature>(),
             Err(FromStrError::MissingTupleAnnotationStructName(
                 "(i)<>".into()
             ))
         );
         assert_eq!(
-            "(i)<S>".parse::<Type>(),
+            "(i)<S>".parse::<Signature>(),
             Err(FromStrError::MissingTupleAnnotationFieldName(
                 "(i)<S>".into()
             ))
         );
         assert_eq!(
-            "(i)<S,a,b>".parse::<Type>(),
+            "(i)<S,a,b>".parse::<Signature>(),
             Err(FromStrError::UnexpectedTupleAnnotationFieldName(
                 1,
                 "b>".into(),
@@ -713,7 +611,7 @@ mod tests {
         // The error is `UnexpectedChar` and not `MissingMapEnd` because we don't detect subtype
         // parsing.
         assert_eq!(
-            "(i{i)".parse::<Type>(),
+            "(i{i)".parse::<Signature>(),
             Err(FromStrError::TupleElementTypeParsing(Box::new(
                 FromStrError::MapValueTypeParsing(Box::new(FromStrError::UnexpectedChar(
                     ')',
@@ -724,23 +622,24 @@ mod tests {
     }
 
     #[test]
-    fn test_type_from_str_meta_object() {
+    fn test_signature_from_str_meta_object() {
         let input = "({I(Issss[(ss)<MetaMethodParameter,name,description>]s)\
                      <MetaMethod,uid,returnSignature,name,parametersSignature,\
                      description,parameters,returnDescription>}{I(Iss)<MetaSignal,\
                      uid,name,signature>}{I(Iss)<MetaProperty,uid,name,signature>}s)\
                      <MetaObject,methods,signals,properties,description>";
-        let t: Type = input.parse().unwrap();
+        let sig: Signature = input.parse().unwrap();
+        let t = sig.into_type();
         assert_eq!(
             t,
-            Type::structure(
+            Type::named_tuple(
                 "MetaObject",
                 [
                     tuple::Field::new(
                         "methods",
                         Type::map(
                             Type::Int64,
-                            Type::structure(
+                            Type::named_tuple(
                                 "MetaMethod",
                                 [
                                     tuple::Field::new("uid", Type::Int64),
@@ -750,7 +649,7 @@ mod tests {
                                     tuple::Field::new("description", Type::String),
                                     tuple::Field::new(
                                         "parameters",
-                                        Type::list(Type::structure(
+                                        Type::list(Type::named_tuple(
                                             "MetaMethodParameter",
                                             [
                                                 tuple::Field::new("name", Type::String),
@@ -767,7 +666,7 @@ mod tests {
                         "signals",
                         Type::map(
                             Type::Int64,
-                            Type::structure(
+                            Type::named_tuple(
                                 "MetaSignal",
                                 [
                                     tuple::Field::new("uid", Type::Int64),
@@ -781,7 +680,7 @@ mod tests {
                         "properties",
                         Type::map(
                             Type::Int64,
-                            Type::structure(
+                            Type::named_tuple(
                                 "MetaProperty",
                                 [
                                     tuple::Field::new("uid", Type::Int64),
@@ -798,15 +697,15 @@ mod tests {
     }
 
     #[test]
-    fn test_type_ser_de() {
+    fn test_signature_ser_de() {
         assert_tokens(
-            &Type::Tuple(Tuple::named(
+            &Signature(Type::Tuple(tuple::Tuple::named(
                 "Point",
                 tuple::Elements::from_iter([
                     tuple::Field::new("x", Type::Double),
                     tuple::Field::new("y", Type::Double),
                 ]),
-            )),
+            ))),
             &[Token::Str("(dd)<Point,x,y>")],
         )
     }

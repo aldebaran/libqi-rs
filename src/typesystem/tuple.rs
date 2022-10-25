@@ -27,7 +27,7 @@ impl<T> Tuple<T> {
         }
     }
 
-    pub fn anonymous<E>(elements: E) -> Self
+    pub fn new<E>(elements: E) -> Self
     where
         E: Into<Elements<T>>,
     {

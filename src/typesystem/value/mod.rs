@@ -5,6 +5,7 @@ pub use ser::to_value;
 
 // TODO: #[non_exhaustive]
 // TODO: Enable the value to borrow data from sources.
+// TODO: This is a dynamic value, and should be de/serialized as such.
 #[derive(Default, Clone, PartialEq, PartialOrd, Debug)]
 pub enum Value {
     #[default]
