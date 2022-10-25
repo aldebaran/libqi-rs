@@ -5,6 +5,12 @@ use std::{
     hash::{BuildHasher, Hash},
 };
 
+// TODO: This is a bad approach because it forces users to implement ToType.
+//       This can create an inconsistency between the Serialize and the ToType
+//       implementations for a type.
+//       Instead, the signature of a type should be deduced from its Serialize
+//       implementation.
+//       T => Value => type()
 pub trait ToType {
     fn to_type() -> Type;
 }

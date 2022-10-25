@@ -8,6 +8,7 @@ pub mod r#type;
 pub use r#type::Type;
 
 // TODO: #[non_exhaustive]
+// TODO: Enable the value to borrow data from sources.
 #[derive(Default, Clone, PartialEq, PartialOrd, Debug)]
 pub enum Value {
     #[default]
