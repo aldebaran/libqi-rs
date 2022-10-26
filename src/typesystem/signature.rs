@@ -1,4 +1,5 @@
-use super::r#type::Type;
+use super::r#type::{tuple, Tuple, Type};
+use itertools::Itertools;
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub struct Signature(Type);
@@ -39,50 +40,93 @@ impl Signature {
     const CHAR_ANNOTATIONS_SEP: char = ',';
     const CHAR_ANNOTATIONS_END: char = '>';
 
-    fn parse(iter: &mut std::str::Chars) -> Result<Self, FromStrError> {
+    fn parse_type(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
         let input = iter.as_str();
         let c = iter.next().ok_or(FromStrError::EndOfInput)?;
         match c {
-            Self::CHAR_NONE => Ok(Self(Type::None)),
-            Self::CHAR_UNKNOWN => Ok(Self(Type::Unknown)),
-            Self::CHAR_VOID => Ok(Self(Type::Void)),
-            Self::CHAR_BOOL => Ok(Self(Type::Bool)),
-            Self::CHAR_INT8 => Ok(Self(Type::Int8)),
-            Self::CHAR_UINT8 => Ok(Self(Type::UInt8)),
-            Self::CHAR_INT16 => Ok(Self(Type::Int16)),
-            Self::CHAR_UINT16 => Ok(Self(Type::UInt16)),
-            Self::CHAR_INT32 => Ok(Self(Type::Int32)),
-            Self::CHAR_UINT32 => Ok(Self(Type::UInt32)),
-            Self::CHAR_INT64 => Ok(Self(Type::Int64)),
-            Self::CHAR_UINT64 => Ok(Self(Type::UInt64)),
-            Self::CHAR_FLOAT => Ok(Self(Type::Float)),
-            Self::CHAR_DOUBLE => Ok(Self(Type::Double)),
-            Self::CHAR_STRING => Ok(Self(Type::String)),
-            Self::CHAR_RAW => Ok(Self(Type::Raw)),
-            Self::CHAR_OBJECT => Ok(Self(Type::Object)),
-            Self::CHAR_DYNAMIC => Ok(Self(Type::Dynamic)),
-            Self::CHAR_MARK_OPTION => Self::parse_option_tail(iter, input),
-            Self::CHAR_LIST_BEGIN => Self::parse_list_tail(iter, input),
-            Self::CHAR_MAP_BEGIN => Self::parse_map_tail(iter, input),
+            Self::CHAR_NONE => Ok(Type::None),
+            Self::CHAR_UNKNOWN => Ok(Type::Unknown),
+            Self::CHAR_VOID => Ok(Type::Void),
+            Self::CHAR_BOOL => Ok(Type::Bool),
+            Self::CHAR_INT8 => Ok(Type::Int8),
+            Self::CHAR_UINT8 => Ok(Type::UInt8),
+            Self::CHAR_INT16 => Ok(Type::Int16),
+            Self::CHAR_UINT16 => Ok(Type::UInt16),
+            Self::CHAR_INT32 => Ok(Type::Int32),
+            Self::CHAR_UINT32 => Ok(Type::UInt32),
+            Self::CHAR_INT64 => Ok(Type::Int64),
+            Self::CHAR_UINT64 => Ok(Type::UInt64),
+            Self::CHAR_FLOAT => Ok(Type::Float),
+            Self::CHAR_DOUBLE => Ok(Type::Double),
+            Self::CHAR_STRING => Ok(Type::String),
+            Self::CHAR_RAW => Ok(Type::Raw),
+            Self::CHAR_OBJECT => Ok(Type::Object),
+            Self::CHAR_DYNAMIC => Ok(Type::Dynamic),
+            Self::CHAR_MARK_OPTION => Ok({
+                let t = Self::parse_option_tail(iter, input)?;
+                Type::option(t)
+            }),
+            Self::CHAR_LIST_BEGIN => Ok({
+                let t = Self::parse_list_tail(iter, input)?;
+                Type::list(t)
+            }),
+            Self::CHAR_MAP_BEGIN => Ok({
+                let (key, value) = Self::parse_map_tail(iter, input)?;
+                Type::map(key, value)
+            }),
             Self::CHAR_TUPLE_BEGIN => {
                 let tuple = Self::parse_tuple_tail(iter, input)?;
-                match iter.next() {
-                    Some(Self::CHAR_ANNOTATIONS_BEGIN) => {
-                        let annotations = Self::parse_tuple_annotations_tail(iter, input);
-                        todo!()
+                fn parse_annotations<'c>(
+                    mut iter: std::str::Chars<'c>,
+                    tuple_start: &str,
+                ) -> Result<
+                    Option<((Option<String>, Option<Vec<String>>), std::str::Chars<'c>)>,
+                    FromStrError,
+                > {
+                    match iter.next() {
+                        Some(Signature::CHAR_ANNOTATIONS_BEGIN) => {
+                            let (name, fields) =
+                                Signature::parse_tuple_annotations_tail(&mut iter, tuple_start)?;
+                            Ok(Some(((name, fields), iter)))
+                        }
+                        _ => Ok(None),
                     }
-                    _ => Ok(tuple),
                 }
+                let tuple = match parse_annotations(iter.clone(), input)? {
+                    Some(((name, fields), after_annot_iter)) => {
+                        // Advance iter to after annotations.
+                        *iter = after_annot_iter;
+                        let elements = match fields {
+                            Some(fields) => tuple
+                                .elements
+                                .name(fields)
+                                .map_err(|err| FromStrError::Annotation(err, input.into()))?,
+                            None => tuple.elements,
+                        };
+                        match name {
+                            Some(name) => Tuple::named(name, elements),
+                            None => Tuple::new(elements),
+                        }
+                    }
+                    None => tuple,
+                };
+                Ok(Type::from(tuple))
             }
-            Self::CHAR_MARK_VARSARGS => Self::parse_varargs_tail(iter, input),
-            Self::CHAR_MARK_KWARGS => Self::parse_kwargs_tail(iter, input),
+            Self::CHAR_MARK_VARSARGS => Ok({
+                let t = Self::parse_varargs_tail(iter, input)?;
+                Type::var_args(t)
+            }),
+            Self::CHAR_MARK_KWARGS => Ok({
+                let t = Self::parse_kwargs_tail(iter, input)?;
+                Type::kw_args(t)
+            }),
             _ => Err(FromStrError::UnexpectedChar(c, input.into())),
         }
     }
 
-    fn parse_option_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
-        match Self::parse(iter) {
-            Ok(sig) => Ok(Self(Type::option(sig.0))),
+    fn parse_option_tail(iter: &mut std::str::Chars, start: &str) -> Result<Type, FromStrError> {
+        match Self::parse_type(iter) {
+            Ok(t) => Ok(t),
             Err(err) => Err(match err {
                 FromStrError::EndOfInput => FromStrError::MissingOptionValueType(start.into()),
                 _ => FromStrError::OptionValueTypeParsing(Box::new(err)),
@@ -91,9 +135,9 @@ impl Signature {
         .into()
     }
 
-    fn parse_varargs_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
-        match Self::parse(iter) {
-            Ok(Self(t)) => Ok(Self(Type::var_args(t))),
+    fn parse_varargs_tail(iter: &mut std::str::Chars, start: &str) -> Result<Type, FromStrError> {
+        match Self::parse_type(iter) {
+            Ok(t) => Ok(t),
             Err(err) => Err(match err {
                 FromStrError::EndOfInput => FromStrError::MissingVarArgsValueType(start.into()),
                 _ => FromStrError::VarArgsValueTypeParsing(Box::new(err)),
@@ -101,9 +145,9 @@ impl Signature {
         }
     }
 
-    fn parse_kwargs_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
-        match Self::parse(iter) {
-            Ok(Self(t)) => Ok(Self(Type::kw_args(t))),
+    fn parse_kwargs_tail(iter: &mut std::str::Chars, start: &str) -> Result<Type, FromStrError> {
+        match Self::parse_type(iter) {
+            Ok(t) => Ok(t),
             Err(err) => Err(match err {
                 FromStrError::EndOfInput => FromStrError::MissingKwArgsValueType(start.into()),
                 _ => FromStrError::KwArgsValueTypeParsing(Box::new(err)),
@@ -111,50 +155,50 @@ impl Signature {
         }
     }
 
-    fn parse_list_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
-        let sig = Self::parse(iter).map_err(|err| match err {
+    fn parse_list_tail(iter: &mut std::str::Chars, start: &str) -> Result<Type, FromStrError> {
+        let t = Self::parse_type(iter).map_err(|err| match err {
             FromStrError::UnexpectedChar(Self::CHAR_LIST_END, _) | FromStrError::EndOfInput => {
                 FromStrError::MissingListValueType(start.into())
             }
             _ => FromStrError::ListValueTypeParsing(Box::new(err)),
         })?;
-        let t = sig.into_type();
         match iter.next() {
-            Some(Self::CHAR_LIST_END) => Ok(Self(Type::list(t))),
+            Some(Self::CHAR_LIST_END) => Ok(t),
             _ => Err(FromStrError::MissingListEnd(start.into())),
         }
     }
 
-    fn parse_map_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
-        let key = Self::parse(iter).map_err(|err| match err {
+    fn parse_map_tail(
+        iter: &mut std::str::Chars,
+        start: &str,
+    ) -> Result<(Type, Type), FromStrError> {
+        let key = Self::parse_type(iter).map_err(|err| match err {
             FromStrError::UnexpectedChar(Self::CHAR_MAP_END, _) | FromStrError::EndOfInput => {
                 FromStrError::MissingMapKeyType(start.into())
             }
             _ => FromStrError::MapKeyTypeParsing(Box::new(err)),
         })?;
-        let key = key.into_type();
-        let value = Self::parse(iter).map_err(|err| match err {
+        let value = Self::parse_type(iter).map_err(|err| match err {
             FromStrError::UnexpectedChar(Self::CHAR_MAP_END, _) => {
                 FromStrError::MissingMapValueType(start.into())
             }
             _ => FromStrError::MapValueTypeParsing(Box::new(err)),
         })?;
-        let value = value.into_type();
         match iter.next() {
-            Some(Self::CHAR_MAP_END) => Ok(Self(Type::map(key, value))),
+            Some(Self::CHAR_MAP_END) => Ok((key, value)),
             _ => Err(FromStrError::MissingMapEnd(start.into())),
         }
     }
 
-    fn parse_tuple_tail(iter: &mut std::str::Chars, start: &str) -> Result<Self, FromStrError> {
+    fn parse_tuple_tail(iter: &mut std::str::Chars, start: &str) -> Result<Tuple, FromStrError> {
         let mut fields = Vec::new();
         loop {
-            match Self::parse(iter) {
-                Ok(Signature(t)) => fields.push(t),
+            match Self::parse_type(iter) {
+                Ok(t) => fields.push(t),
                 Err(err) => {
                     break match err {
                         FromStrError::UnexpectedChar(Self::CHAR_TUPLE_END, _) => {
-                            Ok(Self(Type::tuple(fields)))
+                            Ok(Tuple::new(tuple::Elements::from_iter(fields)))
                         }
                         FromStrError::EndOfInput => {
                             Err(FromStrError::MissingTupleEnd(start.into()))
@@ -168,9 +212,51 @@ impl Signature {
 
     fn parse_tuple_annotations_tail(
         iter: &mut std::str::Chars,
-        start: &str,
-    ) -> Result<Self, FromStrError> {
-        todo!()
+        tuple_start: &str,
+    ) -> Result<(Option<String>, Option<Vec<String>>), FromStrError> {
+        type Value = (Option<String>, Option<Vec<String>>);
+        enum State {
+            Name(Option<String>),
+            Field(Option<String>),
+        }
+        impl State {
+            fn push_char(&mut self, c: char) {
+                match self {
+                    Self::Name(s) | Self::Field(s) => match s {
+                        Some(s) => s.push(c),
+                        None => *s = Some(String::from(c)),
+                    },
+                }
+            }
+            fn next(&mut self, value: &mut Value) {
+                match std::mem::replace(self, Self::Field(None)) {
+                    Self::Name(n) => {
+                        value.0 = n;
+                    }
+                    Self::Field(f) => {
+                        if let Some(f) = f {
+                            let fields = &mut value.1;
+                            let fields = fields.get_or_insert_with(|| Vec::new());
+                            fields.push(f);
+                        }
+                    }
+                }
+            }
+        }
+        let mut value = Value::default();
+        let mut state = State::Name(None);
+        loop {
+            match iter.next() {
+                Some(Self::CHAR_ANNOTATIONS_SEP) => state.next(&mut value),
+                Some(Self::CHAR_ANNOTATIONS_END) => {
+                    state.next(&mut value);
+                    break Ok(value);
+                }
+                Some(c) if c.is_alphanumeric() => state.push_char(c),
+                Some(c) => break Err(FromStrError::UnexpectedChar(c, tuple_start.into())),
+                None => break Err(FromStrError::MissingTupleAnnotationEnd(tuple_start.into())),
+            }
+        }
     }
 }
 
@@ -239,11 +325,23 @@ impl std::fmt::Display for Signature {
                         .into_iter()
                         .fold(String::new(), |s, t| s + &Self(t.clone()).to_string())
                 )?;
-                Ok(())
-                //match t {
-                //    Tuple{ name: None, elements: Elements::Raw(_) } => Ok(()),
-
-                //}
+                // Skip annotations if both name and fields are absent.
+                if t.name.is_none() && !t.has_fields() {
+                    return Ok(());
+                }
+                write!(
+                    f,
+                    "{beg}{name}{fields}{end}",
+                    beg = Self::CHAR_ANNOTATIONS_BEGIN,
+                    end = Self::CHAR_ANNOTATIONS_END,
+                    name = t.name.as_ref().unwrap_or(&String::new()),
+                    fields = t
+                        .fields()
+                        .into_iter()
+                        .flatten()
+                        .map(|f| format!(",{name}", name = f.name))
+                        .collect::<String>(),
+                )
             }
             Type::VarArgs(t) => write!(
                 f,
@@ -265,7 +363,7 @@ impl std::str::FromStr for Signature {
     type Err = FromStrError;
 
     fn from_str(src: &str) -> Result<Self, Self::Err> {
-        Self::parse(&mut src.chars())
+        Self::parse_type(&mut src.chars()).map(Self)
     }
 }
 
@@ -326,14 +424,8 @@ pub enum FromStrError {
     #[error("end of tuple starting at input \"{0}\" is missing")]
     MissingTupleEnd(String),
 
-    #[error("annotation for structure name of tuple starting at input \"{0}\" is missing")]
-    MissingTupleAnnotationStructName(String),
-
-    #[error("annotation for structure field name of tuple starting at input \"{0}\" is missing")]
-    MissingTupleAnnotationFieldName(String),
-
-    #[error("unexpected annotation for structure field name at \"{1}\" of tuple starting at input \"{2}\" (expected {0} fields)")]
-    UnexpectedTupleAnnotationFieldName(usize, String, String),
+    #[error("annotation of structure failed: \"{0}\"")]
+    Annotation(tuple::NameElementsError, String),
 
     #[error("end of annotation for tuple starting at input \"{0}\" is missing")]
     MissingTupleAnnotationEnd(String),
@@ -353,20 +445,33 @@ impl<'de> serde::Deserialize<'de> for Signature {
     where
         D: serde::Deserializer<'de>,
     {
-        <&str>::deserialize(deserializer)?
-            .parse()
-            .map_err(|e| serde::de::Error::custom(e))
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Signature;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a borrowed or owned string")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                v.parse().map_err(|e| serde::de::Error::custom(e))
+            }
+        }
+        deserializer.deserialize_str(Visitor)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{super::r#type::tuple, *};
-    use serde_test::{assert_tokens, Token};
 
     #[test]
     fn test_signature_to_from_string() {
-        macro_rules! assert_sig_to_from_str {
+        use pretty_assertions::assert_eq;
+        macro_rules! assert_sig_to_str {
             ($t:expr, $s:expr) => {{
                 assert_eq!(
                     Signature($t).to_string(),
@@ -375,6 +480,10 @@ mod tests {
                     t = $t,
                     s = $s
                 );
+            }};
+        }
+        macro_rules! assert_sig_from_str {
+            ($t:expr, $s:expr) => {{
                 assert_eq!(
                     $s.parse::<Signature>().map(|s| s.into_type()),
                     Ok($t),
@@ -382,6 +491,12 @@ mod tests {
                     s = $s,
                     t = $t
                 );
+            }};
+        }
+        macro_rules! assert_sig_to_from_str {
+            ($t:expr, $s:expr) => {{
+                assert_sig_to_str!($t, $s);
+                assert_sig_from_str!($t, $s);
             }};
         }
         assert_sig_to_from_str!(Type::None, "_");
@@ -404,35 +519,39 @@ mod tests {
         assert_sig_to_from_str!(Type::Dynamic, "m");
         assert_sig_to_from_str!(Type::option(Type::Void), "+v");
         assert_sig_to_from_str!(Type::list(Type::Int32), "[i]");
+        assert_sig_to_from_str!(Type::list(Type::unit_tuple()), "[()]");
         assert_sig_to_from_str!(Type::map(Type::Float, Type::String), "{fs}");
         assert_sig_to_from_str!(
-            Type::tuple([Type::Float, Type::String, Type::UInt32]),
+            Type::tuple_from_iter([Type::Float, Type::String, Type::UInt32]),
             "(fsI)"
         );
         assert_sig_to_from_str!(
-            Type::tuple([
+            Type::tuple_from_iter([
                 tuple::Field::new("x", Type::Float),
                 tuple::Field::new("y", Type::Float)
             ]),
-            "(fsI)<,x,y>"
+            "(ff)<,x,y>"
         );
+        assert_sig_from_str!(Type::unit_tuple(), "()<>");
+        assert_sig_from_str!(Type::tuple_from_iter([Type::Int32]), "(i)<>");
+        assert_sig_from_str!(Type::tuple_from_iter([Type::Int32]), "(i)<,,,,,,,>");
         assert_sig_to_from_str!(
-            Type::named_tuple(
+            Type::named_tuple_from_iter(
                 "ExplorationMap",
                 [
-                    Type::list(Type::tuple([Type::Double, Type::Double])),
+                    Type::list(Type::tuple_from_iter([Type::Double, Type::Double])),
                     Type::UInt64,
                 ],
             ),
             "([(dd)]L)<ExplorationMap>"
         );
         assert_sig_to_from_str!(
-            Type::named_tuple(
+            Type::named_tuple_from_iter(
                 "ExplorationMap",
                 [
                     tuple::Field::new(
                         "points",
-                        Type::list(Type::named_tuple(
+                        Type::list(Type::named_tuple_from_iter(
                             "Point",
                             [
                                 tuple::Field::new("x", Type::Double),
@@ -449,7 +568,7 @@ mod tests {
         assert_sig_to_from_str!(Type::kw_args(Type::Object), "~o");
         // Some complex type for fun.
         assert_sig_to_from_str!(
-            Type::tuple([
+            Type::tuple_from_iter([
                 Type::list(Type::map(Type::option(Type::Object), Type::Raw)),
                 Type::kw_args(Type::Double),
                 Type::var_args(Type::option(Type::Dynamic)),
@@ -589,22 +708,9 @@ mod tests {
             Err(FromStrError::MissingTupleAnnotationEnd("(i)<".into()))
         );
         assert_eq!(
-            "(i)<>".parse::<Signature>(),
-            Err(FromStrError::MissingTupleAnnotationStructName(
-                "(i)<>".into()
-            ))
-        );
-        assert_eq!(
-            "(i)<S>".parse::<Signature>(),
-            Err(FromStrError::MissingTupleAnnotationFieldName(
-                "(i)<S>".into()
-            ))
-        );
-        assert_eq!(
             "(i)<S,a,b>".parse::<Signature>(),
-            Err(FromStrError::UnexpectedTupleAnnotationFieldName(
-                1,
-                "b>".into(),
+            Err(FromStrError::Annotation(
+                tuple::NameElementsError::BadNamesSize(1, 2),
                 "(i)<S,a,b>".into()
             ))
         );
@@ -623,6 +729,7 @@ mod tests {
 
     #[test]
     fn test_signature_from_str_meta_object() {
+        use pretty_assertions::assert_eq;
         let input = "({I(Issss[(ss)<MetaMethodParameter,name,description>]s)\
                      <MetaMethod,uid,returnSignature,name,parametersSignature,\
                      description,parameters,returnDescription>}{I(Iss)<MetaSignal,\
@@ -632,24 +739,24 @@ mod tests {
         let t = sig.into_type();
         assert_eq!(
             t,
-            Type::named_tuple(
+            Type::named_tuple_from_iter(
                 "MetaObject",
                 [
                     tuple::Field::new(
                         "methods",
                         Type::map(
-                            Type::Int64,
-                            Type::named_tuple(
+                            Type::UInt32,
+                            Type::named_tuple_from_iter(
                                 "MetaMethod",
                                 [
-                                    tuple::Field::new("uid", Type::Int64),
+                                    tuple::Field::new("uid", Type::UInt32),
                                     tuple::Field::new("returnSignature", Type::String),
                                     tuple::Field::new("name", Type::String),
                                     tuple::Field::new("parametersSignature", Type::String),
                                     tuple::Field::new("description", Type::String),
                                     tuple::Field::new(
                                         "parameters",
-                                        Type::list(Type::named_tuple(
+                                        Type::list(Type::named_tuple_from_iter(
                                             "MetaMethodParameter",
                                             [
                                                 tuple::Field::new("name", Type::String),
@@ -665,11 +772,11 @@ mod tests {
                     tuple::Field::new(
                         "signals",
                         Type::map(
-                            Type::Int64,
-                            Type::named_tuple(
+                            Type::UInt32,
+                            Type::named_tuple_from_iter(
                                 "MetaSignal",
                                 [
-                                    tuple::Field::new("uid", Type::Int64),
+                                    tuple::Field::new("uid", Type::UInt32),
                                     tuple::Field::new("name", Type::String),
                                     tuple::Field::new("signature", Type::String),
                                 ]
@@ -679,11 +786,11 @@ mod tests {
                     tuple::Field::new(
                         "properties",
                         Type::map(
-                            Type::Int64,
-                            Type::named_tuple(
+                            Type::UInt32,
+                            Type::named_tuple_from_iter(
                                 "MetaProperty",
                                 [
-                                    tuple::Field::new("uid", Type::Int64),
+                                    tuple::Field::new("uid", Type::UInt32),
                                     tuple::Field::new("name", Type::String),
                                     tuple::Field::new("signature", Type::String),
                                 ]
@@ -698,6 +805,7 @@ mod tests {
 
     #[test]
     fn test_signature_ser_de() {
+        use serde_test::{assert_tokens, Token};
         assert_tokens(
             &Signature(Type::Tuple(tuple::Tuple::named(
                 "Point",

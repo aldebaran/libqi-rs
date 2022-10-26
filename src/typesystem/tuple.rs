@@ -16,6 +16,13 @@ pub struct Tuple<T> {
 }
 
 impl<T> Tuple<T> {
+    pub fn unit() -> Self {
+        Self {
+            name: None,
+            elements: Elements::default(),
+        }
+    }
+
     pub fn named<S, E>(name: S, elements: E) -> Self
     where
         S: Into<String>,
@@ -89,6 +96,38 @@ impl<'a, T> IntoIterator for &'a mut Tuple<T> {
 pub enum Elements<T> {
     Raw(Vec<T>),
     Fields(Vec<Field<T>>),
+}
+
+impl<T> Elements<T> {
+    pub fn name<I>(self, names: I) -> Result<Self, NameElementsError>
+    where
+        I: IntoIterator,
+        I::IntoIter: std::iter::ExactSizeIterator,
+        I::Item: Into<String>,
+    {
+        let elements_len = match &self {
+            Self::Raw(v) => v.len(),
+            Self::Fields(v) => v.len(),
+        };
+        let names = names.into_iter();
+        let names_len = names.len();
+        if elements_len != names_len {
+            return Err(NameElementsError::BadNamesSize(elements_len, names_len));
+        }
+        match self {
+            Self::Fields(_) => Err(NameElementsError::AlreadyNamed),
+            Self::Raw(elements) => {
+                let fields = elements
+                    .into_iter()
+                    .zip(names)
+                    .map(|(element, name)| Field {
+                        name: name.into(),
+                        element,
+                    });
+                Ok(Self::Fields(fields.collect()))
+            }
+        }
+    }
 }
 
 impl<T> Default for Elements<T> {
@@ -236,6 +275,15 @@ impl<T> Field<T> {
             element: element.into(),
         }
     }
+}
+
+#[derive(thiserror::Error, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum NameElementsError {
+    #[error("tuple of size {0} cannot be annotated with {1} names")]
+    BadNamesSize(usize, usize),
+
+    #[error("tuple is already annotated")]
+    AlreadyNamed,
 }
 
 #[cfg(test)]

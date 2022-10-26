@@ -6,6 +6,7 @@ pub mod tuple {
     use crate::typesystem::tuple;
     pub type Tuple = tuple::Tuple<Type>;
     pub type Elements = tuple::Elements<Type>;
+    pub use tuple::NameElementsError;
     pub type Field = tuple::Field<Type>;
 }
 pub use tuple::Tuple;
@@ -72,21 +73,40 @@ impl Type {
         }
     }
 
-    pub fn tuple<I>(elements: I) -> Self
+    pub fn unit_tuple() -> Self {
+        Tuple::unit().into()
+    }
+
+    pub fn tuple<E>(elements: E) -> Self
+    where
+        E: Into<tuple::Elements>,
+    {
+        Tuple::new(elements).into()
+    }
+
+    pub fn tuple_from_iter<I>(elements: I) -> Self
     where
         I: IntoIterator,
         tuple::Elements: FromIterator<I::Item>,
     {
-        Tuple::new(tuple::Elements::from_iter(elements)).into()
+        Self::tuple(tuple::Elements::from_iter(elements))
     }
 
-    pub fn named_tuple<S, I>(name: S, fields: I) -> Self
+    pub fn named_tuple<S, E>(name: S, elements: E) -> Self
+    where
+        S: Into<String>,
+        E: Into<tuple::Elements>,
+    {
+        Tuple::named(name, elements).into()
+    }
+
+    pub fn named_tuple_from_iter<S, I>(name: S, elements: I) -> Self
     where
         S: Into<String>,
         I: IntoIterator,
         tuple::Elements: FromIterator<I::Item>,
     {
-        Tuple::named(name, tuple::Elements::from_iter(fields)).into()
+        Self::named_tuple(name, tuple::Elements::from_iter(elements)).into()
     }
 
     pub fn var_args<T>(t: T) -> Self
@@ -141,14 +161,14 @@ mod tests {
     #[test]
     fn test_type_tuple() {
         assert_eq!(
-            Type::tuple([Type::Int32, Type::Float, Type::String]),
+            Type::tuple_from_iter([Type::Int32, Type::Float, Type::String]),
             Type::Tuple(Tuple {
                 name: None,
                 elements: tuple::Elements::Raw(vec![Type::Int32, Type::Float, Type::String,]),
             })
         );
         assert_eq!(
-            Type::tuple([
+            Type::tuple_from_iter([
                 tuple::Field::new("i", Type::Int32),
                 tuple::Field::new("f", Type::Float)
             ]),
@@ -165,7 +185,7 @@ mod tests {
     #[test]
     fn test_type_named_tuple() {
         assert_eq!(
-            Type::named_tuple(
+            Type::named_tuple_from_iter(
                 "S",
                 [
                     tuple::Field::new("a", Type::Int32),
@@ -181,7 +201,7 @@ mod tests {
             })
         );
         assert_eq!(
-            Type::named_tuple("S", [Type::Int32, Type::Float]),
+            Type::named_tuple_from_iter("S", [Type::Int32, Type::Float]),
             Type::Tuple(Tuple {
                 name: Some("S".into()),
                 elements: tuple::Elements::from_iter([Type::Int32, Type::Float]),
