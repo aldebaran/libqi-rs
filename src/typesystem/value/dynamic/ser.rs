@@ -1,6 +1,6 @@
-use super::{tuple, Tuple, Value};
+use super::{tuple, Dynamic, Tuple};
 
-pub fn to_value<T>(value: &T) -> Result<Value, Error>
+pub fn to_dynamic<T>(value: &T) -> Result<Dynamic, Error>
 where
     T: serde::Serialize + ?Sized,
 {
@@ -10,59 +10,59 @@ where
 pub struct Serializer;
 
 impl serde::Serializer for Serializer {
-    type Ok = Value;
+    type Ok = Dynamic;
     type Error = Error;
 
     type SerializeSeq = ListSerializer;
-    type SerializeTuple = TupleSerializer<Value>;
-    type SerializeTupleStruct = TupleSerializer<Value>;
+    type SerializeTuple = TupleSerializer<Dynamic>;
+    type SerializeTupleStruct = TupleSerializer<Dynamic>;
     type SerializeTupleVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
     type SerializeMap = MapSerializer;
     type SerializeStruct = TupleSerializer<tuple::Field>;
     type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Bool(v))
+        Ok(Dynamic::Bool(v))
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Int8(v))
+        Ok(Dynamic::Int8(v))
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Int16(v))
+        Ok(Dynamic::Int16(v))
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Int32(v))
+        Ok(Dynamic::Int32(v))
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Int64(v))
+        Ok(Dynamic::Int64(v))
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::UInt8(v))
+        Ok(Dynamic::UInt8(v))
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::UInt16(v))
+        Ok(Dynamic::UInt16(v))
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::UInt32(v))
+        Ok(Dynamic::UInt32(v))
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::UInt64(v))
+        Ok(Dynamic::UInt64(v))
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Float(v))
+        Ok(Dynamic::Float(v))
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Double(v))
+        Ok(Dynamic::Double(v))
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
@@ -72,32 +72,32 @@ impl serde::Serializer for Serializer {
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::String(v.to_string()))
+        Ok(Dynamic::String(v.to_string()))
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
         // OPTIMIZE: Do not copy bytes, but reference them
-        Ok(Value::Raw(v.into()))
+        Ok(Dynamic::Raw(v.into()))
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Optional(None))
+        Ok(Dynamic::Optional(None))
     }
 
     fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
     where
         T: serde::Serialize,
     {
-        let value = to_value(value)?;
-        Ok(Value::Optional(Some(Box::new(value))))
+        let value = to_dynamic(value)?;
+        Ok(Dynamic::Optional(Some(Box::new(value))))
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Void)
+        Ok(Dynamic::Void)
     }
 
     fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Tuple(Tuple {
+        Ok(Dynamic::Tuple(Tuple {
             name: Some(name.to_string()),
             elements: tuple::Elements::Fields(vec![]),
         }))
@@ -120,8 +120,8 @@ impl serde::Serializer for Serializer {
     where
         T: serde::Serialize,
     {
-        let value = to_value(value)?;
-        Ok(Value::Tuple(Tuple {
+        let value = to_dynamic(value)?;
+        Ok(Dynamic::Tuple(Tuple {
             name: Some(name.to_string()),
             elements: tuple::Elements::Raw(vec![value]),
         }))
@@ -190,7 +190,7 @@ impl serde::Serializer for Serializer {
 }
 
 pub struct ListSerializer {
-    elements: Vec<Value>,
+    elements: Vec<Dynamic>,
 }
 
 impl ListSerializer {
@@ -202,26 +202,26 @@ impl ListSerializer {
 }
 
 impl serde::ser::SerializeSeq for ListSerializer {
-    type Ok = Value;
+    type Ok = Dynamic;
     type Error = Error;
 
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
     {
-        let value = to_value(value)?;
+        let value = to_dynamic(value)?;
         self.elements.push(value);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::List(self.elements))
+        Ok(Dynamic::List(self.elements))
     }
 }
 
 pub struct MapSerializer {
-    elements: Vec<(Value, Value)>,
-    key: Option<Value>,
+    elements: Vec<(Dynamic, Dynamic)>,
+    key: Option<Dynamic>,
 }
 
 impl MapSerializer {
@@ -234,14 +234,14 @@ impl MapSerializer {
 }
 
 impl serde::ser::SerializeMap for MapSerializer {
-    type Ok = Value;
+    type Ok = Dynamic;
     type Error = Error;
 
     fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
     {
-        let key = to_value(key)?;
+        let key = to_dynamic(key)?;
         self.key = Some(key);
         Ok(())
     }
@@ -254,13 +254,13 @@ impl serde::ser::SerializeMap for MapSerializer {
             .key
             .take()
             .ok_or_else(|| Error::Custom("key was not serialized".into()))?;
-        let value = to_value(value)?;
+        let value = to_dynamic(value)?;
         self.elements.push((key, value));
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Map(self.elements))
+        Ok(Dynamic::Map(self.elements))
     }
 }
 
@@ -277,23 +277,23 @@ impl<T> TupleSerializer<T> {
         }
     }
 
-    fn into_value(self) -> Value
+    fn into_value(self) -> Dynamic
     where
         tuple::Elements: FromIterator<T>,
     {
-        Value::Tuple(Tuple {
+        Dynamic::Tuple(Tuple {
             name: self.name,
             elements: tuple::Elements::from_iter(self.fields),
         })
     }
 }
 
-impl TupleSerializer<Value> {
+impl TupleSerializer<Dynamic> {
     fn add_member<T: ?Sized>(&mut self, value: &T) -> Result<(), Error>
     where
         T: serde::Serialize,
     {
-        let value = to_value(value)?;
+        let value = to_dynamic(value)?;
         self.fields.push(value);
         Ok(())
     }
@@ -305,17 +305,17 @@ impl TupleSerializer<tuple::Field> {
         T: serde::Serialize,
     {
         let name = name.to_string();
-        let value = to_value(value)?;
+        let dynamic = to_dynamic(value)?;
         self.fields.push(tuple::Field {
             name,
-            element: value,
+            element: dynamic,
         });
         Ok(())
     }
 }
 
-impl serde::ser::SerializeTuple for TupleSerializer<Value> {
-    type Ok = Value;
+impl serde::ser::SerializeTuple for TupleSerializer<Dynamic> {
+    type Ok = Dynamic;
     type Error = Error;
 
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
@@ -330,8 +330,8 @@ impl serde::ser::SerializeTuple for TupleSerializer<Value> {
     }
 }
 
-impl serde::ser::SerializeTupleStruct for TupleSerializer<Value> {
-    type Ok = Value;
+impl serde::ser::SerializeTupleStruct for TupleSerializer<Dynamic> {
+    type Ok = Dynamic;
     type Error = Error;
 
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
@@ -347,7 +347,7 @@ impl serde::ser::SerializeTupleStruct for TupleSerializer<Value> {
 }
 
 impl serde::ser::SerializeStruct for TupleSerializer<tuple::Field> {
-    type Ok = Value;
+    type Ok = Dynamic;
     type Error = Error;
 
     fn serialize_field<T: ?Sized>(
@@ -384,28 +384,28 @@ impl serde::ser::Error for Error {
     }
 }
 
-impl serde::Serialize for Value {
+impl serde::Serialize for Dynamic {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         // TODO: Serialize as an enumeration.
         match self {
-            Value::Void => serializer.serialize_unit(),
-            Value::Bool(b) => b.serialize(serializer),
-            Value::Int8(i) => i.serialize(serializer),
-            Value::UInt8(i) => i.serialize(serializer),
-            Value::Int16(i) => i.serialize(serializer),
-            Value::UInt16(i) => i.serialize(serializer),
-            Value::Int32(i) => i.serialize(serializer),
-            Value::UInt32(i) => i.serialize(serializer),
-            Value::Int64(i) => i.serialize(serializer),
-            Value::UInt64(i) => i.serialize(serializer),
-            Value::Float(f) => f.serialize(serializer),
-            Value::Double(d) => d.serialize(serializer),
-            Value::String(s) => s.serialize(serializer),
-            Value::List(l) => l.serialize(serializer),
-            Value::Map(m) => {
+            Dynamic::Void => serializer.serialize_unit(),
+            Dynamic::Bool(b) => b.serialize(serializer),
+            Dynamic::Int8(i) => i.serialize(serializer),
+            Dynamic::UInt8(i) => i.serialize(serializer),
+            Dynamic::Int16(i) => i.serialize(serializer),
+            Dynamic::UInt16(i) => i.serialize(serializer),
+            Dynamic::Int32(i) => i.serialize(serializer),
+            Dynamic::UInt32(i) => i.serialize(serializer),
+            Dynamic::Int64(i) => i.serialize(serializer),
+            Dynamic::UInt64(i) => i.serialize(serializer),
+            Dynamic::Float(f) => f.serialize(serializer),
+            Dynamic::Double(d) => d.serialize(serializer),
+            Dynamic::String(s) => s.serialize(serializer),
+            Dynamic::List(l) => l.serialize(serializer),
+            Dynamic::Map(m) => {
                 // Do not serialize the vector of pair directly, serialize it as a map instead.
                 let mut map = serializer.serialize_map(Some(m.len()))?;
                 use serde::ser::SerializeMap;
@@ -414,12 +414,12 @@ impl serde::Serialize for Value {
                 }
                 map.end()
             }
-            Value::Tuple(t) => t.serialize(serializer),
-            Value::Raw(r) => {
+            Dynamic::Tuple(t) => t.serialize(serializer),
+            Dynamic::Raw(r) => {
                 // Do not serializ the vector of bytes directly, serialize it as bytes instead.
                 serializer.serialize_bytes(r)
             }
-            Value::Optional(o) => o.serialize(serializer),
+            Dynamic::Optional(o) => o.serialize(serializer),
         }
     }
 }
