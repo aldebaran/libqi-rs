@@ -1,6 +1,3 @@
-// TODO: remove the conversions module.
-// mod conversions;
-// pub use conversions::ToType;
 pub mod tuple {
     use super::Type;
     use crate::typesystem::tuple;
@@ -140,7 +137,6 @@ impl From<Tuple> for Type {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_test::{assert_tokens, Token};
 
     #[test]
     fn test_type_list() {
@@ -224,6 +220,23 @@ mod tests {
 
     #[test]
     fn test_type_ser_de() {
-        todo!()
+        use serde_test::{assert_tokens, Token};
+        assert_tokens(
+            &Type::list(Type::option(Type::Double)),
+            &[
+                Token::NewtypeVariant {
+                    name: "Type",
+                    variant: "List",
+                },
+                Token::NewtypeVariant {
+                    name: "Type",
+                    variant: "Option",
+                },
+                Token::UnitVariant {
+                    name: "Type",
+                    variant: "Double",
+                },
+            ],
+        );
     }
 }
