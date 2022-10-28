@@ -1,18 +1,18 @@
 pub use super::ser::Error;
-use super::{tuple, Dynamic};
+use super::{tuple, Value};
 use serde::{
     de::{value::MapDeserializer, IntoDeserializer},
     forward_to_deserialize_any,
 };
 
-pub fn from_dynamic<T>(d: Dynamic) -> Result<T, Error>
+pub fn from_value<T>(d: Value) -> Result<T, Error>
 where
     T: serde::de::DeserializeOwned,
 {
     T::deserialize(d)
 }
 
-impl<'de> serde::Deserializer<'de> for Dynamic {
+impl<'de> serde::Deserializer<'de> for Value {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -20,27 +20,27 @@ impl<'de> serde::Deserializer<'de> for Dynamic {
         V: serde::de::Visitor<'de>,
     {
         match self {
-            Dynamic::Void => visitor.visit_unit(),
-            Dynamic::Bool(b) => visitor.visit_bool(b),
-            Dynamic::Int8(i) => visitor.visit_i8(i),
-            Dynamic::UInt8(i) => visitor.visit_u8(i),
-            Dynamic::Int16(i) => visitor.visit_i16(i),
-            Dynamic::UInt16(i) => visitor.visit_u16(i),
-            Dynamic::Int32(i) => visitor.visit_i32(i),
-            Dynamic::UInt32(i) => visitor.visit_u32(i),
-            Dynamic::Int64(i) => visitor.visit_i64(i),
-            Dynamic::UInt64(i) => visitor.visit_u64(i),
-            Dynamic::Float(f) => visitor.visit_f32(f),
-            Dynamic::Double(d) => visitor.visit_f64(d),
-            Dynamic::String(s) => visitor.visit_string(s),
-            Dynamic::Raw(buf) => visitor.visit_byte_buf(buf),
-            Dynamic::Optional(o) => match o {
+            Value::Void => visitor.visit_unit(),
+            Value::Bool(b) => visitor.visit_bool(b),
+            Value::Int8(i) => visitor.visit_i8(i),
+            Value::UInt8(i) => visitor.visit_u8(i),
+            Value::Int16(i) => visitor.visit_i16(i),
+            Value::UInt16(i) => visitor.visit_u16(i),
+            Value::Int32(i) => visitor.visit_i32(i),
+            Value::UInt32(i) => visitor.visit_u32(i),
+            Value::Int64(i) => visitor.visit_i64(i),
+            Value::UInt64(i) => visitor.visit_u64(i),
+            Value::Float(f) => visitor.visit_f32(f),
+            Value::Double(d) => visitor.visit_f64(d),
+            Value::String(s) => visitor.visit_string(s),
+            Value::Raw(buf) => visitor.visit_byte_buf(buf),
+            Value::Optional(o) => match o {
                 Some(v) => visitor.visit_some(*v),
                 None => visitor.visit_none(),
             },
-            Dynamic::List(l) => visitor.visit_seq(l.into_deserializer()),
-            Dynamic::Map(m) => visitor.visit_map(MapDeserializer::new(m.into_iter())),
-            Dynamic::Tuple(_) => todo!(),
+            Value::List(l) => visitor.visit_seq(l.into_deserializer()),
+            Value::Map(m) => visitor.visit_map(MapDeserializer::new(m.into_iter())),
+            Value::Tuple(_) => todo!(),
         }
     }
 
@@ -116,73 +116,73 @@ impl<'de> serde::Deserializer<'de> for Dynamic {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Dynamic {
-    fn deserialize<D>(deserializer: D) -> Result<Dynamic, D::Error>
+impl<'de> serde::Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         struct Visitor;
 
         impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = Dynamic;
+            type Value = Value;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("any valid JSON value")
             }
 
-            fn visit_bool<E>(self, value: bool) -> Result<Dynamic, E> {
-                Ok(Dynamic::Bool(value))
+            fn visit_bool<E>(self, value: bool) -> Result<Value, E> {
+                Ok(Value::Bool(value))
             }
 
-            fn visit_i8<E>(self, value: i8) -> Result<Dynamic, E> {
-                Ok(Dynamic::Int8(value))
+            fn visit_i8<E>(self, value: i8) -> Result<Value, E> {
+                Ok(Value::Int8(value))
             }
 
-            fn visit_u8<E>(self, value: u8) -> Result<Dynamic, E> {
-                Ok(Dynamic::UInt8(value))
+            fn visit_u8<E>(self, value: u8) -> Result<Value, E> {
+                Ok(Value::UInt8(value))
             }
 
-            fn visit_i16<E>(self, value: i16) -> Result<Dynamic, E> {
-                Ok(Dynamic::Int16(value))
+            fn visit_i16<E>(self, value: i16) -> Result<Value, E> {
+                Ok(Value::Int16(value))
             }
 
-            fn visit_u16<E>(self, value: u16) -> Result<Dynamic, E> {
-                Ok(Dynamic::UInt16(value))
+            fn visit_u16<E>(self, value: u16) -> Result<Value, E> {
+                Ok(Value::UInt16(value))
             }
 
-            fn visit_i32<E>(self, value: i32) -> Result<Dynamic, E> {
-                Ok(Dynamic::Int32(value))
+            fn visit_i32<E>(self, value: i32) -> Result<Value, E> {
+                Ok(Value::Int32(value))
             }
 
-            fn visit_u32<E>(self, value: u32) -> Result<Dynamic, E> {
-                Ok(Dynamic::UInt32(value))
+            fn visit_u32<E>(self, value: u32) -> Result<Value, E> {
+                Ok(Value::UInt32(value))
             }
 
-            fn visit_i64<E>(self, value: i64) -> Result<Dynamic, E> {
-                Ok(Dynamic::Int64(value))
+            fn visit_i64<E>(self, value: i64) -> Result<Value, E> {
+                Ok(Value::Int64(value))
             }
 
-            fn visit_u64<E>(self, value: u64) -> Result<Dynamic, E> {
-                Ok(Dynamic::UInt64(value))
+            fn visit_u64<E>(self, value: u64) -> Result<Value, E> {
+                Ok(Value::UInt64(value))
             }
 
-            fn visit_f32<E>(self, value: f32) -> Result<Dynamic, E> {
-                Ok(Dynamic::Float(value))
+            fn visit_f32<E>(self, value: f32) -> Result<Value, E> {
+                Ok(Value::Float(value))
             }
 
-            fn visit_f64<E>(self, value: f64) -> Result<Dynamic, E> {
-                Ok(Dynamic::Double(value))
+            fn visit_f64<E>(self, value: f64) -> Result<Value, E> {
+                Ok(Value::Double(value))
             }
 
-            fn visit_str<E>(self, value: &str) -> Result<Dynamic, E>
+            fn visit_str<E>(self, value: &str) -> Result<Value, E>
             where
                 E: serde::de::Error,
             {
                 self.visit_string(value.to_string())
             }
 
-            fn visit_string<E>(self, value: String) -> Result<Dynamic, E> {
-                Ok(Dynamic::String(value))
+            fn visit_string<E>(self, value: String) -> Result<Value, E> {
+                Ok(Value::String(value))
             }
 
             fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
@@ -193,35 +193,33 @@ impl<'de> serde::Deserialize<'de> for Dynamic {
             }
 
             fn visit_byte_buf<E>(self, value: Vec<u8>) -> Result<Self::Value, E> {
-                Ok(Dynamic::Raw(value))
+                Ok(Value::Raw(value))
             }
 
-            fn visit_none<E>(self) -> Result<Dynamic, E> {
-                Ok(Dynamic::Optional(None))
+            fn visit_none<E>(self) -> Result<Value, E> {
+                Ok(Value::Optional(None))
             }
 
-            fn visit_some<D>(self, deserializer: D) -> Result<Dynamic, D::Error>
+            fn visit_some<D>(self, deserializer: D) -> Result<Value, D::Error>
             where
                 D: serde::Deserializer<'de>,
             {
                 let v = serde::Deserialize::deserialize(deserializer)?;
-                Ok(Dynamic::Optional(Some(Box::new(v))))
+                Ok(Value::Optional(Some(Box::new(v))))
             }
 
-            fn visit_unit<E>(self) -> Result<Dynamic, E> {
-                Ok(Dynamic::Void)
+            fn visit_unit<E>(self) -> Result<Value, E> {
+                Ok(Value::Void)
             }
 
             fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
             where
                 D: serde::Deserializer<'de>,
             {
-                Ok(Dynamic::Tuple(serde::Deserialize::deserialize(
-                    deserializer,
-                )?))
+                Ok(Value::Tuple(serde::Deserialize::deserialize(deserializer)?))
             }
 
-            fn visit_seq<V>(self, mut seq: V) -> Result<Dynamic, V::Error>
+            fn visit_seq<V>(self, mut seq: V) -> Result<Value, V::Error>
             where
                 V: serde::de::SeqAccess<'de>,
             {
@@ -229,10 +227,10 @@ impl<'de> serde::Deserialize<'de> for Dynamic {
                 while let Some(elem) = seq.next_element()? {
                     vec.push(elem);
                 }
-                Ok(Dynamic::List(vec))
+                Ok(Value::List(vec))
             }
 
-            fn visit_map<V>(self, mut map: V) -> Result<Dynamic, V::Error>
+            fn visit_map<V>(self, mut map: V) -> Result<Value, V::Error>
             where
                 V: serde::de::MapAccess<'de>,
             {
@@ -240,7 +238,7 @@ impl<'de> serde::Deserialize<'de> for Dynamic {
                 while let Some(pair) = map.next_entry()? {
                     vec.push(pair);
                 }
-                Ok(Dynamic::Map(vec))
+                Ok(Value::Map(vec))
             }
 
             fn visit_enum<A>(self, data: A) -> Result<Self::Value, A::Error>
@@ -259,7 +257,7 @@ impl<'de> serde::Deserialize<'de> for Dynamic {
     }
 }
 
-impl<'de> serde::de::IntoDeserializer<'de, Error> for Dynamic {
+impl<'de> serde::de::IntoDeserializer<'de, Error> for Value {
     type Deserializer = Self;
 
     fn into_deserializer(self) -> Self::Deserializer {
@@ -274,7 +272,7 @@ impl serde::de::Error for Error {
 }
 
 fn deserialize_tuple<'de, V>(
-    dynamic: Dynamic,
+    dynamic: Value,
     name: Option<&str>,
     visitor: V,
 ) -> Result<V::Value, Error>
@@ -283,7 +281,7 @@ where
 {
     use serde::de::Deserializer;
     match dynamic {
-        Dynamic::Tuple(tuple) if tuple.name.as_deref() == name => match tuple.elements {
+        Value::Tuple(tuple) if tuple.name.as_deref() == name => match tuple.elements {
             tuple::Elements::Raw(fields) => visitor.visit_seq(fields.into_deserializer()),
             tuple::Elements::Fields(fields) => visitor.visit_map(MapDeserializer::new(
                 fields.into_iter().map(|nf| (nf.name, nf.element)),

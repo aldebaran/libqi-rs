@@ -56,43 +56,43 @@ pub mod server {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use typesystem::value::{dynamic, Dynamic};
+    use typesystem::value::{dynamic, Value};
 
-    pub fn sample_serializable_and_dynamic_value() -> (proto::tests::Serializable, Dynamic) {
+    pub fn sample_serializable_and_dynamic_value() -> (proto::tests::Serializable, Value) {
         let s = proto::tests::Serializable::sample();
-        let t = value::Dynamic::Tuple(dynamic::Tuple {
+        let t = value::Value::Tuple(dynamic::Tuple {
             name: None,
             elements: dynamic::tuple::Elements::Raw(vec![
-                Dynamic::Int8(-8),
-                Dynamic::UInt8(8),
-                Dynamic::Int16(-16),
-                Dynamic::UInt16(16),
-                Dynamic::Int32(-32),
-                Dynamic::UInt32(32),
-                Dynamic::Int64(-64),
-                Dynamic::UInt64(64),
-                Dynamic::Float(32.32),
-                Dynamic::Double(64.64),
+                Value::Int8(-8),
+                Value::UInt8(8),
+                Value::Int16(-16),
+                Value::UInt16(16),
+                Value::Int32(-32),
+                Value::UInt32(32),
+                Value::Int64(-64),
+                Value::UInt64(64),
+                Value::Float(32.32),
+                Value::Double(64.64),
             ]),
         });
-        let r = Dynamic::Raw(vec![51, 52, 53, 54]);
-        let o = Dynamic::Optional(Some(Box::new(Dynamic::Bool(false))));
-        let s1 = Dynamic::Tuple(dynamic::Tuple {
+        let r = Value::Raw(vec![51, 52, 53, 54]);
+        let o = Value::Optional(Some(Box::new(Value::Bool(false))));
+        let s1 = Value::Tuple(dynamic::Tuple {
             name: Some("S1".to_string()),
             elements: dynamic::tuple::Elements::Raw(vec![
-                Dynamic::String("bananas".to_string()),
-                Dynamic::String("oranges".to_string()),
+                Value::String("bananas".to_string()),
+                Value::String("oranges".to_string()),
             ]),
         });
-        let l = Dynamic::List(vec![
-            Dynamic::String("cookies".to_string()),
-            Dynamic::String("muffins".to_string()),
+        let l = Value::List(vec![
+            Value::String("cookies".to_string()),
+            Value::String("muffins".to_string()),
         ]);
-        let m = Dynamic::Map(vec![
-            (Dynamic::Int32(1), Dynamic::String("hello".to_string())),
-            (Dynamic::Int32(2), Dynamic::String("world".to_string())),
+        let m = Value::Map(vec![
+            (Value::Int32(1), Value::String("hello".to_string())),
+            (Value::Int32(2), Value::String("world".to_string())),
         ]);
-        let s0: Dynamic = dynamic::Tuple {
+        let s0: Value = dynamic::Tuple {
             name: Some("S0".to_string()),
             elements: [
                 dynamic::tuple::Field {
@@ -124,7 +124,7 @@ mod tests {
             .collect(),
         }
         .into();
-        let v = Dynamic::Tuple(dynamic::Tuple {
+        let v = Value::Tuple(dynamic::Tuple {
             name: Some("Serializable".to_string()),
             elements: [s0].into_iter().collect(),
         });
@@ -141,8 +141,8 @@ mod tests {
             0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
         let message: Message = proto::from_reader(input.as_slice()).unwrap();
-        let dynamic: Dynamic = proto::from_message(&message).unwrap();
-        assert_eq!(dynamic, Dynamic::from("The robot is not localized"));
+        let dynamic: Value = proto::from_message(&message).unwrap();
+        assert_eq!(dynamic, Value::from("The robot is not localized"));
     }
 
     #[futures_test::test]
