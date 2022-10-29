@@ -1,5 +1,4 @@
 use super::r#type::{tuple, Tuple, Type};
-use itertools::Itertools;
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub struct Signature(Type);

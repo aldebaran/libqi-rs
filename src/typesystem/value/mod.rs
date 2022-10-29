@@ -1,5 +1,4 @@
 pub mod dynamic;
-pub use dynamic::Value;
 
 // use std::{
 //     collections::{BTreeSet, BinaryHeap, HashSet, LinkedList, VecDeque},
@@ -107,7 +106,7 @@ pub use dynamic::Value;
 //    };
 //}
 //impl_tuples_to_type!(32);
-//
+
 //#[cfg(test)]
 //mod tests {
 //    use super::*;

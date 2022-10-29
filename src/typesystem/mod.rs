@@ -5,3 +5,4 @@ pub mod value;
 pub use r#type::Type;
 pub use signature::Signature;
 pub use tuple::Tuple;
+pub use value::*;

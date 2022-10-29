@@ -129,7 +129,7 @@ pub struct TryFromValueError;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::proto::tests::Serializable;
+    use crate::tests::*;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -223,14 +223,14 @@ mod tests {
 
     #[test]
     fn test_to_value() {
-        let (s, expected) = crate::tests::sample_serializable_and_dynamic_value();
+        let (s, expected) = sample_serializable_and_dynamic_value();
         let value = to_value(&s).unwrap();
         assert_eq!(value, expected);
     }
 
     #[test]
     fn test_from_value() {
-        let (expected, v) = crate::tests::sample_serializable_and_dynamic_value();
+        let (expected, v) = sample_serializable_and_dynamic_value();
         let s: Serializable = from_value(v).unwrap();
         assert_eq!(s, expected);
     }

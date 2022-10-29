@@ -2,65 +2,76 @@
 
 pub mod proto;
 pub mod typesystem;
-pub use typesystem::{r#type, value};
 
-use futures::prelude::*;
-use proto::message::{self, Message};
+//use futures::prelude::*;
 
-fn to_message_stream<'r, R>(reader: R) -> impl Stream<Item = Message> + 'r
-where
-    R: AsyncRead + Unpin + 'r,
-{
-    stream::unfold(reader, |mut reader| async {
-        todo!()
-        //let msg = Message::read(&mut reader).await.ok()?;
-        //Some((msg, reader))
-    })
-}
-
-fn to_message_sink<'w, W>(writer: W) -> impl Sink<Message, Error = proto::Error> + 'w
-where
-    W: AsyncWrite + Unpin + 'w,
-{
-    sink::unfold(writer, |mut writer, msg: Message| async move {
-        todo!()
-        //msg.write(&mut writer).await?;
-        //Ok::<_, message::Error>(writer)
-    })
-}
-
-pub mod server {
-    use super::*;
-    use std::pin::Pin;
-
-    pub struct Remote<'a> {
-        // OPTIMIZE: See if we could avoid using boxes here.
-        stream: Pin<Box<dyn Stream<Item = Message> + Unpin + 'a>>,
-        sink: Pin<Box<dyn Sink<Message, Error = proto::Error> + Unpin + 'a>>,
-    }
-
-    impl<'a> Remote<'a> {
-        pub fn from_read_write<R, W>(reader: R, writer: W) -> Self
-        where
-            R: AsyncRead + Unpin + 'a,
-            W: AsyncWrite + Unpin + 'a,
-        {
-            let _stream = Box::pin(to_message_stream(reader));
-            let _sink = Box::pin(to_message_sink(writer));
-            todo!()
-        }
-    }
-}
+//pub mod server {
+//    use super::*;
+//    use std::pin::Pin;
+//
+//    pub struct Remote<'a> {
+//        // OPTIMIZE: See if we could avoid using boxes here.
+//        stream: Pin<Box<dyn Stream<Item = proto::Message> + Unpin + 'a>>,
+//        sink: Pin<Box<dyn Sink<proto::Message, Error = proto::Error> + Unpin + 'a>>,
+//    }
+//
+//    impl<'a> Remote<'a> {
+//        pub fn from_read_write<R, W>(reader: R, writer: W) -> Self
+//        where
+//            R: std::io::Read + 'a,
+//            W: std::io::Write + 'a,
+//        {
+//            let _stream = Box::pin(proto::message_stream_from_reader(reader));
+//            let _sink = Box::pin(proto::message_sink_from_writer(writer));
+//            todo!()
+//        }
+//    }
+//}
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
-    use typesystem::value::{dynamic, Value};
+    use std::collections::BTreeMap;
+    use typesystem::dynamic::{self, Value};
 
-    pub fn sample_serializable_and_dynamic_value() -> (proto::tests::Serializable, Value) {
-        let s = proto::tests::Serializable::sample();
-        let t = value::Value::Tuple(dynamic::Tuple {
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    struct S0 {
+        t: (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64),
+        #[serde(with = "serde_bytes")]
+        r: Vec<u8>,
+        o: Option<bool>,
+        s: S1,
+        l: Vec<String>,
+        m: BTreeMap<i32, String>,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    struct S1(String, String);
+
+    #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+    pub struct Serializable(S0);
+
+    impl Serializable {
+        pub fn sample() -> Self {
+            Self(S0 {
+                t: (-8, 8, -16, 16, -32, 32, -64, 64, 32.32, 64.64),
+                r: vec![51, 52, 53, 54],
+                o: Some(false),
+                s: S1("bananas".to_string(), "oranges".to_string()),
+                l: vec!["cookies".to_string(), "muffins".to_string()],
+                m: {
+                    let mut m = BTreeMap::new();
+                    m.insert(1, "hello".to_string());
+                    m.insert(2, "world".to_string());
+                    m
+                },
+            })
+        }
+    }
+
+    pub fn sample_serializable_and_dynamic_value() -> (Serializable, Value) {
+        let s = Serializable::sample();
+        let t = Value::Tuple(dynamic::Tuple {
             name: None,
             elements: dynamic::tuple::Elements::Raw(vec![
                 Value::Int8(-8),
@@ -129,54 +140,6 @@ mod tests {
             elements: [s0].into_iter().collect(),
         });
         (s, v)
-    }
-
-    #[test]
-    fn dynamic_to_message() {
-        let input = vec![
-            0x42, 0xde, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
-            0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72,
-            0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
-            0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
-        ];
-        let message: Message = proto::from_reader(input.as_slice()).unwrap();
-        let dynamic: Value = proto::from_message(&message).unwrap();
-        assert_eq!(dynamic, Value::from("The robot is not localized"));
-    }
-
-    #[futures_test::test]
-    async fn to_message_stream() {
-        todo!()
-        //let mut buf = Vec::new();
-        //let messages = message::tests::samples();
-        //for msg in &messages {
-        //    msg.write(&mut buf).await.expect("message write error");
-        //}
-
-        //let stream = super::to_message_stream(buf.as_slice());
-        //let stream_messages = stream.collect::<Vec<_>>().await;
-        //assert_eq!(stream_messages, messages);
-    }
-
-    #[futures_test::test]
-    async fn to_message_sink() {
-        todo!()
-        //let mut buf = Vec::new();
-        //let messages = message::tests::samples();
-
-        //let mut sink = Box::pin(super::to_message_sink(&mut buf));
-        //for msg in &messages {
-        //    sink.send(msg.clone()).await.expect("sink send");
-        //}
-        //drop(sink);
-
-        //let mut reader = buf.as_slice();
-        //let mut actual_messages = Vec::new();
-        //for _i in 0..messages.len() {
-        //    actual_messages.push(Message::read(&mut reader).await.expect("message read"))
-        //}
-        //assert_eq!(actual_messages, messages);
     }
 
     //#[test]
