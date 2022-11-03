@@ -76,7 +76,7 @@ pub(crate) mod tests {
 
     #[test]
     fn dynamic_value_to_message() {
-        use crate::typesystem::dynamic::Value;
+        use crate::typesystem::value::dynamic::AnyValue;
         let input = vec![
             0x42, 0xde, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
@@ -85,8 +85,8 @@ pub(crate) mod tests {
             0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
         let message: Message = from_reader(input.as_slice()).unwrap();
-        let dynamic: Value = from_message(&message).unwrap();
-        assert_eq!(dynamic, Value::from("The robot is not localized"));
+        let dynamic: AnyValue = from_message(&message).unwrap();
+        assert_eq!(dynamic, AnyValue::from("The robot is not localized"));
     }
 
     #[futures_test::test]

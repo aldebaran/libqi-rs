@@ -1,4 +1,16 @@
 pub mod dynamic;
+use super::Type;
+
+pub trait Value {
+    fn get_type<'t>() -> &'t Type;
+
+    fn to_any_value(&self) -> dynamic::AnyValue
+    where
+        Self: serde::Serialize,
+    {
+        dynamic::to_any_value(&self, Self::get_type())
+    }
+}
 
 // use std::{
 //     collections::{BTreeSet, BinaryHeap, HashSet, LinkedList, VecDeque},

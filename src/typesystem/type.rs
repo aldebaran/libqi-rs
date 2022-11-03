@@ -1,25 +1,6 @@
-pub mod tuple {
-    use super::Type;
-    use crate::typesystem::tuple;
-    pub type Tuple = tuple::Tuple<Type>;
-    pub type Elements = tuple::Elements<Type>;
-    pub use tuple::NameElementsError;
-    pub type Field = tuple::Field<Type>;
-}
-pub use tuple::Tuple;
+use indexmap::{indexmap, IndexMap};
 
-#[derive(
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Clone,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(Debug, Default, PartialEq, Eq, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Type {
     #[default]
     None,
@@ -46,7 +27,17 @@ pub enum Type {
         key: Box<Type>,
         value: Box<Type>,
     },
-    Tuple(Tuple),
+    Tuple {
+        elements: Vec<Type>,
+    },
+    TupleStruct {
+        name: String,
+        elements: Vec<Type>,
+    },
+    Struct {
+        name: String,
+        fields: IndexMap<String, Type>,
+    },
     VarArgs(Box<Type>),
     KwArgs(Box<Type>),
 }
@@ -71,39 +62,40 @@ impl Type {
     }
 
     pub fn unit_tuple() -> Self {
-        Tuple::unit().into()
+        Self::Tuple {
+            elements: Vec::new(),
+        }
     }
 
     pub fn tuple<E>(elements: E) -> Self
     where
-        E: Into<tuple::Elements>,
+        E: Into<Vec<Type>>,
     {
-        Tuple::new(elements).into()
+        Self::Tuple {
+            elements: elements.into(),
+        }
     }
 
-    pub fn tuple_from_iter<I>(elements: I) -> Self
-    where
-        I: IntoIterator,
-        tuple::Elements: FromIterator<I::Item>,
-    {
-        Self::tuple(tuple::Elements::from_iter(elements))
-    }
-
-    pub fn named_tuple<S, E>(name: S, elements: E) -> Self
+    pub fn tuple_struct<S, E>(name: S, elements: E) -> Self
     where
         S: Into<String>,
-        E: Into<tuple::Elements>,
+        E: Into<Vec<Type>>,
     {
-        Tuple::named(name, elements).into()
+        Self::TupleStruct {
+            name: name.into(),
+            elements: elements.into(),
+        }
     }
 
-    pub fn named_tuple_from_iter<S, I>(name: S, elements: I) -> Self
+    pub fn structure<S, F>(name: S, fields: F) -> Self
     where
         S: Into<String>,
-        I: IntoIterator,
-        tuple::Elements: FromIterator<I::Item>,
+        F: Into<IndexMap<String, Type>>,
     {
-        Self::named_tuple(name, tuple::Elements::from_iter(elements)).into()
+        Self::Struct {
+            name: name.into(),
+            fields: fields.into(),
+        }
     }
 
     pub fn var_args<T>(t: T) -> Self
@@ -128,11 +120,13 @@ impl Type {
     }
 }
 
-impl From<Tuple> for Type {
-    fn from(t: Tuple) -> Self {
-        Self::Tuple(t)
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
     }
 }
+
+// TODO: type! macro ?
 
 #[cfg(test)]
 mod tests {
@@ -157,51 +151,38 @@ mod tests {
     #[test]
     fn test_type_tuple() {
         assert_eq!(
-            Type::tuple_from_iter([Type::Int32, Type::Float, Type::String]),
-            Type::Tuple(Tuple {
-                name: None,
-                elements: tuple::Elements::Raw(vec![Type::Int32, Type::Float, Type::String,]),
-            })
-        );
-        assert_eq!(
-            Type::tuple_from_iter([
-                tuple::Field::new("i", Type::Int32),
-                tuple::Field::new("f", Type::Float)
-            ]),
-            Type::Tuple(Tuple {
-                name: None,
-                elements: tuple::Elements::Fields(vec![
-                    tuple::Field::new("i", Type::Int32),
-                    tuple::Field::new("f", Type::Float)
-                ])
-            })
+            Type::tuple(vec![Type::Int32, Type::Float, Type::String]),
+            Type::Tuple {
+                elements: vec![Type::Int32, Type::Float, Type::String,],
+            }
         );
     }
 
     #[test]
-    fn test_type_named_tuple() {
+    fn test_type_tuple_struct() {
         assert_eq!(
-            Type::named_tuple_from_iter(
-                "S",
-                [
-                    tuple::Field::new("a", Type::Int32),
-                    tuple::Field::new("b", Type::Float)
-                ]
-            ),
-            Type::Tuple(Tuple {
-                name: Some("S".into()),
-                elements: tuple::Elements::from_iter([
-                    tuple::Field::new("a", Type::Int32),
-                    tuple::Field::new("b", Type::Float)
-                ]),
-            })
+            Type::tuple_struct("S", vec![Type::Int32, Type::Float]),
+            Type::TupleStruct {
+                name: "S".into(),
+                elements: vec![Type::Int32, Type::Float]
+            }
         );
+    }
+
+    #[test]
+    fn test_type_structure() {
         assert_eq!(
-            Type::named_tuple_from_iter("S", [Type::Int32, Type::Float]),
-            Type::Tuple(Tuple {
-                name: Some("S".into()),
-                elements: tuple::Elements::from_iter([Type::Int32, Type::Float]),
-            })
+            Type::structure(
+                "S",
+                IndexMap::from_iter([("a".into(), Type::Int32), ("b".into(), Type::Float)])
+            ),
+            Type::Struct {
+                name: "S".into(),
+                fields: indexmap! {
+                    "a".into() => Type::Int32,
+                    "b".into() => Type::Float
+                }
+            }
         );
     }
 

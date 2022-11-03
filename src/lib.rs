@@ -32,7 +32,13 @@ pub mod typesystem;
 pub(crate) mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use typesystem::dynamic::{self, Value};
+    use typesystem::{
+        value::{
+            dynamic::{self, AnyValue},
+            Value,
+        },
+        Type,
+    };
 
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     struct S0 {
@@ -69,41 +75,96 @@ pub(crate) mod tests {
         }
     }
 
-    pub fn sample_serializable_and_dynamic_value() -> (Serializable, Value) {
+    impl Value for Serializable {
+        fn get_type<'t>() -> &'t Type {
+            use std::sync::Once;
+            use typesystem::r#type::tuple::Field;
+            static mut TYPE: Option<Type> = None;
+            static INIT: Once = Once::new();
+            INIT.call_once(|| {
+                let s0 = {
+                    let t = Type::tuple_from_iter([
+                        Type::Int8,
+                        Type::UInt8,
+                        Type::Int16,
+                        Type::UInt16,
+                        Type::Int32,
+                        Type::UInt32,
+                        Type::Int64,
+                        Type::UInt64,
+                        Type::Float,
+                        Type::Double,
+                    ]);
+                    let r = Type::Raw;
+                    let o = Type::option(Type::Bool);
+                    let s = Type::named_tuple_from_iter("S1", [Type::String, Type::String]);
+                    let l = Type::list(Type::String);
+                    let m = Type::map(Type::Int32, Type::String);
+                    Type::named_tuple_from_iter(
+                        "S0",
+                        [
+                            Field::new("t", t),
+                            Field::new("r", r),
+                            Field::new("o", o),
+                            Field::new("s", s),
+                            Field::new("l", l),
+                            Field::new("m", m),
+                        ],
+                    )
+                };
+                unsafe {
+                    TYPE = Some(Type::named_tuple_from_iter("S", [s0]));
+                }
+            });
+            unsafe { TYPE.as_ref().unwrap_unchecked() }
+        }
+    }
+
+    pub fn sample_serializable_and_dynamic_value() -> (Serializable, AnyValue) {
         let s = Serializable::sample();
-        let t = Value::Tuple(dynamic::Tuple {
+        let t = AnyValue::Tuple(dynamic::Tuple {
             name: None,
             elements: dynamic::tuple::Elements::Raw(vec![
-                Value::Int8(-8),
-                Value::UInt8(8),
-                Value::Int16(-16),
-                Value::UInt16(16),
-                Value::Int32(-32),
-                Value::UInt32(32),
-                Value::Int64(-64),
-                Value::UInt64(64),
-                Value::Float(32.32),
-                Value::Double(64.64),
+                AnyValue::Int8(-8),
+                AnyValue::UInt8(8),
+                AnyValue::Int16(-16),
+                AnyValue::UInt16(16),
+                AnyValue::Int32(-32),
+                AnyValue::UInt32(32),
+                AnyValue::Int64(-64),
+                AnyValue::UInt64(64),
+                AnyValue::Float(32.32),
+                AnyValue::Double(64.64),
             ]),
         });
-        let r = Value::Raw(vec![51, 52, 53, 54]);
-        let o = Value::Optional(Some(Box::new(Value::Bool(false))));
-        let s1 = Value::Tuple(dynamic::Tuple {
+        let r = AnyValue::Raw(vec![51, 52, 53, 54]);
+        let o = AnyValue::Option {
+            value_type: Type::option(Type::Bool),
+            option: Some(Box::new(AnyValue::Bool(false))),
+        };
+        let s1 = AnyValue::Tuple(dynamic::Tuple {
             name: Some("S1".to_string()),
             elements: dynamic::tuple::Elements::Raw(vec![
-                Value::String("bananas".to_string()),
-                Value::String("oranges".to_string()),
+                AnyValue::String("bananas".to_string()),
+                AnyValue::String("oranges".to_string()),
             ]),
         });
-        let l = Value::List(vec![
-            Value::String("cookies".to_string()),
-            Value::String("muffins".to_string()),
-        ]);
-        let m = Value::Map(vec![
-            (Value::Int32(1), Value::String("hello".to_string())),
-            (Value::Int32(2), Value::String("world".to_string())),
-        ]);
-        let s0: Value = dynamic::Tuple {
+        let l = AnyValue::List {
+            value_type: Type::String,
+            list: vec![
+                AnyValue::String("cookies".to_string()),
+                AnyValue::String("muffins".to_string()),
+            ],
+        };
+        let m = AnyValue::Map {
+            key_type: Type::Int32,
+            value_type: Type::String,
+            map: vec![
+                (AnyValue::Int32(1), AnyValue::String("hello".to_string())),
+                (AnyValue::Int32(2), AnyValue::String("world".to_string())),
+            ],
+        };
+        let s0: AnyValue = dynamic::Tuple {
             name: Some("S0".to_string()),
             elements: [
                 dynamic::tuple::Field {
@@ -135,7 +196,7 @@ pub(crate) mod tests {
             .collect(),
         }
         .into();
-        let v = Value::Tuple(dynamic::Tuple {
+        let v = AnyValue::Tuple(dynamic::Tuple {
             name: Some("Serializable".to_string()),
             elements: [s0].into_iter().collect(),
         });
