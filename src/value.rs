@@ -1,14 +1,13 @@
-pub mod dynamic;
-use super::Type;
+use crate::{anyvalue, AnyValue, Type};
 
 pub trait Value {
     fn get_type<'t>() -> &'t Type;
 
-    fn to_any_value(&self) -> Result<dynamic::AnyValue, dynamic::ser::Error>
+    fn to_any_value(&self) -> Result<AnyValue, anyvalue::ser::Error>
     where
         Self: serde::Serialize,
     {
-        dynamic::to_any_value(&self, Self::get_type())
+        anyvalue::to_any_value(&self, Self::get_type())
     }
 }
 

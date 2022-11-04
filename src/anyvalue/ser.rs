@@ -1,5 +1,4 @@
-use super::AnyValue;
-use crate::typesystem::r#type::Type;
+use crate::{AnyValue, Type};
 use indexmap::IndexMap;
 
 impl serde::Serialize for AnyValue {

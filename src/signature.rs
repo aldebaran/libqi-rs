@@ -848,7 +848,7 @@ mod tests {
                                 "signature".into() => Type::String,
                             ]
                         }.into()
-                    }.into(),
+                    },
                     "properties".into() => Type::Map {
                         key: Type::UInt32.into(),
                         value: Type::Struct {
@@ -859,7 +859,7 @@ mod tests {
                                 "signature".into() => Type::String,
                             ]
                         }.into()
-                    }.into(),
+                    },
                     "description".into() => Type::String,
                 ]
             }

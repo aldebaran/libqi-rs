@@ -4,9 +4,6 @@ pub use kind::Kind;
 pub mod flags;
 pub use flags::Flags;
 
-pub mod action;
-pub use action::Action;
-
 pub mod subject;
 pub use subject::Subject;
 
@@ -248,16 +245,17 @@ pub(crate) mod tests {
     use serde_test::{assert_tokens, Token};
 
     pub fn samples() -> [Message; 3] {
+        use subject::*;
         [
             Message {
                 id: 123,
                 version: Message::CURRENT_VERSION,
                 kind: Kind::Post,
                 flags: Flags::RETURN_TYPE,
-                subject: subject::Subject::try_from_values(
-                    subject::Service::Other(543.into()),
-                    subject::Object::Other(32.into()),
-                    action::BoundObject::Terminate.into(),
+                subject: Subject::try_from_values(
+                    Service::Other(543.into()),
+                    Object::Other(32.into()),
+                    action::BoundObject::Terminate,
                 )
                 .unwrap(),
                 payload: vec![1, 2, 3],
@@ -267,10 +265,10 @@ pub(crate) mod tests {
                 version: Message::CURRENT_VERSION,
                 kind: Kind::Event,
                 flags: Flags::empty(),
-                subject: subject::Subject::try_from_values(
-                    subject::Service::Other(90934.into()),
-                    subject::Object::Other(178.into()),
-                    action::BoundObject::Metaobject.into(),
+                subject: Subject::try_from_values(
+                    Service::Other(90934.into()),
+                    Object::Other(178.into()),
+                    action::BoundObject::Metaobject,
                 )
                 .unwrap(),
                 payload: vec![],
@@ -280,7 +278,7 @@ pub(crate) mod tests {
                 version: Message::CURRENT_VERSION,
                 kind: Kind::Capability,
                 flags: Flags::DYNAMIC_PAYLOAD,
-                subject: subject::ServiceDirectory {
+                subject: ServiceDirectory {
                     action: action::ServiceDirectory::UnregisterService,
                 }
                 .into(),

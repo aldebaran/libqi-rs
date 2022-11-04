@@ -1,11 +1,11 @@
-pub use super::action;
-pub use action::Action;
-
 pub mod service;
 pub use service::Service;
 
 pub mod object;
 pub use object::Object;
+
+pub mod action;
+pub use action::Action;
 
 trait SubjectExt {
     fn service(&self) -> Service;
@@ -22,30 +22,27 @@ pub enum Subject {
 
 impl Subject {
     // Interpretation of action ID depends on service & object.
-    pub fn try_from_values<S, O>(
-        service: S,
-        object: O,
-        action_id: action::Id,
-    ) -> Result<Self, Error>
+    pub fn try_from_values<S, O, A>(service: S, object: O, action_id: A) -> Result<Self, Error>
     where
         S: Into<Service>,
         O: Into<Object>,
+        A: Into<action::Id>,
     {
         let service = service.into();
         let object = object.into();
         match (service, object) {
             (Service::Server, Object::None) => {
-                let action = action_id.try_into()?;
+                let action = action_id.into().try_into()?;
                 Ok(Server { action }.into())
             }
             (Service::Server, _) => Err(Error::UnexpectedServerObject(object)),
             (_, Object::None) => Err(Error::UnexpectedNoneObject),
             (Service::ServiceDirectory, Object::ServiceMain) => {
-                let action = action_id.try_into()?;
+                let action = action_id.into().try_into()?;
                 Ok(ServiceDirectory { action }.into())
             }
             (service, object) => {
-                Ok(BoundObject::from_values_unchecked(service, object, action_id).into())
+                Ok(BoundObject::from_values_unchecked(service, object, action_id.into()).into())
             }
         }
     }

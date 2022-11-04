@@ -1,4 +1,5 @@
-use super::{message::MagicCookie, Error, Message, Result};
+use super::{Error, Result};
+use crate::{message::MagicCookie, Message};
 
 pub fn to_writer<W, T>(writer: W, value: &T) -> Result<()>
 where
@@ -660,14 +661,14 @@ mod tests {
 
     #[test]
     fn test_message_to_bytes() {
-        use crate::proto::message::*;
+        use crate::message::*;
         let msg = Message {
             id: 329,
             version: 12,
             kind: Kind::Capability,
             flags: Flags::RETURN_TYPE,
             subject: subject::ServiceDirectory {
-                action: action::ServiceDirectory::ServiceReady,
+                action: subject::action::ServiceDirectory::ServiceReady,
             }
             .into(),
             payload: vec![0x17, 0x2b, 0xe6, 0x01, 0x5f],
@@ -690,7 +691,7 @@ mod tests {
 
     #[test]
     fn test_subject_to_bytes() {
-        use crate::proto::message::subject::*;
+        use crate::message::subject::*;
         let subject =
             BoundObject::from_values_unchecked(service::Id(23), object::Id(923), action::Id(392));
         let buf = to_bytes(&subject).unwrap();

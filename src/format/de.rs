@@ -1,4 +1,5 @@
-use super::{message::MagicCookie, Error, Message, Result};
+use super::{Error, Result};
+use crate::{message::MagicCookie, Message};
 
 pub fn from_reader<'de, R, T>(reader: R) -> Result<T>
 where
@@ -627,7 +628,7 @@ mod tests {
             0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
         ];
         let msg: Message = from_bytes(input).unwrap();
-        use crate::proto::message::{subject::*, *};
+        use crate::message::{subject::*, *};
         assert_eq!(
             msg,
             Message {
@@ -657,7 +658,7 @@ mod tests {
             0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
         let msg = from_bytes::<Message>(input).unwrap();
-        use crate::proto::message::{subject::*, *};
+        use crate::message::{subject::*, *};
         assert_eq!(
             msg,
             Message {

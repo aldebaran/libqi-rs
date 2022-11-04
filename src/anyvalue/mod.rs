@@ -1,6 +1,6 @@
 pub mod de;
 pub mod ser;
-use crate::typesystem::Type;
+use crate::Type;
 pub use de::from_any_value;
 use indexmap::IndexMap;
 pub use ser::to_any_value;
@@ -166,7 +166,7 @@ pub struct TryFromValueError;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::*;
+    use crate::{tests::*, Value};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn test_anyvalue_as_str() {
         assert_eq!(AnyValue::from("cupcakes").as_str(), Some("cupcakes"));
-        assert_eq!(AnyValue::Float(3.14).as_str(), None);
+        assert_eq!(AnyValue::Float(3.15).as_str(), None);
     }
 
     #[test]
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_to_anyvalue() {
-        use crate::typesystem::Value;
+        use crate::Value;
         let (s, expected) = sample_serializable_and_anyvalue();
         let value = to_any_value(&s, Serializable::get_type()).unwrap();
         assert_eq!(value, expected);
@@ -242,7 +242,6 @@ mod tests {
 
     #[test]
     fn test_anyvalue_to_anyvalue() {
-        use crate::typesystem::Value;
         let (_, src_value) = sample_serializable_and_anyvalue();
         let value = to_any_value(&src_value, Serializable::get_type()).unwrap();
         assert_eq!(value, src_value);
@@ -264,7 +263,6 @@ mod tests {
 
     #[test]
     fn test_to_from_anyvalue_invariant() {
-        use crate::typesystem::Value;
         let (s, _) = crate::tests::sample_serializable_and_anyvalue();
         let s2: Serializable =
             from_any_value(&to_any_value(&s, Serializable::get_type()).unwrap()).unwrap();
@@ -288,8 +286,7 @@ mod tests {
                     value_type: Type::Map {
                         key: Type::String.into(),
                         value: Type::Float.into(),
-                    }
-                    .into(),
+                    },
                     option: None,
                 },
             ]),

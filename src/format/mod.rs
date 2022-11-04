@@ -1,9 +1,7 @@
 mod de;
-pub mod message;
 mod ser;
 
 pub use de::{from_bytes, from_message, from_reader, Deserializer};
-pub use message::Message;
 pub use ser::{to_bytes, to_message, to_writer, Serializer};
 use std::str::Utf8Error;
 
@@ -42,7 +40,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::tests::*;
+    use crate::{message::*, tests::*, AnyValue, Message};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -55,7 +53,6 @@ pub(crate) mod tests {
 
     #[test]
     fn dynamic_value_to_message() {
-        use crate::typesystem::AnyValue;
         let input = vec![
             0x42, 0xde, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
@@ -69,12 +66,12 @@ pub(crate) mod tests {
             Message {
                 id: 990340,
                 version: 0,
-                kind: message::Kind::Error,
-                flags: message::Flags::empty(),
-                subject: message::Subject::try_from_values(
-                    message::subject::service::Id(47),
-                    message::subject::object::Id(1),
-                    message::subject::action::Id(178)
+                kind: Kind::Error,
+                flags: Flags::empty(),
+                subject: Subject::try_from_values(
+                    subject::service::Id(47),
+                    subject::object::Id(1),
+                    subject::action::Id(178)
                 )
                 .unwrap(),
                 payload: vec![

@@ -144,7 +144,7 @@ impl<'de> serde::Deserialize<'de> for AnyValue {
         //    }
         //}
 
-        use crate::typesystem::{Signature, Type};
+        use crate::{Signature, Type};
         struct Visitor;
         impl<'de> serde::de::Visitor<'de> for Visitor {
             type Value = AnyValue;

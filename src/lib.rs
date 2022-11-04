@@ -1,17 +1,23 @@
 // TODO: #![warn(missing_docs)]
 
-pub mod proto;
-pub mod typesystem;
+pub mod anyvalue;
+pub mod format;
+pub mod message;
+pub mod signature;
+pub mod r#type;
+pub mod value;
+
+pub use anyvalue::AnyValue;
+pub use message::Message;
+pub use r#type::Type;
+pub use signature::Signature;
+pub use value::Value;
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use indexmap::indexmap;
     use std::collections::BTreeMap;
-    use typesystem::{
-        value::{dynamic::AnyValue, Value},
-        Type,
-    };
 
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     struct S0 {
