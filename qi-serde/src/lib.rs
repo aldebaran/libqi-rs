@@ -7,7 +7,11 @@ pub mod signature;
 pub mod r#type;
 pub mod value;
 
-pub use anyvalue::AnyValue;
+pub use anyvalue::{from_any_value, to_any_value, AnyValue};
+pub use format::{
+    from_bytes, from_message, from_reader, to_bytes, to_message, to_writer, Deserializer, Error,
+    Result, Serializer,
+};
 pub use message::Message;
 pub use r#type::Type;
 pub use signature::Signature;
