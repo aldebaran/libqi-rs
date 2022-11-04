@@ -7,19 +7,16 @@ edition = "2021"
 name = "qi"
 
 [dependencies]
+thiserror = "1.0.36"
 bitflags = "1.3.2"
-futures = "0.3.24"
 num-derive = "0.3.3"
 num-traits = "0.2.15"
-serde = { version = "1.0.145", features = ["derive"] }
-thiserror = "1.0.36"
-serde_bytes = "0.11.7"
 seq-macro = "0.3.1"
-itertools = "0.10.5"
 indexmap = { version = "1.9.1", features = ["serde"] }
+serde = { version = "1.0.145", features = ["derive"] }
+serde_bytes = "0.11.7"
 
 [dev-dependencies]
 assert_matches = "1.5.0"
-futures-test = "0.3.24"
 pretty_assertions = "1.3.0"
 serde_test = "1.0.145"

@@ -153,7 +153,7 @@ impl<'de> serde::Deserialize<'de> for Message {
                             *value = Some(map.next_value()?);
                             Ok(())
                         }
-                        Some(_) => return Err(de::Error::duplicate_field(field)),
+                        Some(_) => Err(de::Error::duplicate_field(field)),
                     }
                 }
 

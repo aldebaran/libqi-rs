@@ -1,13 +1,15 @@
-mod de;
-mod ser;
+pub mod de;
+pub mod ser;
 use crate::typesystem::Type;
 pub use de::from_any_value;
+use indexmap::IndexMap;
 pub use ser::to_any_value;
 
 /// Any value supported by the qi type system.
 // TODO: #[non_exhaustive]
 // TODO: Enable the value to borrow data from sources.
-#[derive(Default, Clone, PartialEq, PartialOrd, Debug)]
+// TODO: Implement PartialOrd manually.
+#[derive(Default, Clone, PartialEq, Debug)]
 pub enum AnyValue {
     #[default]
     Void,
@@ -37,7 +39,15 @@ pub enum AnyValue {
         key_type: Type,
         map: Vec<(AnyValue, AnyValue)>,
     },
-    Tuple(Tuple),
+    Tuple(Vec<AnyValue>),
+    TupleStruct {
+        name: String,
+        elements: Vec<AnyValue>,
+    },
+    Struct {
+        name: String,
+        fields: IndexMap<String, AnyValue>,
+    },
     // TODO: Handle enumerations
 }
 
@@ -53,17 +63,17 @@ impl AnyValue {
         self.as_string().map(|s| s.as_str())
     }
 
-    pub fn as_tuple(&self) -> Option<&Tuple> {
-        if let Self::Tuple(tuple) = self {
-            Some(tuple)
+    pub fn as_tuple(&self) -> Option<&Vec<AnyValue>> {
+        if let Self::Tuple(elements) = self {
+            Some(elements)
         } else {
             None
         }
     }
 
-    pub fn as_tuple_mut(&mut self) -> Option<&mut Tuple> {
-        if let Self::Tuple(tuple) = self {
-            Some(tuple)
+    pub fn as_tuple_mut(&mut self) -> Option<&mut Vec<AnyValue>> {
+        if let Self::Tuple(elements) = self {
+            Some(elements)
         } else {
             None
         }
@@ -92,36 +102,31 @@ impl AnyValue {
             AnyValue::Double(_) => Type::Double,
             AnyValue::String(_) => Type::String,
             AnyValue::Raw(_) => Type::Raw,
-            AnyValue::Option { value_type, .. } => Type::option(value_type.clone()),
-            AnyValue::List { value_type, .. } => Type::list(value_type.clone()),
+            AnyValue::Option { value_type, .. } => Type::Option(value_type.clone().into()),
+            AnyValue::List { value_type, .. } => Type::List(value_type.clone().into()),
             AnyValue::Map {
                 key_type,
                 value_type,
                 ..
-            } => Type::map(key_type.clone(), value_type.clone()),
-            AnyValue::Tuple(t) => t.get_type(),
+            } => Type::Map {
+                key: key_type.clone().into(),
+                value: value_type.clone().into(),
+            },
+            AnyValue::Tuple(elements) => Type::Tuple(elements.iter().map(Self::get_type).collect()),
+            AnyValue::TupleStruct { name, elements } => Type::TupleStruct {
+                name: name.clone(),
+                elements: elements.iter().map(Self::get_type).collect(),
+            },
+            AnyValue::Struct { name, fields } => Type::Struct {
+                name: name.clone(),
+                fields: fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.get_type()))
+                    .collect(),
+            },
         }
     }
 }
-
-pub mod tuple {
-    use super::{AnyValue, Type};
-    use crate::typesystem::tuple;
-    pub type Tuple = tuple::Tuple<AnyValue>;
-    pub type Elements = tuple::Elements<AnyValue>;
-    pub type Field = tuple::Field<AnyValue>;
-
-    impl tuple::Tuple<AnyValue> {
-        pub fn get_type(&self) -> Type {
-            let (name, elements) = (self.name, self.elements);
-            let elements = elements.into_iter().map(|v| v.get_type());
-            let elements = elements.collect();
-            use crate::typesystem::r#type::Tuple as TypeTuple;
-            TypeTuple { name, elements }.into()
-        }
-    }
-}
-pub use tuple::Tuple;
 
 impl From<String> for AnyValue {
     fn from(s: String) -> Self {
@@ -152,27 +157,10 @@ impl<'v> TryFrom<&'v AnyValue> for &'v str {
     }
 }
 
-impl From<Tuple> for AnyValue {
-    fn from(t: Tuple) -> Self {
-        AnyValue::Tuple(t)
-    }
-}
-
-impl TryFrom<AnyValue> for Tuple {
-    type Error = TryFromValueError;
-
-    fn try_from(d: AnyValue) -> Result<Self, Self::Error> {
-        match d {
-            AnyValue::Tuple(t) => Ok(t),
-            _ => Err(TryFromValueError),
-        }
-    }
-}
-
 // TODO: Implement all conversions
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[error("dynamic value conversion failed")]
+#[error("any value conversion failed")]
 pub struct TryFromValueError;
 
 #[cfg(test)]
@@ -182,7 +170,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn test_dynamic_from_string() {
+    fn test_anyvalue_from_string() {
         assert_eq!(
             AnyValue::from("muffins recipe".to_owned()),
             AnyValue::String("muffins recipe".into())
@@ -190,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dynamic_try_into_string() {
+    fn test_anyvalue_try_into_string() {
         let res: Result<String, _> = AnyValue::String("muffins recipe".into()).try_into();
         assert_eq!(res, Ok("muffins recipe".to_owned()));
         let res: Result<String, _> = AnyValue::Int32(321).try_into();
@@ -198,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dynamic_from_str() {
+    fn test_anyvalue_from_str() {
         assert_eq!(
             AnyValue::from("cookies recipe"),
             AnyValue::String("cookies recipe".into())
@@ -206,7 +194,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dynamic_try_into_str() {
+    fn test_anyvalue_try_into_str() {
         let value = AnyValue::String("muffins recipe".into());
         let res: Result<&str, _> = (&value).try_into();
         assert_eq!(res, Ok("muffins recipe"));
@@ -215,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dynamic_as_string() {
+    fn test_anyvalue_as_string() {
         assert_eq!(
             AnyValue::from("muffins").as_string(),
             Some(&"muffins".to_owned())
@@ -224,97 +212,70 @@ mod tests {
     }
 
     #[test]
-    fn test_dynamic_as_str() {
+    fn test_anyvalue_as_str() {
         assert_eq!(AnyValue::from("cupcakes").as_str(), Some("cupcakes"));
         assert_eq!(AnyValue::Float(3.14).as_str(), None);
     }
 
     #[test]
-    fn test_dynamic_from_tuple() {
-        assert_eq!(
-            AnyValue::from(Tuple::default()),
-            AnyValue::Tuple(Tuple {
-                name: Default::default(),
-                elements: Default::default()
-            }),
-        );
-    }
-
-    #[test]
-    fn test_dynamic_try_into_tuple() {
-        let t: Result<Tuple, _> = AnyValue::Tuple(Tuple {
-            name: Default::default(),
-            elements: Default::default(),
-        })
-        .try_into();
-        assert_eq!(t, Ok(Tuple::default()));
-        let t: Result<Tuple, _> = AnyValue::from("cheesecake").try_into();
-        assert_eq!(t, Err(TryFromValueError));
-    }
-
-    #[test]
-    fn test_dynamic_as_tuple() {
-        assert_eq!(
-            AnyValue::Tuple(Default::default()).as_tuple(),
-            Some(&Tuple::default())
-        );
+    fn test_anyvalue_as_tuple() {
+        assert_eq!(AnyValue::Tuple(Vec::new()).as_tuple(), Some(&Vec::new()));
         assert_eq!(AnyValue::Int32(42).as_tuple(), None);
     }
 
     #[test]
-    fn test_dynamic_as_tuple_mut() {
+    fn test_anyvalue_as_tuple_mut() {
         assert_eq!(
-            AnyValue::Tuple(Default::default()).as_tuple_mut(),
-            Some(&mut Tuple::default())
+            AnyValue::Tuple(Vec::new()).as_tuple_mut(),
+            Some(&mut Vec::new())
         );
         assert_eq!(AnyValue::Int32(42).as_tuple_mut(), None);
     }
 
     #[test]
-    fn test_to_dynamic_value() {
+    fn test_to_anyvalue() {
         use crate::typesystem::Value;
-        let (s, expected) = sample_serializable_and_dynamic_value();
+        let (s, expected) = sample_serializable_and_anyvalue();
         let value = to_any_value(&s, Serializable::get_type()).unwrap();
         assert_eq!(value, expected);
     }
 
     #[test]
-    fn test_dynamic_to_dynamic_value() {
+    fn test_anyvalue_to_anyvalue() {
         use crate::typesystem::Value;
-        let (_, src_value) = sample_serializable_and_dynamic_value();
+        let (_, src_value) = sample_serializable_and_anyvalue();
         let value = to_any_value(&src_value, Serializable::get_type()).unwrap();
         assert_eq!(value, src_value);
     }
 
     #[test]
-    fn test_from_dynamic_value() {
-        let (expected, v) = sample_serializable_and_dynamic_value();
+    fn test_from_anyvalue() {
+        let (expected, v) = sample_serializable_and_anyvalue();
         let s: Serializable = from_any_value(&v).unwrap();
         assert_eq!(s, expected);
     }
 
     #[test]
-    fn test_dynamic_from_dynamic_value() {
-        let (_, src_value) = sample_serializable_and_dynamic_value();
+    fn test_anyvalue_from_anyvalue() {
+        let (_, src_value) = sample_serializable_and_anyvalue();
         let value: AnyValue = from_any_value(&src_value).unwrap();
         assert_eq!(value, src_value);
     }
 
     #[test]
-    fn test_to_from_dynamic_value_invariant() {
+    fn test_to_from_anyvalue_invariant() {
         use crate::typesystem::Value;
-        let (s, _) = crate::tests::sample_serializable_and_dynamic_value();
+        let (s, _) = crate::tests::sample_serializable_and_anyvalue();
         let s2: Serializable =
             from_any_value(&to_any_value(&s, Serializable::get_type()).unwrap()).unwrap();
         assert_eq!(s, s2);
-        Ok(())
     }
 
     #[test]
-    fn test_dynamic_ser_de() {
+    fn test_anyvalue_ser_de() {
         use serde_test::{assert_tokens, Token};
         assert_tokens(
-            &AnyValue::Tuple(Tuple::new(tuple::Elements::from_iter([
+            &AnyValue::Tuple(vec![
                 AnyValue::List {
                     value_type: Type::String,
                     list: vec![
@@ -324,10 +285,14 @@ mod tests {
                 },
                 AnyValue::Int32(12),
                 AnyValue::Option {
-                    value_type: Type::map(Type::String, Type::Float),
+                    value_type: Type::Map {
+                        key: Type::String.into(),
+                        value: Type::Float.into(),
+                    }
+                    .into(),
                     option: None,
                 },
-            ]))),
+            ]),
             &[
                 Token::Tuple { len: 2 },
                 Token::Str("([s]i+{sf})"),

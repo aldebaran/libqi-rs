@@ -1,10 +1,12 @@
-use super::{tuple as value_tuple, AnyValue};
-use crate::typesystem::r#type::{Type, tuple as type_tuple};
+use super::AnyValue;
+use crate::typesystem::r#type::Type;
+use indexmap::IndexMap;
 
 impl serde::Serialize for AnyValue {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
     where
-        S: serde::Serializer {
+        S: serde::Serializer,
+    {
         todo!()
     }
 }
@@ -40,12 +42,12 @@ impl<'t> serde::Serializer for Serializer<'t> {
     type Ok = AnyValue;
     type Error = Error;
 
-    type SerializeSeq = ListSerializer<'t>;
-    type SerializeTuple = TupleSerializer<AnyValue, std::slice::Iter<'t, Type>>;
-    type SerializeTupleStruct = TupleSerializer<AnyValue, std::slice::Iter<'t, Type>>;
+    type SerializeSeq = ListSerializer;
+    type SerializeTuple = TupleSerializer<std::slice::Iter<'t, Type>>;
+    type SerializeTupleStruct = TupleStructSerializer<std::slice::Iter<'t, Type>>;
     type SerializeTupleVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
-    type SerializeMap = MapSerializer<'t>;
-    type SerializeStruct = TupleSerializer<value_tuple::Field, std::slice::Iter<'t, type_tuple::Field>>;
+    type SerializeMap = MapSerializer;
+    type SerializeStruct = StructSerializer<indexmap::map::Iter<'t, String, Type>>;
     type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
@@ -124,15 +126,13 @@ impl<'t> serde::Serializer for Serializer<'t> {
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         match self.value_type {
             Type::Option(value_type) => Ok(AnyValue::Option {
-                value_type: **value_type,
+                value_type: value_type.as_ref().clone(),
                 option: None,
             }),
-            _ => {
-                return Err(Error::UnexpectedValueType {
-                    expected: self.value_type.clone(),
-                    actual: "an option type".into(),
-                });
-            }
+            _ => Err(Error::UnexpectedValueType {
+                expected: self.value_type.clone(),
+                actual: "an option type".into(),
+            }),
         }
     }
 
@@ -163,22 +163,18 @@ impl<'t> serde::Serializer for Serializer<'t> {
         Ok(AnyValue::Void)
     }
 
-    fn serialize_unit_struct(self, name: &'static str) -> Result<Self::Ok, Self::Error> {
-        if !matches!(self.value_type, 
-                     Type::Tuple(type_tuple::Tuple {
-                        name: Some(tuple_name),
-                        elements: type_tuple::Elements::Raw(v),
-                     }) if tuple_name == name && v.is_empty())
+    fn serialize_unit_struct(self, struct_name: &'static str) -> Result<Self::Ok, Self::Error> {
+        if !matches!(self.value_type, Type::TupleStruct { name, elements } if name == struct_name && elements.is_empty())
         {
             return Err(Error::UnexpectedValueType {
                 expected: self.value_type.clone(),
-                actual: format!("a unit struct type named {name}"),
+                actual: format!("a unit struct type named {struct_name}"),
             });
         }
-        Ok(AnyValue::Tuple(value_tuple::Tuple {
-            name: Some(name.to_string()),
-            elements: value_tuple::Elements::Raw(vec![]),
-        }))
+        Ok(AnyValue::TupleStruct {
+            name: struct_name.into(),
+            elements: vec![],
+        })
     }
 
     fn serialize_unit_variant(
@@ -192,29 +188,28 @@ impl<'t> serde::Serializer for Serializer<'t> {
 
     fn serialize_newtype_struct<T: ?Sized>(
         self,
-        name: &'static str,
+        struct_name: &'static str,
         element: &T,
     ) -> Result<Self::Ok, Self::Error>
     where
         T: serde::Serialize,
     {
         let element_type = match self.value_type {
-            Type::Tuple(type_tuple::Tuple {
-                name: Some(tuple_name),
-                elements: type_tuple::Elements::Raw(v),
-            }) if tuple_name == name && v.len() == 1 => v.get(0).unwrap(),
+            Type::TupleStruct { name, elements } if name == struct_name && elements.len() == 1 => {
+                elements.get(0).unwrap()
+            }
             _ => {
                 return Err(Error::UnexpectedValueType {
                     expected: self.value_type.clone(),
-                    actual: format!("a newtype struct type named {name}"),
+                    actual: format!("a newtype struct type named {struct_name}"),
                 });
             }
         };
         let value = to_any_value(element, element_type)?;
-        Ok(AnyValue::Tuple(value_tuple::Tuple {
-            name: Some(name.to_string()),
-            elements: value_tuple::Elements::Raw(vec![value]),
-        }))
+        Ok(AnyValue::TupleStruct {
+            name: struct_name.into(),
+            elements: vec![value],
+        })
     }
 
     fn serialize_newtype_variant<T: ?Sized>(
@@ -230,47 +225,53 @@ impl<'t> serde::Serializer for Serializer<'t> {
         todo!("enums are not yet supported as dynamic values")
     }
 
-    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+    fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         let value_type = match self.value_type {
-            Type::List(value_type) => value_type.as_ref(),
+            Type::List(value_type) => value_type.as_ref().clone(),
             _ => {
                 return Err(Error::UnexpectedValueType {
                     expected: self.value_type.clone(),
-                    actual: format!("a list type"),
+                    actual: "a list type".into(),
                 });
             }
         };
         Ok(ListSerializer::new(value_type))
     }
 
-    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+    fn serialize_tuple(self, tuple_len: usize) -> Result<Self::SerializeTuple, Self::Error> {
         let element_types = match self.value_type {
-            Type::Tuple(type_tuple::Tuple { name: None, elements: type_tuple::Elements::Raw(element_types) }) if element_types.len() == len => element_types,
+            Type::Tuple(element_types) if element_types.len() == tuple_len => element_types,
             _ => {
                 return Err(Error::UnexpectedValueType {
                     expected: self.value_type.clone(),
-                    actual: format!("a tuple type of size {len}"),
+                    actual: format!("a tuple type of size {tuple_len}"),
                 });
-            },
+            }
         };
-        Ok(TupleSerializer::new(None, element_types))
+        Ok(TupleSerializer::new(element_types))
     }
 
     fn serialize_tuple_struct(
         self,
-        name: &'static str,
-        len: usize,
+        struct_name: &'static str,
+        struct_len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
         let element_types = match self.value_type {
-            Type::Tuple(type_tuple::Tuple { name: Some(tuple_name), elements: type_tuple::Elements::Raw(element_types) }) if element_types.len() == len => element_types,
+            Type::TupleStruct { name, elements }
+                if name == struct_name && elements.len() == struct_len =>
+            {
+                elements
+            }
             _ => {
                 return Err(Error::UnexpectedValueType {
                     expected: self.value_type.clone(),
-                    actual: format!("a tuple struct type of name {name} of size {len}"),
+                    actual: format!(
+                        "a tuple struct type of name {struct_name} of size {struct_len}"
+                    ),
                 });
-            },
+            }
         };
-        Ok(TupleSerializer::new(Some(name.to_string()), element_types))
+        Ok(TupleStructSerializer::new(struct_name, element_types))
     }
 
     fn serialize_tuple_variant(
@@ -285,32 +286,34 @@ impl<'t> serde::Serializer for Serializer<'t> {
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
         let (key_type, value_type) = match self.value_type {
-            Type::Map { key, value } => (key, value),
+            Type::Map { key, value } => (key.as_ref().clone(), value.as_ref().clone()),
             _ => {
                 return Err(Error::UnexpectedValueType {
                     expected: self.value_type.clone(),
-                    actual: format!("a map type"),
+                    actual: "a map type".into(),
                 });
-            },
+            }
         };
         Ok(MapSerializer::new(key_type, value_type))
     }
 
     fn serialize_struct(
         self,
-        name: &'static str,
-        len: usize,
+        struct_name: &'static str,
+        struct_len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        let element_types = match self.value_type {
-            Type::Tuple(type_tuple::Tuple { name: Some(tuple_name), elements: type_tuple::Elements::Fields(fields) }) if tuple_name == name && fields.len() == len => fields,
+        let field_types = match self.value_type {
+            Type::Struct { name, fields } if name == struct_name && fields.len() == struct_len => {
+                fields
+            }
             _ => {
                 return Err(Error::UnexpectedValueType {
                     expected: self.value_type.clone(),
-                    actual: format!("a struct type of size {len}"),
+                    actual: format!("a struct type of size {struct_len}"),
                 });
-            },
+            }
         };
-        Ok(TupleSerializer::new(Some(name.to_string()), element_types))
+        Ok(StructSerializer::new(struct_name, field_types.iter()))
     }
 
     fn serialize_struct_variant(
@@ -324,13 +327,13 @@ impl<'t> serde::Serializer for Serializer<'t> {
     }
 }
 
-pub struct ListSerializer<'t> {
-    value_type: &'t Type,
+pub struct ListSerializer {
+    value_type: Type,
     elements: Vec<AnyValue>,
 }
 
-impl<'t> ListSerializer<'t> {
-    fn new(value_type: &'t Type) -> Self {
+impl ListSerializer {
+    fn new(value_type: Type) -> Self {
         Self {
             value_type,
             elements: Vec::new(),
@@ -338,7 +341,7 @@ impl<'t> ListSerializer<'t> {
     }
 }
 
-impl<'t> serde::ser::SerializeSeq for ListSerializer<'t> {
+impl serde::ser::SerializeSeq for ListSerializer {
     type Ok = AnyValue;
     type Error = Error;
 
@@ -346,25 +349,28 @@ impl<'t> serde::ser::SerializeSeq for ListSerializer<'t> {
     where
         T: serde::Serialize,
     {
-        let value = to_any_value(value, self.value_type)?;
+        let value = to_any_value(value, &self.value_type)?;
         self.elements.push(value);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AnyValue::List{ value_type: *self.value_type, list: self.elements })
+        Ok(AnyValue::List {
+            value_type: self.value_type,
+            list: self.elements,
+        })
     }
 }
 
-pub struct MapSerializer<'t> {
+pub struct MapSerializer {
     elements: Vec<(AnyValue, AnyValue)>,
-    value_type: &'t Type,
+    value_type: Type,
     key: Option<AnyValue>,
-    key_type: &'t Type,
+    key_type: Type,
 }
 
-impl<'t> MapSerializer<'t> {
-    fn new(key_type: &'t Type, value_type: &'t Type) -> Self {
+impl MapSerializer {
+    fn new(key_type: Type, value_type: Type) -> Self {
         Self {
             elements: Vec::new(),
             key_type,
@@ -374,7 +380,7 @@ impl<'t> MapSerializer<'t> {
     }
 }
 
-impl<'t> serde::ser::SerializeMap for MapSerializer<'t> {
+impl serde::ser::SerializeMap for MapSerializer {
     type Ok = AnyValue;
     type Error = Error;
 
@@ -382,7 +388,7 @@ impl<'t> serde::ser::SerializeMap for MapSerializer<'t> {
     where
         T: serde::Serialize,
     {
-        let key = to_any_value(key, self.key_type)?;
+        let key = to_any_value(key, &self.key_type)?;
         self.key = Some(key);
         Ok(())
     }
@@ -395,94 +401,99 @@ impl<'t> serde::ser::SerializeMap for MapSerializer<'t> {
             .key
             .take()
             .ok_or_else(|| Error::Custom("key was not serialized".into()))?;
-        let value = to_any_value(value, self.value_type)?;
+        let value = to_any_value(value, &self.value_type)?;
         self.elements.push((key, value));
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AnyValue::Map { key_type: *self.key_type, value_type: *self.value_type, map: self.elements })
-    }
-}
-
-pub struct TupleSerializer<V, I> {
-    name: Option<String>,
-    elements: Vec<V>,
-    element_types: I,
-}
-
-impl<'t, V, I> TupleSerializer<V, I> where I: Iterator {
-    fn new<E>(name: Option<String>, element_types: E) -> Self where E: IntoIterator<IntoIter = I>{
-        Self {
-            name,
-            elements: Vec::new(),
-            element_types: element_types.into_iter(),
-        }
-    }
-
-    fn into_value(self) -> AnyValue
-    where
-        value_tuple::Elements: FromIterator<V>,
-    {
-        AnyValue::Tuple(value_tuple::Tuple {
-            name: self.name,
-            elements: value_tuple::Elements::from_iter(self.elements),
+        Ok(AnyValue::Map {
+            key_type: self.key_type,
+            value_type: self.value_type,
+            map: self.elements,
         })
     }
 }
 
-impl<'t, I> TupleSerializer<AnyValue, I> where I: Iterator<Item = &'t Type> {
-    fn add_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Error>
+pub struct TupleSerializer<I> {
+    elements: Vec<AnyValue>,
+    element_types: I,
+}
+
+impl<I> TupleSerializer<I>
+where
+    I: Iterator,
+{
+    fn new<E>(element_types: E) -> Self
     where
-        T: serde::Serialize,
+        E: IntoIterator<IntoIter = I>,
     {
-        let value_type = match self.element_types.next() {
-            Some(t) => t,
-            None => unreachable!(),
-        };
-        let element = to_any_value(value, value_type)?;
-        self.elements.push(element);
-        Ok(())
+        Self {
+            elements: Vec::new(),
+            element_types: element_types.into_iter(),
+        }
     }
 }
 
-impl<'t, I> TupleSerializer<value_tuple::Field, I> where I: Iterator<Item = &'t type_tuple::Field> {
-    fn add_field<T: ?Sized>(&mut self, name: &str, value: &T) -> Result<(), Error>
-    where
-        T: serde::Serialize,
-    {
-        let name = name.to_string();
-        let value_type = match self.element_types.next() {
-            Some(t) => t,
-            None => unreachable!(),
-        };
-        let element = to_any_value(value, &value_type.element)?;
-        self.elements.push(value_tuple::Field {
-            name,
-            element,
-        });
-        Ok(())
+fn serialize_tuple_element<'t, T, I>(value: &T, types: &mut I) -> Result<AnyValue, Error>
+where
+    T: serde::Serialize + ?Sized,
+    I: Iterator<Item = &'t Type>,
+{
+    match types.next() {
+        Some(t) => to_any_value(value, t),
+        None => unreachable!("the tuple size precondition is not verified"),
     }
 }
 
-impl<'t, I> serde::ser::SerializeTuple for TupleSerializer<AnyValue, I> where I: Iterator<Item = &'t Type> {
+impl<'t, I> serde::ser::SerializeTuple for TupleSerializer<I>
+where
+    I: Iterator<Item = &'t Type>,
+{
     type Ok = AnyValue;
     type Error = Error;
 
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
-
-        self.add_element(value)
+        let element = serialize_tuple_element(value, &mut self.element_types)?;
+        self.elements.push(element);
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(self.into_value())
+        Ok(AnyValue::Tuple(self.elements))
     }
 }
 
-impl<'t, I> serde::ser::SerializeTupleStruct for TupleSerializer<AnyValue, I>  where I: Iterator<Item = &'t Type> {
+pub struct TupleStructSerializer<I> {
+    name: String,
+    elements: Vec<AnyValue>,
+    element_types: I,
+}
+
+impl<I> TupleStructSerializer<I>
+where
+    I: Iterator,
+{
+    fn new<S, E>(name: S, element_types: E) -> Self
+    where
+        S: Into<String>,
+        E: IntoIterator<IntoIter = I>,
+    {
+        Self {
+            name: name.into(),
+            elements: Vec::new(),
+            element_types: element_types.into_iter(),
+        }
+    }
+}
+
+impl<'t, I> serde::ser::SerializeTupleStruct for TupleStructSerializer<I>
+where
+    I: Iterator<Item = &'t Type>,
+{
     type Ok = AnyValue;
     type Error = Error;
 
@@ -490,15 +501,46 @@ impl<'t, I> serde::ser::SerializeTupleStruct for TupleSerializer<AnyValue, I>  w
     where
         T: serde::Serialize,
     {
-        self.add_element(value)
+        let element = serialize_tuple_element(value, &mut self.element_types)?;
+        self.elements.push(element);
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(self.into_value())
+        Ok(AnyValue::TupleStruct {
+            name: self.name,
+            elements: self.elements,
+        })
     }
 }
 
-impl<'t, I> serde::ser::SerializeStruct for TupleSerializer<value_tuple::Field, I> where I: Iterator<Item = &'t type_tuple::Field> {
+struct StructSerializer<I> {
+    name: String,
+    fields: IndexMap<String, AnyValue>,
+    field_types: I,
+}
+
+impl<I> StructSerializer<I>
+where
+    I: Iterator,
+{
+    fn new<S, F>(name: S, field_types: F) -> Self
+    where
+        S: Into<String>,
+        F: IntoIterator<IntoIter = I>,
+    {
+        Self {
+            name: name.into(),
+            fields: IndexMap::new(),
+            field_types: field_types.into_iter(),
+        }
+    }
+}
+
+impl<'t, I> serde::ser::SerializeStruct for StructSerializer<I>
+where
+    I: Iterator<Item = (&'t String, &'t Type)> + Clone,
+{
     type Ok = AnyValue;
     type Error = Error;
 
@@ -510,18 +552,38 @@ impl<'t, I> serde::ser::SerializeStruct for TupleSerializer<value_tuple::Field, 
     where
         T: serde::Serialize,
     {
-        self.add_field(key, value)
+        let field_type = match self.field_types.clone().find(|(k, _)| *k == key) {
+            Some((_field_name, field_type)) => field_type,
+            None => {
+                return Err(Error::UnexpectedTupleField(
+                    key.into(),
+                    self.field_types
+                        .clone()
+                        .map(|(k, _)| format!(",{k}"))
+                        .collect(),
+                ))
+            }
+        };
+        let value = to_any_value(value, field_type)?;
+        self.fields.insert(key.into(), value);
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(self.into_value())
+        Ok(AnyValue::Struct {
+            name: self.name,
+            fields: self.fields,
+        })
     }
 }
 
-#[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum Error {
-    #[error("unexpected value type, expected {expected} but got {actual}", expected = expected)]
+    #[error("unexpected value type, expected {expected} but got {actual}")]
     UnexpectedValueType { expected: Type, actual: String },
+
+    #[error("unexpected tuple field \"{0}\", expected any of {1}")]
+    UnexpectedTupleField(String, String),
 
     #[error("error: {0}")]
     Custom(String),

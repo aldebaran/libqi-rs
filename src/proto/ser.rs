@@ -43,7 +43,7 @@ where
 
     fn write_size(&mut self, size: usize) -> Result<()> {
         // Sizes are always serialized as u32 in libqi.
-        let size = size.try_into().map_err(|e| Error::BadSize(e))?;
+        let size = size.try_into().map_err(Error::BadSize)?;
         self.write_u32(size)?;
         Ok(())
     }

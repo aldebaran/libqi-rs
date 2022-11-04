@@ -1,6 +1,6 @@
-use super::r#type::{tuple, Tuple, Type};
+use super::r#type::Type;
 
-#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct Signature(Type);
 
 impl Signature {
@@ -33,187 +33,240 @@ impl Signature {
     const CHAR_MAP_END: char = '}';
     const CHAR_TUPLE_BEGIN: char = '(';
     const CHAR_TUPLE_END: char = ')';
-    const CHAR_MARK_VARSARGS: char = '#';
-    const CHAR_MARK_KWARGS: char = '~';
+    const CHAR_MARK_VAR_ARGS: char = '#';
+    const CHAR_MARK_KW_ARGS: char = '~';
     const CHAR_ANNOTATIONS_BEGIN: char = '<';
     const CHAR_ANNOTATIONS_SEP: char = ',';
     const CHAR_ANNOTATIONS_END: char = '>';
 
-    fn parse_type(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
-        let input = iter.as_str();
-        let c = iter.next().ok_or(FromStrError::EndOfInput)?;
-        match c {
-            Self::CHAR_NONE => Ok(Type::None),
-            Self::CHAR_UNKNOWN => Ok(Type::Unknown),
-            Self::CHAR_VOID => Ok(Type::Void),
-            Self::CHAR_BOOL => Ok(Type::Bool),
-            Self::CHAR_INT8 => Ok(Type::Int8),
-            Self::CHAR_UINT8 => Ok(Type::UInt8),
-            Self::CHAR_INT16 => Ok(Type::Int16),
-            Self::CHAR_UINT16 => Ok(Type::UInt16),
-            Self::CHAR_INT32 => Ok(Type::Int32),
-            Self::CHAR_UINT32 => Ok(Type::UInt32),
-            Self::CHAR_INT64 => Ok(Type::Int64),
-            Self::CHAR_UINT64 => Ok(Type::UInt64),
-            Self::CHAR_FLOAT => Ok(Type::Float),
-            Self::CHAR_DOUBLE => Ok(Type::Double),
-            Self::CHAR_STRING => Ok(Type::String),
-            Self::CHAR_RAW => Ok(Type::Raw),
-            Self::CHAR_OBJECT => Ok(Type::Object),
-            Self::CHAR_DYNAMIC => Ok(Type::Dynamic),
-            Self::CHAR_MARK_OPTION => Ok({
-                let t = Self::parse_option_tail(iter, input)?;
-                Type::option(t)
-            }),
-            Self::CHAR_LIST_BEGIN => Ok({
-                let t = Self::parse_list_tail(iter, input)?;
-                Type::list(t)
-            }),
-            Self::CHAR_MAP_BEGIN => Ok({
-                let (key, value) = Self::parse_map_tail(iter, input)?;
-                Type::map(key, value)
-            }),
-            Self::CHAR_TUPLE_BEGIN => {
-                let tuple = Self::parse_tuple_tail(iter, input)?;
-                fn parse_annotations<'c>(
-                    mut iter: std::str::Chars<'c>,
-                    tuple_start: &str,
-                ) -> Result<
-                    Option<((Option<String>, Option<Vec<String>>), std::str::Chars<'c>)>,
-                    FromStrError,
-                > {
-                    match iter.next() {
-                        Some(Signature::CHAR_ANNOTATIONS_BEGIN) => {
-                            let (name, fields) =
-                                Signature::parse_tuple_annotations_tail(&mut iter, tuple_start)?;
-                            Ok(Some(((name, fields), iter)))
+    fn parse_type<'c>(
+        iter: &std::str::Chars<'c>,
+    ) -> Result<(Type, std::str::Chars<'c>), FromStrError> {
+        let mut iter_after_value = iter.clone();
+        let value = match iter_after_value.next().ok_or(FromStrError::EndOfInput)? {
+            Self::CHAR_NONE => Type::None,
+            Self::CHAR_UNKNOWN => Type::Unknown,
+            Self::CHAR_VOID => Type::Void,
+            Self::CHAR_BOOL => Type::Bool,
+            Self::CHAR_INT8 => Type::Int8,
+            Self::CHAR_UINT8 => Type::UInt8,
+            Self::CHAR_INT16 => Type::Int16,
+            Self::CHAR_UINT16 => Type::UInt16,
+            Self::CHAR_INT32 => Type::Int32,
+            Self::CHAR_UINT32 => Type::UInt32,
+            Self::CHAR_INT64 => Type::Int64,
+            Self::CHAR_UINT64 => Type::UInt64,
+            Self::CHAR_FLOAT => Type::Float,
+            Self::CHAR_DOUBLE => Type::Double,
+            Self::CHAR_STRING => Type::String,
+            Self::CHAR_RAW => Type::Raw,
+            Self::CHAR_OBJECT => Type::Object,
+            Self::CHAR_DYNAMIC => Type::Dynamic,
+            c => {
+                let (value, iter_end) = match c {
+                    Self::CHAR_MARK_OPTION => Self::parse_option(iter),
+                    Self::CHAR_LIST_BEGIN => Self::parse_list(iter),
+                    Self::CHAR_MAP_BEGIN => Self::parse_map(iter),
+                    Self::CHAR_TUPLE_BEGIN => Self::parse_tuple(iter),
+                    Self::CHAR_MARK_VAR_ARGS => Self::parse_var_args(iter),
+                    Self::CHAR_MARK_KW_ARGS => Self::parse_kw_args(iter),
+                    c => return Err(FromStrError::UnexpectedChar(c, iter.as_str().into())),
+                }?;
+                iter_after_value = iter_end;
+                value
+            }
+        };
+        Ok((value, iter_after_value))
+    }
+
+    fn pass_marker<'c>(iter: &std::str::Chars<'c>) -> std::str::Chars<'c> {
+        let mut iter = iter.clone();
+        match iter.next() {
+            Some(_) => iter,
+            None => unreachable!(),
+        }
+    }
+
+    fn parse_option<'c>(
+        iter: &std::str::Chars<'c>,
+    ) -> Result<(Type, std::str::Chars<'c>), FromStrError> {
+        let iter_value = Self::pass_marker(iter);
+        let (value, iter_after_value) = match Self::parse_type(&iter_value) {
+            Ok(t) => t,
+            Err(err) => {
+                return Err(match err {
+                    FromStrError::EndOfInput => {
+                        FromStrError::MissingOptionValueType(iter.as_str().into())
+                    }
+                    _ => FromStrError::OptionValueTypeParsing(Box::new(err)),
+                })
+            }
+        };
+        Ok((Type::Option(value.into()), iter_after_value))
+    }
+
+    fn parse_list<'c>(
+        iter: &std::str::Chars<'c>,
+    ) -> Result<(Type, std::str::Chars<'c>), FromStrError> {
+        let iter_value = Self::pass_marker(iter);
+        let (value, mut iter_after_value) = match Self::parse_type(&iter_value) {
+            Ok(t) => t,
+            Err(err) => {
+                return Err(match err {
+                    FromStrError::UnexpectedChar(Self::CHAR_LIST_END, _)
+                    | FromStrError::EndOfInput => {
+                        FromStrError::MissingListValueType(iter.as_str().into())
+                    }
+                    _ => FromStrError::ListValueTypeParsing(Box::new(err)),
+                })
+            }
+        };
+        if iter_after_value.next() != Some(Self::CHAR_LIST_END) {
+            return Err(FromStrError::MissingListEnd(iter.as_str().into()));
+        }
+        Ok((Type::List(value.into()), iter_after_value))
+    }
+
+    fn parse_map<'c>(
+        iter: &std::str::Chars<'c>,
+    ) -> Result<(Type, std::str::Chars<'c>), FromStrError> {
+        let iter_value = Self::pass_marker(iter);
+        let (key, iter_key) = match Self::parse_type(&iter_value) {
+            Ok(t) => t,
+            Err(err) => {
+                return Err(match err {
+                    FromStrError::UnexpectedChar(Self::CHAR_MAP_END, _)
+                    | FromStrError::EndOfInput => {
+                        FromStrError::MissingMapKeyType(iter.as_str().into())
+                    }
+                    _ => FromStrError::MapKeyTypeParsing(Box::new(err)),
+                })
+            }
+        };
+        let (value, mut iter_after_value) = match Self::parse_type(&iter_key) {
+            Ok(t) => t,
+            Err(err) => {
+                return Err(match err {
+                    FromStrError::UnexpectedChar(Self::CHAR_MAP_END, _) => {
+                        FromStrError::MissingMapValueType(iter.as_str().into())
+                    }
+                    _ => FromStrError::MapValueTypeParsing(Box::new(err)),
+                })
+            }
+        };
+        if iter_after_value.next() != Some(Self::CHAR_MAP_END) {
+            return Err(FromStrError::MissingMapEnd(iter.as_str().into()));
+        }
+        Ok((
+            Type::Map {
+                key: key.into(),
+                value: value.into(),
+            },
+            iter_after_value,
+        ))
+    }
+
+    fn parse_var_args<'c>(
+        iter: &std::str::Chars<'c>,
+    ) -> Result<(Type, std::str::Chars<'c>), FromStrError> {
+        let iter_value = Self::pass_marker(iter);
+        let (value_type, iter_after_value) = match Self::parse_type(&iter_value) {
+            Ok(t) => t,
+            Err(err) => {
+                return Err(match err {
+                    FromStrError::EndOfInput => {
+                        FromStrError::MissingVarArgsValueType(iter.as_str().into())
+                    }
+                    _ => FromStrError::VarArgsValueTypeParsing(Box::new(err)),
+                })
+            }
+        };
+        Ok((Type::VarArgs(value_type.into()), iter_after_value))
+    }
+
+    fn parse_kw_args<'c>(
+        iter: &std::str::Chars<'c>,
+    ) -> Result<(Type, std::str::Chars<'c>), FromStrError> {
+        let iter_value = Self::pass_marker(iter);
+        let (value_type, iter_after_value) = match Self::parse_type(&iter_value) {
+            Ok(t) => t,
+            Err(err) => {
+                return Err(match err {
+                    FromStrError::EndOfInput => {
+                        FromStrError::MissingKwArgsValueType(iter.as_str().into())
+                    }
+                    _ => FromStrError::KwArgsValueTypeParsing(Box::new(err)),
+                })
+            }
+        };
+        Ok((Type::KwArgs(value_type.into()), iter_after_value))
+    }
+
+    fn parse_tuple<'c>(
+        iter: &std::str::Chars<'c>,
+    ) -> Result<(Type, std::str::Chars<'c>), FromStrError> {
+        let mut iter_elements = Self::pass_marker(iter);
+        let mut elements = Vec::new();
+        let elements = loop {
+            match Self::parse_type(&iter_elements) {
+                Ok((element, iter_after_element)) => {
+                    elements.push(element);
+                    iter_elements = iter_after_element;
+                }
+                Err(err) => match err {
+                    FromStrError::UnexpectedChar(Self::CHAR_TUPLE_END, _) => break elements,
+                    FromStrError::EndOfInput => {
+                        return Err(FromStrError::MissingTupleEnd(iter.as_str().into()))
+                    }
+                    _ => return Err(FromStrError::TupleElementTypeParsing(Box::new(err))),
+                },
+            }
+        };
+        let mut iter_after_tuple = iter_elements.clone();
+
+        let tuple = {
+            let iter_annotations = iter_elements;
+            match iter_annotations.clone().next() {
+                Some(Signature::CHAR_ANNOTATIONS_BEGIN) => {
+                    match Self::parse_annotations(&iter_annotations, iter) {
+                        Ok((Annotations { name, field_names }, iter_after_annotations)) => {
+                            iter_after_tuple = iter_after_annotations;
+                            match (name, field_names) {
+                                (Some(name), Some(field_names)) => {
+                                    if field_names.len() != elements.len() {
+                                        return Err(FromStrError::Annotation(
+                                            iter.as_str().into(),
+                                            format!("expected {elems_len} annotations but got {names_len}",
+                                                    elems_len=elements.len(), names_len = field_names.len()),
+                                        ));
+                                    }
+                                    let fields = field_names.into_iter().zip(elements).collect();
+                                    Type::Struct { name, fields }
+                                }
+                                (Some(name), None) => Type::TupleStruct { name, elements },
+                                (_, _) => Type::Tuple(elements),
+                            }
                         }
-                        _ => Ok(None),
+                        Err(err) => {
+                            return Err(FromStrError::Annotation(
+                                iter.as_str().into(),
+                                err.to_string(),
+                            ))
+                        }
                     }
                 }
-                let tuple = match parse_annotations(iter.clone(), input)? {
-                    Some(((name, fields), after_annot_iter)) => {
-                        // Advance iter to after annotations.
-                        *iter = after_annot_iter;
-                        let elements = match fields {
-                            Some(fields) => tuple
-                                .elements
-                                .name(fields)
-                                .map_err(|err| FromStrError::Annotation(err, input.into()))?,
-                            None => tuple.elements,
-                        };
-                        match name {
-                            Some(name) => Tuple::named(name, elements),
-                            None => Tuple::new(elements),
-                        }
-                    }
-                    None => tuple,
-                };
-                Ok(Type::from(tuple))
+                _ => Type::Tuple(elements),
             }
-            Self::CHAR_MARK_VARSARGS => Ok({
-                let t = Self::parse_varargs_tail(iter, input)?;
-                Type::var_args(t)
-            }),
-            Self::CHAR_MARK_KWARGS => Ok({
-                let t = Self::parse_kwargs_tail(iter, input)?;
-                Type::kw_args(t)
-            }),
-            _ => Err(FromStrError::UnexpectedChar(c, input.into())),
-        }
+        };
+
+        Ok((tuple, iter_after_tuple))
     }
 
-    fn parse_option_tail(iter: &mut std::str::Chars, start: &str) -> Result<Type, FromStrError> {
-        match Self::parse_type(iter) {
-            Ok(t) => Ok(t),
-            Err(err) => Err(match err {
-                FromStrError::EndOfInput => FromStrError::MissingOptionValueType(start.into()),
-                _ => FromStrError::OptionValueTypeParsing(Box::new(err)),
-            }),
-        }
-        .into()
-    }
-
-    fn parse_varargs_tail(iter: &mut std::str::Chars, start: &str) -> Result<Type, FromStrError> {
-        match Self::parse_type(iter) {
-            Ok(t) => Ok(t),
-            Err(err) => Err(match err {
-                FromStrError::EndOfInput => FromStrError::MissingVarArgsValueType(start.into()),
-                _ => FromStrError::VarArgsValueTypeParsing(Box::new(err)),
-            }),
-        }
-    }
-
-    fn parse_kwargs_tail(iter: &mut std::str::Chars, start: &str) -> Result<Type, FromStrError> {
-        match Self::parse_type(iter) {
-            Ok(t) => Ok(t),
-            Err(err) => Err(match err {
-                FromStrError::EndOfInput => FromStrError::MissingKwArgsValueType(start.into()),
-                _ => FromStrError::KwArgsValueTypeParsing(Box::new(err)),
-            }),
-        }
-    }
-
-    fn parse_list_tail(iter: &mut std::str::Chars, start: &str) -> Result<Type, FromStrError> {
-        let t = Self::parse_type(iter).map_err(|err| match err {
-            FromStrError::UnexpectedChar(Self::CHAR_LIST_END, _) | FromStrError::EndOfInput => {
-                FromStrError::MissingListValueType(start.into())
-            }
-            _ => FromStrError::ListValueTypeParsing(Box::new(err)),
-        })?;
-        match iter.next() {
-            Some(Self::CHAR_LIST_END) => Ok(t),
-            _ => Err(FromStrError::MissingListEnd(start.into())),
-        }
-    }
-
-    fn parse_map_tail(
-        iter: &mut std::str::Chars,
-        start: &str,
-    ) -> Result<(Type, Type), FromStrError> {
-        let key = Self::parse_type(iter).map_err(|err| match err {
-            FromStrError::UnexpectedChar(Self::CHAR_MAP_END, _) | FromStrError::EndOfInput => {
-                FromStrError::MissingMapKeyType(start.into())
-            }
-            _ => FromStrError::MapKeyTypeParsing(Box::new(err)),
-        })?;
-        let value = Self::parse_type(iter).map_err(|err| match err {
-            FromStrError::UnexpectedChar(Self::CHAR_MAP_END, _) => {
-                FromStrError::MissingMapValueType(start.into())
-            }
-            _ => FromStrError::MapValueTypeParsing(Box::new(err)),
-        })?;
-        match iter.next() {
-            Some(Self::CHAR_MAP_END) => Ok((key, value)),
-            _ => Err(FromStrError::MissingMapEnd(start.into())),
-        }
-    }
-
-    fn parse_tuple_tail(iter: &mut std::str::Chars, start: &str) -> Result<Tuple, FromStrError> {
-        let mut fields = Vec::new();
-        loop {
-            match Self::parse_type(iter) {
-                Ok(t) => fields.push(t),
-                Err(err) => {
-                    break match err {
-                        FromStrError::UnexpectedChar(Self::CHAR_TUPLE_END, _) => {
-                            Ok(Tuple::new(tuple::Elements::from_iter(fields)))
-                        }
-                        FromStrError::EndOfInput => {
-                            Err(FromStrError::MissingTupleEnd(start.into()))
-                        }
-                        _ => Err(FromStrError::TupleElementTypeParsing(Box::new(err))),
-                    }
-                }
-            }
-        }
-    }
-
-    fn parse_tuple_annotations_tail(
-        iter: &mut std::str::Chars,
-        tuple_start: &str,
-    ) -> Result<(Option<String>, Option<Vec<String>>), FromStrError> {
-        type Value = (Option<String>, Option<Vec<String>>);
+    fn parse_annotations<'c>(
+        iter: &std::str::Chars<'c>,
+        iter_tuple: &std::str::Chars<'c>,
+    ) -> Result<(Annotations, std::str::Chars<'c>), FromStrError> {
+        let mut iter_annotations = Self::pass_marker(iter);
         enum State {
             Name(Option<String>),
             Field(Option<String>),
@@ -227,36 +280,50 @@ impl Signature {
                     },
                 }
             }
-            fn next(&mut self, value: &mut Value) {
+            fn next(&mut self, annotations: &mut Annotations) {
                 match std::mem::replace(self, Self::Field(None)) {
-                    Self::Name(n) => {
-                        value.0 = n;
+                    Self::Name(name) => {
+                        annotations.name = name;
                     }
-                    Self::Field(f) => {
-                        if let Some(f) = f {
-                            let fields = &mut value.1;
-                            let fields = fields.get_or_insert_with(|| Vec::new());
+                    Self::Field(field) => {
+                        if let Some(f) = field {
+                            let fields = &mut annotations.field_names;
+                            let fields = fields.get_or_insert_with(Vec::new);
                             fields.push(f);
                         }
                     }
                 }
             }
         }
-        let mut value = Value::default();
+        let mut annotations = Annotations {
+            name: None,
+            field_names: None,
+        };
         let mut state = State::Name(None);
-        loop {
-            match iter.next() {
-                Some(Self::CHAR_ANNOTATIONS_SEP) => state.next(&mut value),
+        let value = loop {
+            match iter_annotations.next() {
+                Some(Self::CHAR_ANNOTATIONS_SEP) => state.next(&mut annotations),
                 Some(Self::CHAR_ANNOTATIONS_END) => {
-                    state.next(&mut value);
-                    break Ok(value);
+                    state.next(&mut annotations);
+                    break annotations;
                 }
                 Some(c) if c.is_alphanumeric() => state.push_char(c),
-                Some(c) => break Err(FromStrError::UnexpectedChar(c, tuple_start.into())),
-                None => break Err(FromStrError::MissingTupleAnnotationEnd(tuple_start.into())),
+                Some(c) => return Err(FromStrError::UnexpectedChar(c, iter_tuple.as_str().into())),
+                None => {
+                    return Err(FromStrError::MissingTupleAnnotationEnd(
+                        iter.as_str().into(),
+                        iter_tuple.as_str().into(),
+                    ))
+                }
             }
-        }
+        };
+        Ok((value, iter_annotations))
     }
+}
+
+struct Annotations {
+    name: Option<String>,
+    field_names: Option<Vec<String>>,
 }
 
 impl From<Type> for Signature {
@@ -271,90 +338,77 @@ impl From<Signature> for Type {
     }
 }
 
+fn write_type(t: &Type, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    use std::fmt::Write;
+    match t {
+        Type::None => f.write_char(Signature::CHAR_NONE),
+        Type::Unknown => f.write_char(Signature::CHAR_UNKNOWN),
+        Type::Void => f.write_char(Signature::CHAR_VOID),
+        Type::Bool => f.write_char(Signature::CHAR_BOOL),
+        Type::Int8 => f.write_char(Signature::CHAR_INT8),
+        Type::UInt8 => f.write_char(Signature::CHAR_UINT8),
+        Type::Int16 => f.write_char(Signature::CHAR_INT16),
+        Type::UInt16 => f.write_char(Signature::CHAR_UINT16),
+        Type::Int32 => f.write_char(Signature::CHAR_INT32),
+        Type::UInt32 => f.write_char(Signature::CHAR_UINT32),
+        Type::Int64 => f.write_char(Signature::CHAR_INT64),
+        Type::UInt64 => f.write_char(Signature::CHAR_UINT64),
+        Type::Float => f.write_char(Signature::CHAR_FLOAT),
+        Type::Double => f.write_char(Signature::CHAR_DOUBLE),
+        Type::String => f.write_char(Signature::CHAR_STRING),
+        Type::Raw => f.write_char(Signature::CHAR_RAW),
+        Type::Object => f.write_char(Signature::CHAR_OBJECT),
+        Type::Dynamic => f.write_char(Signature::CHAR_DYNAMIC),
+        Type::Option(o) => {
+            f.write_char(Signature::CHAR_MARK_OPTION)?;
+            write_type(o.as_ref(), f)
+        }
+        Type::List(t) => {
+            f.write_char(Signature::CHAR_LIST_BEGIN)?;
+            write_type(t.as_ref(), f)?;
+            f.write_char(Signature::CHAR_LIST_END)
+        }
+        Type::Map { key, value } => {
+            f.write_char(Signature::CHAR_MAP_BEGIN)?;
+            write_type(key.as_ref(), f)?;
+            write_type(value.as_ref(), f)?;
+            f.write_char(Signature::CHAR_MAP_END)
+        }
+        Type::Tuple(elements) => {
+            f.write_char(Signature::CHAR_TUPLE_BEGIN)?;
+            for element in elements {
+                write_type(element, f)?;
+            }
+            f.write_char(Signature::CHAR_TUPLE_END)
+        }
+        Type::TupleStruct { .. } => todo!(),
+        Type::Struct { name, fields } => {
+            f.write_char(Signature::CHAR_TUPLE_BEGIN)?;
+            for (_, field) in fields {
+                write_type(field, f)?;
+            }
+            f.write_char(Signature::CHAR_TUPLE_END)?;
+            f.write_char(Signature::CHAR_ANNOTATIONS_BEGIN)?;
+            f.write_str(name)?;
+            for (name, _) in fields {
+                write!(f, ",{name}")?;
+            }
+            f.write_char(Signature::CHAR_ANNOTATIONS_END)
+        }
+        Type::VarArgs(t) => {
+            f.write_char(Signature::CHAR_MARK_VAR_ARGS)?;
+            write_type(t, f)
+        }
+        Type::KwArgs(t) => {
+            f.write_char(Signature::CHAR_MARK_KW_ARGS)?;
+            write_type(t, f)
+        }
+    }
+}
+
 impl std::fmt::Display for Signature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use std::fmt::Write;
-        match &self.0 {
-            Type::None => f.write_char(Self::CHAR_NONE),
-            Type::Unknown => f.write_char(Self::CHAR_UNKNOWN),
-            Type::Void => f.write_char(Self::CHAR_VOID),
-            Type::Bool => f.write_char(Self::CHAR_BOOL),
-            Type::Int8 => f.write_char(Self::CHAR_INT8),
-            Type::UInt8 => f.write_char(Self::CHAR_UINT8),
-            Type::Int16 => f.write_char(Self::CHAR_INT16),
-            Type::UInt16 => f.write_char(Self::CHAR_UINT16),
-            Type::Int32 => f.write_char(Self::CHAR_INT32),
-            Type::UInt32 => f.write_char(Self::CHAR_UINT32),
-            Type::Int64 => f.write_char(Self::CHAR_INT64),
-            Type::UInt64 => f.write_char(Self::CHAR_UINT64),
-            Type::Float => f.write_char(Self::CHAR_FLOAT),
-            Type::Double => f.write_char(Self::CHAR_DOUBLE),
-            Type::String => f.write_char(Self::CHAR_STRING),
-            Type::Raw => f.write_char(Self::CHAR_RAW),
-            Type::Object => f.write_char(Self::CHAR_OBJECT),
-            Type::Dynamic => f.write_char(Self::CHAR_DYNAMIC),
-            Type::Option(o) => write!(
-                f,
-                "{mark}{o}",
-                mark = Self::CHAR_MARK_OPTION,
-                o = Self((**o).clone())
-            ),
-            Type::List(t) => write!(
-                f,
-                "{beg}{t}{end}",
-                beg = Self::CHAR_LIST_BEGIN,
-                t = Self((**t).clone()),
-                end = Self::CHAR_LIST_END
-            ),
-            Type::Map { key, value } => write!(
-                f,
-                "{beg}{key}{value}{end}",
-                beg = Self::CHAR_MAP_BEGIN,
-                key = Self((**key).clone()),
-                value = Self((**value).clone()),
-                end = Self::CHAR_MAP_END
-            ),
-            Type::Tuple(t) => {
-                write!(
-                    f,
-                    "{beg}{ts}{end}",
-                    beg = Self::CHAR_TUPLE_BEGIN,
-                    end = Self::CHAR_TUPLE_END,
-                    ts = t
-                        .into_iter()
-                        .fold(String::new(), |s, t| s + &Self(t.clone()).to_string())
-                )?;
-                // Skip annotations if both name and fields are absent.
-                if t.name.is_none() && !t.has_fields() {
-                    return Ok(());
-                }
-                write!(
-                    f,
-                    "{beg}{name}{fields}{end}",
-                    beg = Self::CHAR_ANNOTATIONS_BEGIN,
-                    end = Self::CHAR_ANNOTATIONS_END,
-                    name = t.name.as_ref().unwrap_or(&String::new()),
-                    fields = t
-                        .fields()
-                        .into_iter()
-                        .flatten()
-                        .map(|f| format!(",{name}", name = f.name))
-                        .collect::<String>(),
-                )
-            }
-            Type::VarArgs(t) => write!(
-                f,
-                "{mark}{t}",
-                mark = Self::CHAR_MARK_VARSARGS,
-                t = Self(*t.clone())
-            ),
-            Type::KwArgs(t) => write!(
-                f,
-                "{mark}{t}",
-                mark = Self::CHAR_MARK_KWARGS,
-                t = Self(*t.clone())
-            ),
-        }
+        write_type(&self.0, f)
     }
 }
 
@@ -362,7 +416,10 @@ impl std::str::FromStr for Signature {
     type Err = FromStrError;
 
     fn from_str(src: &str) -> Result<Self, Self::Err> {
-        Self::parse_type(&mut src.chars()).map(Self)
+        match Self::parse_type(&src.chars()) {
+            Ok((t, _)) => Ok(Self(t)),
+            Err(err) => Err(err),
+        }
     }
 }
 
@@ -423,11 +480,11 @@ pub enum FromStrError {
     #[error("end of tuple starting at input \"{0}\" is missing")]
     MissingTupleEnd(String),
 
-    #[error("annotation of structure failed: \"{0}\"")]
-    Annotation(tuple::NameElementsError, String),
+    #[error("annotation of structure starting at input \"{0}\" failed: {1}")]
+    Annotation(String, String),
 
-    #[error("end of annotation for tuple starting at input \"{0}\" is missing")]
-    MissingTupleAnnotationEnd(String),
+    #[error("end of annotations starting at input \"{0}\" for tuple starting at input \"{1}\" is missing")]
+    MissingTupleAnnotationEnd(String, String),
 }
 
 impl serde::Serialize for Signature {
@@ -465,7 +522,8 @@ impl<'de> serde::Deserialize<'de> for Signature {
 
 #[cfg(test)]
 mod tests {
-    use super::{super::r#type::tuple, *};
+    use super::*;
+    use indexmap::indexmap;
 
     #[test]
     fn test_signature_to_from_string() {
@@ -516,61 +574,74 @@ mod tests {
         assert_sig_to_from_str!(Type::Raw, "r");
         assert_sig_to_from_str!(Type::Object, "o");
         assert_sig_to_from_str!(Type::Dynamic, "m");
-        assert_sig_to_from_str!(Type::option(Type::Void), "+v");
-        assert_sig_to_from_str!(Type::list(Type::Int32), "[i]");
-        assert_sig_to_from_str!(Type::list(Type::unit_tuple()), "[()]");
-        assert_sig_to_from_str!(Type::map(Type::Float, Type::String), "{fs}");
+        assert_sig_to_from_str!(Type::Option(Type::Void.into()), "+v");
+        assert_sig_to_from_str!(Type::List(Type::Int32.into()), "[i]");
+        assert_sig_to_from_str!(Type::List(Type::Tuple(vec![]).into()), "[()]");
         assert_sig_to_from_str!(
-            Type::tuple_from_iter([Type::Float, Type::String, Type::UInt32]),
+            Type::Map {
+                key: Type::Float.into(),
+                value: Type::String.into(),
+            },
+            "{fs}"
+        );
+        assert_sig_to_from_str!(
+            Type::Tuple(vec![Type::Float, Type::String, Type::UInt32]),
             "(fsI)"
         );
         assert_sig_to_from_str!(
-            Type::tuple_from_iter([
-                tuple::Field::new("x", Type::Float),
-                tuple::Field::new("y", Type::Float)
-            ]),
+            Type::Struct {
+                name: String::new(),
+                fields: indexmap![
+                    "x".into() => Type::Float,
+                    "y".into() => Type::Float
+                ]
+            },
             "(ff)<,x,y>"
         );
-        assert_sig_from_str!(Type::unit_tuple(), "()<>");
-        assert_sig_from_str!(Type::tuple_from_iter([Type::Int32]), "(i)<>");
-        assert_sig_from_str!(Type::tuple_from_iter([Type::Int32]), "(i)<,,,,,,,>");
+        // Annotations can be ignored.
+        assert_sig_from_str!(Type::Tuple(vec![]), "()<>");
+        assert_sig_from_str!(Type::Tuple(vec![Type::Int32]), "(i)<>");
+        assert_sig_from_str!(Type::Tuple(vec![Type::Int32]), "(i)<,,,,,,,>");
         assert_sig_to_from_str!(
-            Type::named_tuple_from_iter(
-                "ExplorationMap",
-                [
-                    Type::list(Type::tuple_from_iter([Type::Double, Type::Double])),
+            Type::TupleStruct {
+                name: "ExplorationMap".into(),
+                elements: vec![
+                    Type::List(Type::Tuple(vec![Type::Double, Type::Double]).into()),
                     Type::UInt64,
                 ],
-            ),
+            },
             "([(dd)]L)<ExplorationMap>"
         );
         assert_sig_to_from_str!(
-            Type::named_tuple_from_iter(
-                "ExplorationMap",
-                [
-                    tuple::Field::new(
-                        "points",
-                        Type::list(Type::named_tuple_from_iter(
-                            "Point",
-                            [
-                                tuple::Field::new("x", Type::Double),
-                                tuple::Field::new("y", Type::Double)
-                            ],
-                        )),
-                    ),
-                    tuple::Field::new("timestamp", Type::UInt64),
+            Type::Struct {
+                name: "ExplorationMap".into(),
+                fields: indexmap![
+                    "points".into() => Type::List(Type::Struct {
+                        name: "Point".into(),
+                        fields: indexmap![
+                            "x".into() => Type::Double,
+                            "y".into() => Type::Double
+                        ],
+                    }.into()),
+                    "timestamp".into() => Type::UInt64,
                 ],
-            ),
+            },
             "([(dd)<Point,x,y>]L)<ExplorationMap,points,timestamp>"
         );
-        assert_sig_to_from_str!(Type::var_args(Type::Dynamic), "#m");
-        assert_sig_to_from_str!(Type::kw_args(Type::Object), "~o");
+        assert_sig_to_from_str!(Type::VarArgs(Type::Dynamic.into()), "#m");
+        assert_sig_to_from_str!(Type::KwArgs(Type::Object.into()), "~o");
         // Some complex type for fun.
         assert_sig_to_from_str!(
-            Type::tuple_from_iter([
-                Type::list(Type::map(Type::option(Type::Object), Type::Raw)),
-                Type::kw_args(Type::Double),
-                Type::var_args(Type::option(Type::Dynamic)),
+            Type::Tuple(vec![
+                Type::List(
+                    Type::Map {
+                        key: Type::Option(Type::Object.into()).into(),
+                        value: Type::Raw.into(),
+                    }
+                    .into()
+                ),
+                Type::KwArgs(Type::Double.into()),
+                Type::VarArgs(Type::Option(Type::Dynamic.into()).into()),
             ]),
             "([{+or}]~d#+m)"
         );
@@ -704,12 +775,15 @@ mod tests {
         // Tuples annotations
         assert_eq!(
             "(i)<".parse::<Signature>(),
-            Err(FromStrError::MissingTupleAnnotationEnd("(i)<".into()))
+            Err(FromStrError::MissingTupleAnnotationEnd(
+                "<".into(),
+                "(i)<".into()
+            ))
         );
         assert_eq!(
             "(i)<S,a,b>".parse::<Signature>(),
             Err(FromStrError::Annotation(
-                tuple::NameElementsError::BadNamesSize(1, 2),
+                "expected 1 annotations but got 2".into(),
                 "(i)<S,a,b>".into()
             ))
         );
@@ -738,67 +812,57 @@ mod tests {
         let t = sig.into_type();
         assert_eq!(
             t,
-            Type::named_tuple_from_iter(
-                "MetaObject",
-                [
-                    tuple::Field::new(
-                        "methods",
-                        Type::map(
-                            Type::UInt32,
-                            Type::named_tuple_from_iter(
-                                "MetaMethod",
-                                [
-                                    tuple::Field::new("uid", Type::UInt32),
-                                    tuple::Field::new("returnSignature", Type::String),
-                                    tuple::Field::new("name", Type::String),
-                                    tuple::Field::new("parametersSignature", Type::String),
-                                    tuple::Field::new("description", Type::String),
-                                    tuple::Field::new(
-                                        "parameters",
-                                        Type::list(Type::named_tuple_from_iter(
-                                            "MetaMethodParameter",
-                                            [
-                                                tuple::Field::new("name", Type::String),
-                                                tuple::Field::new("description", Type::String)
-                                            ]
-                                        ))
-                                    ),
-                                    tuple::Field::new("returnDescription", Type::String),
-                                ]
-                            )
-                        )
-                    ),
-                    tuple::Field::new(
-                        "signals",
-                        Type::map(
-                            Type::UInt32,
-                            Type::named_tuple_from_iter(
-                                "MetaSignal",
-                                [
-                                    tuple::Field::new("uid", Type::UInt32),
-                                    tuple::Field::new("name", Type::String),
-                                    tuple::Field::new("signature", Type::String),
-                                ]
-                            )
-                        )
-                    ),
-                    tuple::Field::new(
-                        "properties",
-                        Type::map(
-                            Type::UInt32,
-                            Type::named_tuple_from_iter(
-                                "MetaProperty",
-                                [
-                                    tuple::Field::new("uid", Type::UInt32),
-                                    tuple::Field::new("name", Type::String),
-                                    tuple::Field::new("signature", Type::String),
-                                ]
-                            )
-                        )
-                    ),
-                    tuple::Field::new("description", Type::String)
+            Type::Struct {
+                name: "MetaObject".into(),
+                fields: indexmap![
+                    "methods".into() => Type::Map {
+                        key: Type::UInt32.into(),
+                        value: Type::Struct {
+                            name: "MetaMethod".into(),
+                            fields: indexmap![
+                                "uid".into() => Type::UInt32,
+                                "returnSignature".into() => Type::String,
+                                "name".into() => Type::String,
+                                "parametersSignature".into() => Type::String,
+                                "description".into() => Type::String,
+                                "parameters".into() => Type::List(
+                                    Type::Struct {
+                                        name: "MetaMethodParameter".into(),
+                                        fields: indexmap![
+                                            "name".into() => Type::String,
+                                            "description".into() => Type::String
+                                        ]
+                                    }.into(),
+                                ),
+                                "returnDescription".into() => Type::String,
+                            ]
+                        }.into(),
+                    },
+                    "signals".into() => Type::Map {
+                        key: Type::UInt32.into(),
+                        value: Type::Struct {
+                            name: "MetaSignal".into(),
+                            fields: indexmap![
+                                "uid".into() => Type::UInt32,
+                                "name".into() => Type::String,
+                                "signature".into() => Type::String,
+                            ]
+                        }.into()
+                    }.into(),
+                    "properties".into() => Type::Map {
+                        key: Type::UInt32.into(),
+                        value: Type::Struct {
+                            name: "MetaProperty".into(),
+                            fields: indexmap![
+                                "uid".into() => Type::UInt32,
+                                "name".into() => Type::String,
+                                "signature".into() => Type::String,
+                            ]
+                        }.into()
+                    }.into(),
+                    "description".into() => Type::String,
                 ]
-            )
+            }
         );
     }
 
@@ -806,13 +870,13 @@ mod tests {
     fn test_signature_ser_de() {
         use serde_test::{assert_tokens, Token};
         assert_tokens(
-            &Signature(Type::Tuple(tuple::Tuple::named(
-                "Point",
-                tuple::Elements::from_iter([
-                    tuple::Field::new("x", Type::Double),
-                    tuple::Field::new("y", Type::Double),
-                ]),
-            ))),
+            &Signature(Type::Struct {
+                name: "Point".into(),
+                fields: indexmap![
+                    "x".into() => Type::Double,
+                    "y".into() => Type::Double,
+                ],
+            }),
             &[Token::Str("(dd)<Point,x,y>")],
         )
     }

@@ -76,9 +76,9 @@ impl SubjectExt for Subject {
 
     fn action(&self) -> Action {
         match self {
-            Self::Server(s) => s.action().into(),
-            Self::ServiceDirectory(sd) => sd.action().into(),
-            Self::BoundObject(b) => b.action().into(),
+            Self::Server(s) => s.action(),
+            Self::ServiceDirectory(sd) => sd.action(),
+            Self::BoundObject(b) => b.action(),
         }
     }
 }
@@ -137,8 +137,7 @@ mod de {
             D: serde::Deserializer<'de>,
         {
             let s = ser::Repr::deserialize(deserializer)?;
-            Self::try_from_values(s.service, s.object, s.action)
-                .map_err(|e| serde::de::Error::custom(e))
+            Self::try_from_values(s.service, s.object, s.action).map_err(serde::de::Error::custom)
         }
     }
 }

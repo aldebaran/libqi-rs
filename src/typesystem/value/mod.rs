@@ -4,7 +4,7 @@ use super::Type;
 pub trait Value {
     fn get_type<'t>() -> &'t Type;
 
-    fn to_any_value(&self) -> dynamic::AnyValue
+    fn to_any_value(&self) -> Result<dynamic::AnyValue, dynamic::ser::Error>
     where
         Self: serde::Serialize,
     {

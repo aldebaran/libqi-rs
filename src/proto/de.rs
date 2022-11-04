@@ -55,7 +55,7 @@ where
 {
     type Error = Error;
 
-    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,
     {
@@ -435,7 +435,7 @@ where
     fn from_reader(reader: R) -> Self {
         Self {
             reader,
-            fields_iter: Message::FIELDS.into_iter(),
+            fields_iter: Message::FIELDS.iter(),
             current_field: None,
             payload_size: None,
         }
@@ -509,7 +509,7 @@ where
                 Message::PAYLOAD_TOKEN => {
                     let size = self
                         .payload_size
-                        .ok_or_else(|| Error::MissingMessageField("payload_size"))?;
+                        .ok_or(Error::MissingMessageField("payload_size"))?;
                     let mut payload = vec![0; size];
                     self.reader.read_exact(&mut payload)?;
                     let payload: Result<_> = seed.deserialize(payload.into_deserializer());
@@ -580,7 +580,7 @@ where
     let size_bytes = read_bytes(reader)?;
     let size = u32::from_le_bytes(size_bytes)
         .try_into()
-        .map_err(|e| Error::BadSize(e))?;
+        .map_err(Error::BadSize)?;
     Ok(size)
 }
 
