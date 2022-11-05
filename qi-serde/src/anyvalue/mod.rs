@@ -271,34 +271,67 @@ mod tests {
 
     #[test]
     fn test_anyvalue_ser_de() {
+        use indexmap::indexmap;
         use serde_test::{assert_tokens, Token};
         assert_tokens(
-            &AnyValue::Tuple(vec![
-                AnyValue::List {
-                    value_type: Type::String,
-                    list: vec![
-                        AnyValue::String("cookies".into()),
-                        AnyValue::String("muffins".into()),
-                    ],
-                },
-                AnyValue::Int32(12),
-                AnyValue::Option {
-                    value_type: Type::Map {
-                        key: Type::String.into(),
-                        value: Type::Float.into(),
+            &AnyValue::Struct {
+                name: "S".into(),
+                fields: indexmap![
+                    "l".into() => AnyValue::List {
+                        value_type: Type::String,
+                        list: vec![
+                            AnyValue::String("cookies".into()),
+                            AnyValue::String("muffins".into()),
+                        ],
                     },
-                    option: None,
-                },
-            ]),
+                    "r".into() => AnyValue::Raw(vec![1, 2, 3, 4]),
+                    "i".into() => AnyValue::Int32(12),
+                    "om".into() => AnyValue::Option {
+                        value_type: Type::Map {
+                            key: Type::String.into(),
+                            value: Type::Float.into(),
+                        },
+                        option: Some(
+                            AnyValue::Map {
+                                key_type: Type::String,
+                                value_type: Type::Float,
+                                map: vec![
+                                    (
+                                        AnyValue::String("pi".into()),
+                                        AnyValue::Float(std::f32::consts::PI),
+                                    ),
+                                    (
+                                        AnyValue::String("tau".into()),
+                                        AnyValue::Float(std::f32::consts::TAU),
+                                    ),
+                                ],
+                            }
+                            .into(),
+                        ),
+                    },
+                    "ol".into() => AnyValue::Option {
+                        value_type: Type::Int64,
+                        option: None,
+                    },
+                ],
+            },
             &[
                 Token::Tuple { len: 2 },
-                Token::Str("([s]i+{sf})"),
+                Token::Str("([s]ri+{sf}+l)<S,l,r,i,om,ol>"),
                 Token::Tuple { len: 3 },
                 Token::Seq { len: Some(2) },
                 Token::Str("cookies"),
                 Token::Str("muffins"),
                 Token::SeqEnd,
+                Token::Bytes(&[1, 2, 3, 4]),
                 Token::I32(12),
+                Token::Some,
+                Token::Map { len: Some(1) },
+                Token::Str("pi"),
+                Token::F32(std::f32::consts::PI),
+                Token::Str("tau"),
+                Token::F32(std::f32::consts::TAU),
+                Token::MapEnd,
                 Token::None,
                 Token::TupleEnd,
             ],

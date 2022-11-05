@@ -1,12 +1,78 @@
-use crate::{AnyValue, Type};
+use crate::{AnyValue, Signature, Type};
 use indexmap::IndexMap;
 
 impl serde::Serialize for AnyValue {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        todo!()
+        use serde::ser::SerializeTuple;
+        let mut serializer = serializer.serialize_tuple(2)?;
+        let value_type = self.get_type();
+        serializer.serialize_element(&Signature::from(value_type))?;
+        match self {
+            AnyValue::Void => serializer.serialize_element(&()),
+            AnyValue::Bool(b) => serializer.serialize_element(b),
+            AnyValue::Int8(i) => serializer.serialize_element(i),
+            AnyValue::UInt8(u) => serializer.serialize_element(u),
+            AnyValue::Int16(i) => serializer.serialize_element(i),
+            AnyValue::UInt16(u) => serializer.serialize_element(u),
+            AnyValue::Int32(i) => serializer.serialize_element(i),
+            AnyValue::UInt32(u) => serializer.serialize_element(u),
+            AnyValue::Int64(i) => serializer.serialize_element(i),
+            AnyValue::UInt64(u) => serializer.serialize_element(u),
+            AnyValue::Float(f) => serializer.serialize_element(f),
+            AnyValue::Double(d) => serializer.serialize_element(d),
+            AnyValue::String(s) => serializer.serialize_element(s),
+            AnyValue::Raw(r) => serializer.serialize_element(serde_bytes::Bytes::new(r)),
+            AnyValue::Option { option, .. } => serializer.serialize_element(option),
+            AnyValue::List { list, .. } => serializer.serialize_element(list),
+            AnyValue::Map { map, .. } => {
+                struct AsMap<T>(T);
+                impl serde::Serialize for AsMap<&Vec<(AnyValue, AnyValue)>> {
+                    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                    where
+                        S: serde::Serializer,
+                    {
+                        serializer.collect_map(self.0.iter().map(|(k, v)| (k, v)))
+                    }
+                }
+                serializer.serialize_element(&AsMap(map))
+            }
+            AnyValue::Tuple(elements) | AnyValue::TupleStruct { elements, .. } => {
+                struct AsTuple<T>(T);
+                impl serde::Serialize for AsTuple<&Vec<AnyValue>> {
+                    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                    where
+                        S: serde::Serializer,
+                    {
+                        let mut serializer = serializer.serialize_tuple(self.0.len())?;
+                        for element in self.0 {
+                            serializer.serialize_element(element)?;
+                        }
+                        serializer.end()
+                    }
+                }
+                serializer.serialize_element(&AsTuple(elements))
+            }
+            AnyValue::Struct { fields, .. } => {
+                struct AsTuple<T>(T);
+                impl serde::Serialize for AsTuple<&IndexMap<String, AnyValue>> {
+                    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+                    where
+                        S: serde::Serializer,
+                    {
+                        let mut serializer = serializer.serialize_tuple(self.0.len())?;
+                        for (_key, element) in self.0 {
+                            serializer.serialize_element(element)?;
+                        }
+                        serializer.end()
+                    }
+                }
+                serializer.serialize_element(&AsTuple(fields))
+            }
+        }?;
+        serializer.end()
     }
 }
 
