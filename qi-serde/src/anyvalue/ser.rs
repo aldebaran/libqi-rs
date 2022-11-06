@@ -8,7 +8,7 @@ impl serde::Serialize for AnyValue {
     {
         use serde::ser::SerializeTuple;
         let mut serializer = serializer.serialize_tuple(2)?;
-        let value_type = self.get_type();
+        let value_type = self.runtime_type();
         serializer.serialize_element(&Signature::from(value_type))?;
         match self {
             AnyValue::Void => serializer.serialize_element(&()),
@@ -248,7 +248,7 @@ impl<'t> serde::Serializer for Serializer<'t> {
         _variant_index: u32,
         _variant: &'static str,
     ) -> Result<Self::Ok, Self::Error> {
-        todo!("enums are not yet supported as an AnyValue")
+        todo!("enums are not yet supported as values")
     }
 
     fn serialize_newtype_struct<T: ?Sized>(
@@ -287,7 +287,7 @@ impl<'t> serde::Serializer for Serializer<'t> {
     where
         T: serde::Serialize,
     {
-        todo!("enums are not yet supported as dynamic values")
+        todo!("enums are not yet supported as values")
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
@@ -346,7 +346,7 @@ impl<'t> serde::Serializer for Serializer<'t> {
         _variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        todo!("enums are not yet supported as dynamic values")
+        todo!("enums are not yet supported as values")
     }
 
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
@@ -388,7 +388,7 @@ impl<'t> serde::Serializer for Serializer<'t> {
         _variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        todo!("enums are not yet supported as dynamic values")
+        todo!("enums are not yet supported as values")
     }
 }
 

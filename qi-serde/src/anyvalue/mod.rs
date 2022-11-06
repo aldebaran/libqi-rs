@@ -1,7 +1,7 @@
 pub mod de;
 pub mod ser;
 use crate::Type;
-pub use de::from_any_value;
+pub use de::{from_any_value, from_any_value_ref};
 use indexmap::IndexMap;
 pub use ser::to_any_value;
 
@@ -83,10 +83,10 @@ impl AnyValue {
     where
         T: serde::de::DeserializeOwned,
     {
-        from_any_value(self)
+        from_any_value_ref(self)
     }
 
-    pub fn get_type(&self) -> Type {
+    pub fn runtime_type(&self) -> Type {
         match self {
             AnyValue::Void => Type::Void,
             AnyValue::Bool(_) => Type::Bool,
@@ -112,19 +112,25 @@ impl AnyValue {
                 key: key_type.clone().into(),
                 value: value_type.clone().into(),
             },
-            AnyValue::Tuple(elements) => Type::Tuple(elements.iter().map(Self::get_type).collect()),
+            AnyValue::Tuple(elements) => {
+                Type::Tuple(elements.iter().map(Self::runtime_type).collect())
+            }
             AnyValue::TupleStruct { name, elements } => Type::TupleStruct {
                 name: name.clone(),
-                elements: elements.iter().map(Self::get_type).collect(),
+                elements: elements.iter().map(Self::runtime_type).collect(),
             },
             AnyValue::Struct { name, fields } => Type::Struct {
                 name: name.clone(),
                 fields: fields
                     .iter()
-                    .map(|(name, value)| (name.clone(), value.get_type()))
+                    .map(|(name, value)| (name.clone(), value.runtime_type()))
                     .collect(),
             },
         }
+    }
+
+    pub fn matches_type(&self, _t: &Type) -> bool {
+        todo!()
     }
 }
 
@@ -234,39 +240,40 @@ mod tests {
 
     #[test]
     fn test_to_anyvalue() {
-        use crate::Value;
-        let (s, expected) = sample_serializable_and_anyvalue();
+        let s = Serializable::sample();
+        let expected = Serializable::sample_as_value();
         let value = to_any_value(&s, Serializable::get_type()).unwrap();
         assert_eq!(value, expected);
     }
 
     #[test]
     fn test_anyvalue_to_anyvalue() {
-        let (_, src_value) = sample_serializable_and_anyvalue();
+        let src_value = Serializable::sample_as_value();
         let value = to_any_value(&src_value, Serializable::get_type()).unwrap();
         assert_eq!(value, src_value);
     }
 
     #[test]
     fn test_from_anyvalue() {
-        let (expected, v) = sample_serializable_and_anyvalue();
-        let s: Serializable = from_any_value(&v).unwrap();
+        let expected = Serializable::sample();
+        let value = Serializable::sample_as_value();
+        let s: Serializable = from_any_value_ref(&value).unwrap();
         assert_eq!(s, expected);
     }
 
     #[test]
     fn test_anyvalue_from_anyvalue() {
-        let (_, src_value) = sample_serializable_and_anyvalue();
-        let value: AnyValue = from_any_value(&src_value).unwrap();
+        let src_value = Serializable::sample_as_value();
+        let value: AnyValue = from_any_value_ref(&src_value).unwrap();
         assert_eq!(value, src_value);
     }
 
     #[test]
     fn test_to_from_anyvalue_invariant() {
-        let (s, _) = crate::tests::sample_serializable_and_anyvalue();
-        let s2: Serializable =
-            from_any_value(&to_any_value(&s, Serializable::get_type()).unwrap()).unwrap();
-        assert_eq!(s, s2);
+        let src_s = Serializable::sample();
+        let s: Serializable =
+            from_any_value_ref(&to_any_value(&src_s, Serializable::get_type()).unwrap()).unwrap();
+        assert_eq!(s, src_s);
     }
 
     #[test]

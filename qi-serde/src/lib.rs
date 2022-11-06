@@ -56,6 +56,63 @@ pub(crate) mod tests {
                 },
             })
         }
+
+        pub fn sample_as_value() -> AnyValue {
+            let t = AnyValue::Tuple(vec![
+                AnyValue::Int8(-8),
+                AnyValue::UInt8(8),
+                AnyValue::Int16(-16),
+                AnyValue::UInt16(16),
+                AnyValue::Int32(-32),
+                AnyValue::UInt32(32),
+                AnyValue::Int64(-64),
+                AnyValue::UInt64(64),
+                AnyValue::Float(32.32),
+                AnyValue::Double(64.64),
+            ]);
+            let r = AnyValue::Raw(vec![51, 52, 53, 54]);
+            let o = AnyValue::Option {
+                value_type: Type::Bool,
+                option: Some(AnyValue::Bool(false).into()),
+            };
+            let s1 = AnyValue::TupleStruct {
+                name: "S1".into(),
+                elements: vec![
+                    AnyValue::String("bananas".into()),
+                    AnyValue::String("oranges".into()),
+                ],
+            };
+            let l = AnyValue::List {
+                value_type: Type::String,
+                list: vec![
+                    AnyValue::String("cookies".into()),
+                    AnyValue::String("muffins".into()),
+                ],
+            };
+            let m = AnyValue::Map {
+                key_type: Type::Int32,
+                value_type: Type::String,
+                map: vec![
+                    (AnyValue::Int32(1), AnyValue::String("hello".to_string())),
+                    (AnyValue::Int32(2), AnyValue::String("world".to_string())),
+                ],
+            };
+            let s0 = AnyValue::Struct {
+                name: "S0".into(),
+                fields: indexmap![
+                    "t".into() => t,
+                    "r".into() => r,
+                    "o".into() => o,
+                    "s".into() => s1,
+                    "l".into() => l,
+                    "m".into() => m,
+                ],
+            };
+            AnyValue::TupleStruct {
+                name: "Serializable".into(),
+                elements: vec![s0],
+            }
+        }
     }
 
     impl Value for Serializable {
@@ -105,64 +162,5 @@ pub(crate) mod tests {
                 }
             })
         }
-    }
-
-    pub fn sample_serializable_and_anyvalue() -> (Serializable, AnyValue) {
-        let s = Serializable::sample();
-        let t = AnyValue::Tuple(vec![
-            AnyValue::Int8(-8),
-            AnyValue::UInt8(8),
-            AnyValue::Int16(-16),
-            AnyValue::UInt16(16),
-            AnyValue::Int32(-32),
-            AnyValue::UInt32(32),
-            AnyValue::Int64(-64),
-            AnyValue::UInt64(64),
-            AnyValue::Float(32.32),
-            AnyValue::Double(64.64),
-        ]);
-        let r = AnyValue::Raw(vec![51, 52, 53, 54]);
-        let o = AnyValue::Option {
-            value_type: Type::Bool,
-            option: Some(AnyValue::Bool(false).into()),
-        };
-        let s1 = AnyValue::TupleStruct {
-            name: "S1".into(),
-            elements: vec![
-                AnyValue::String("bananas".into()),
-                AnyValue::String("oranges".into()),
-            ],
-        };
-        let l = AnyValue::List {
-            value_type: Type::String,
-            list: vec![
-                AnyValue::String("cookies".into()),
-                AnyValue::String("muffins".into()),
-            ],
-        };
-        let m = AnyValue::Map {
-            key_type: Type::Int32,
-            value_type: Type::String,
-            map: vec![
-                (AnyValue::Int32(1), AnyValue::String("hello".to_string())),
-                (AnyValue::Int32(2), AnyValue::String("world".to_string())),
-            ],
-        };
-        let s0 = AnyValue::Struct {
-            name: "S0".into(),
-            fields: indexmap![
-                "t".into() => t,
-                "r".into() => r,
-                "o".into() => o,
-                "s".into() => s1,
-                "l".into() => l,
-                "m".into() => m,
-            ],
-        };
-        let v = AnyValue::TupleStruct {
-            name: "Serializable".into(),
-            elements: vec![s0],
-        };
-        (s, v)
     }
 }

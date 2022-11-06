@@ -1,7 +1,7 @@
 pub use super::ser::Error;
 use super::AnyValue;
 use serde::{
-    de::{value::MapDeserializer, IntoDeserializer},
+    de::{value::MapDeserializer, value::SeqDeserializer, IntoDeserializer},
     forward_to_deserialize_any,
 };
 
@@ -195,9 +195,16 @@ impl<'de> serde::Deserialize<'de> for AnyValue {
     }
 }
 
-pub fn from_any_value<T>(d: &AnyValue) -> Result<T, Error>
+pub fn from_any_value<T>(d: AnyValue) -> Result<T, Error>
 where
     T: serde::de::DeserializeOwned,
+{
+    T::deserialize(d)
+}
+
+pub fn from_any_value_ref<'v, T>(d: &'v AnyValue) -> Result<T, Error>
+where
+    T: serde::Deserialize<'v>,
 {
     T::deserialize(d)
 }
@@ -228,36 +235,35 @@ impl<'de> serde::Deserializer<'de> for AnyValue {
                 Some(v) => visitor.visit_some(v.into_deserializer()),
                 None => visitor.visit_none(),
             },
-            AnyValue::List { list, .. } => visitor.visit_seq(list.into_deserializer()),
+            AnyValue::List { list: seq, .. }
+            | AnyValue::Tuple(seq)
+            | AnyValue::TupleStruct { elements: seq, .. } => {
+                visitor.visit_seq(SeqDeserializer::new(seq.into_iter()))
+            }
             AnyValue::Map { map, .. } => visitor.visit_map(MapDeserializer::new(map.into_iter())),
-            AnyValue::Tuple(_) => todo!(),
-            AnyValue::TupleStruct { .. } => todo!(),
-            AnyValue::Struct { .. } => todo!(),
+            AnyValue::Struct { fields, .. } => {
+                visitor.visit_map(MapDeserializer::new(fields.into_iter()))
+            }
         }
-    }
-
-    fn deserialize_enum<V>(
-        self,
-        _name: &'static str,
-        _variants: &'static [&'static str],
-        _visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!("enums are not yet supported as an AnyValue")
     }
 
     forward_to_deserialize_any! {
         bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64
         char str string bytes byte_buf option unit
         tuple unit_struct tuple_struct struct newtype_struct
-        seq map identifier ignored_any
+        seq map enum identifier ignored_any
     }
 }
 
 impl<'de> serde::Deserializer<'de> for &'de AnyValue {
     type Error = Error;
+
+    forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64
+        char str string bytes byte_buf option unit
+        tuple unit_struct tuple_struct struct newtype_struct
+        seq map enum identifier ignored_any
+    }
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
@@ -282,64 +288,17 @@ impl<'de> serde::Deserializer<'de> for &'de AnyValue {
                 Some(v) => visitor.visit_some(v.as_ref()),
                 None => visitor.visit_none(),
             },
-            AnyValue::List { list, .. } => visitor.visit_seq(DeserializeSeqRef(list)),
-            AnyValue::Map { map, .. } => visitor.visit_map(DeserializeMapRef(map)),
-            AnyValue::Tuple(_) => todo!(),
-            AnyValue::TupleStruct { .. } => todo!(),
-            AnyValue::Struct { .. } => todo!(),
+            AnyValue::List { list, .. } => visitor.visit_seq(SeqDeserializer::new(list.iter())),
+            AnyValue::Map { map, .. } => {
+                visitor.visit_map(MapDeserializer::new(map.iter().map(|(k, v)| (k, v))))
+            }
+            AnyValue::Tuple(elements) | AnyValue::TupleStruct { elements, .. } => {
+                visitor.visit_seq(SeqDeserializer::new(elements.iter()))
+            }
+            AnyValue::Struct { fields, .. } => visitor.visit_map(MapDeserializer::new(
+                fields.iter().map(|(k, v)| (k.as_str(), v)),
+            )),
         }
-    }
-
-    fn deserialize_enum<V>(
-        self,
-        _name: &'static str,
-        _variants: &'static [&'static str],
-        _visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        todo!("enums are not yet supported as an AnyValue")
-    }
-
-    forward_to_deserialize_any! {
-        bool i8 i16 i32 i64 u8 u16 u32 u64 f32 f64
-        char str string bytes byte_buf option unit
-        tuple unit_struct tuple_struct struct newtype_struct
-        seq map identifier ignored_any
-    }
-}
-
-struct DeserializeSeqRef<'v>(&'v Vec<AnyValue>);
-
-impl<'v, 'de> serde::de::SeqAccess<'de> for DeserializeSeqRef<'v> {
-    type Error = Error;
-
-    fn next_element_seed<T>(&mut self, _seed: T) -> Result<Option<T::Value>, Self::Error>
-    where
-        T: serde::de::DeserializeSeed<'de>,
-    {
-        todo!()
-    }
-}
-
-struct DeserializeMapRef<'v>(&'v Vec<(AnyValue, AnyValue)>);
-
-impl<'v, 'de> serde::de::MapAccess<'de> for DeserializeMapRef<'v> {
-    type Error = Error;
-
-    fn next_key_seed<K>(&mut self, _seed: K) -> Result<Option<K::Value>, Self::Error>
-    where
-        K: serde::de::DeserializeSeed<'de>,
-    {
-        todo!()
-    }
-
-    fn next_value_seed<V>(&mut self, _seed: V) -> Result<V::Value, Self::Error>
-    where
-        V: serde::de::DeserializeSeed<'de>,
-    {
-        todo!()
     }
 }
 
