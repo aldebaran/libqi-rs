@@ -318,7 +318,7 @@ mod tests {
             &[
                 Token::Tuple { len: 2 },
                 Token::Str("([s]ri+{sf}+l)<S,l,r,i,om,ol>"),
-                Token::Tuple { len: 3 },
+                Token::Tuple { len: 5 },
                 Token::Seq { len: Some(2) },
                 Token::Str("cookies"),
                 Token::Str("muffins"),
@@ -333,6 +333,7 @@ mod tests {
                 Token::F32(std::f32::consts::TAU),
                 Token::MapEnd,
                 Token::None,
+                Token::TupleEnd,
                 Token::TupleEnd,
             ],
         )

@@ -60,10 +60,9 @@ pub(crate) mod tests {
 
     impl Value for Serializable {
         fn get_type<'t>() -> &'t Type {
-            use std::sync::Once;
-            static mut TYPE: Option<Type> = None;
-            static INIT: Once = Once::new();
-            INIT.call_once(|| {
+            use once_cell::sync::OnceCell;
+            static TYPE: OnceCell<Type> = OnceCell::new();
+            TYPE.get_or_init(|| {
                 let s0 = {
                     let t = Type::Tuple(vec![
                         Type::Int8,
@@ -100,14 +99,11 @@ pub(crate) mod tests {
                         },
                     }
                 };
-                unsafe {
-                    TYPE = Some(Type::TupleStruct {
-                        name: "S".into(),
-                        elements: vec![s0],
-                    });
+                Type::TupleStruct {
+                    name: "S".into(),
+                    elements: vec![s0],
                 }
-            });
-            unsafe { TYPE.as_ref().unwrap_unchecked() }
+            })
         }
     }
 
