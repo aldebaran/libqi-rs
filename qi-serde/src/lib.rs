@@ -1,21 +1,21 @@
 // TODO: #![warn(missing_docs)]
 
-pub mod anyvalue;
 pub mod format;
 pub mod message;
+pub mod reflect;
 pub mod signature;
 pub mod r#type;
 pub mod value;
 
-pub use anyvalue::{from_any_value, to_any_value, AnyValue};
 pub use format::{
     from_bytes, from_message, from_reader, to_bytes, to_message, to_writer, Deserializer, Error,
     Result, Serializer,
 };
 pub use message::Message;
 pub use r#type::Type;
+pub use reflect::Reflect;
 pub use signature::Signature;
-pub use value::Value;
+pub use value::{from_value_ref, to_value, Value};
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -57,47 +57,37 @@ pub(crate) mod tests {
             })
         }
 
-        pub fn sample_as_value() -> AnyValue {
-            let t = AnyValue::Tuple(vec![
-                AnyValue::Int8(-8),
-                AnyValue::UInt8(8),
-                AnyValue::Int16(-16),
-                AnyValue::UInt16(16),
-                AnyValue::Int32(-32),
-                AnyValue::UInt32(32),
-                AnyValue::Int64(-64),
-                AnyValue::UInt64(64),
-                AnyValue::Float(32.32),
-                AnyValue::Double(64.64),
+        pub fn sample_as_value() -> Value {
+            let t = Value::Tuple(vec![
+                Value::Int8(-8),
+                Value::UInt8(8),
+                Value::Int16(-16),
+                Value::UInt16(16),
+                Value::Int32(-32),
+                Value::UInt32(32),
+                Value::Int64(-64),
+                Value::UInt64(64),
+                Value::Float(32.32),
+                Value::Double(64.64),
             ]);
-            let r = AnyValue::Raw(vec![51, 52, 53, 54]);
-            let o = AnyValue::Option {
-                value_type: Type::Bool,
-                option: Some(AnyValue::Bool(false).into()),
-            };
-            let s1 = AnyValue::TupleStruct {
+            let r = Value::Raw(vec![51, 52, 53, 54]);
+            let o = Value::Option(Some(Value::Bool(false).into()));
+            let s1 = Value::TupleStruct {
                 name: "S1".into(),
                 elements: vec![
-                    AnyValue::String("bananas".into()),
-                    AnyValue::String("oranges".into()),
+                    Value::String("bananas".into()),
+                    Value::String("oranges".into()),
                 ],
             };
-            let l = AnyValue::List {
-                value_type: Type::String,
-                list: vec![
-                    AnyValue::String("cookies".into()),
-                    AnyValue::String("muffins".into()),
-                ],
-            };
-            let m = AnyValue::Map {
-                key_type: Type::Int32,
-                value_type: Type::String,
-                map: vec![
-                    (AnyValue::Int32(1), AnyValue::String("hello".to_string())),
-                    (AnyValue::Int32(2), AnyValue::String("world".to_string())),
-                ],
-            };
-            let s0 = AnyValue::Struct {
+            let l = Value::List(vec![
+                Value::String("cookies".into()),
+                Value::String("muffins".into()),
+            ]);
+            let m = Value::Map(vec![
+                (Value::Int32(1), Value::String("hello".to_string())),
+                (Value::Int32(2), Value::String("world".to_string())),
+            ]);
+            let s0 = Value::Struct {
                 name: "S0".into(),
                 fields: indexmap![
                     "t".into() => t,
@@ -108,14 +98,14 @@ pub(crate) mod tests {
                     "m".into() => m,
                 ],
             };
-            AnyValue::TupleStruct {
+            Value::TupleStruct {
                 name: "Serializable".into(),
                 elements: vec![s0],
             }
         }
     }
 
-    impl Value for Serializable {
+    impl Reflect for Serializable {
         fn get_type<'t>() -> &'t Type {
             use once_cell::sync::OnceCell;
             static TYPE: OnceCell<Type> = OnceCell::new();

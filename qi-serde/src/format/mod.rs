@@ -40,7 +40,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{message::*, tests::*, AnyValue, Message};
+    use crate::{message::*, tests::*, Message, Value};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -92,7 +92,7 @@ pub(crate) mod tests {
                 ],
             }
         );
-        let dynamic: AnyValue = from_message(&message).unwrap();
-        assert_eq!(dynamic, AnyValue::from("The robot is not localized"));
+        let dynamic: Value = from_message(&message).unwrap();
+        assert_eq!(dynamic, Value::from("The robot is not localized"));
     }
 }

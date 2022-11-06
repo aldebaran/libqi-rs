@@ -1,35 +1,35 @@
-use crate::{AnyValue, Signature, Type};
+use crate::{Signature, Type, Value};
 use indexmap::IndexMap;
 
-impl serde::Serialize for AnyValue {
+impl serde::Serialize for Value {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
         use serde::ser::SerializeTuple;
         let mut serializer = serializer.serialize_tuple(2)?;
-        let value_type = self.runtime_type();
+        let value_type = self.get_type();
         serializer.serialize_element(&Signature::from(value_type))?;
         match self {
-            AnyValue::Void => serializer.serialize_element(&()),
-            AnyValue::Bool(b) => serializer.serialize_element(b),
-            AnyValue::Int8(i) => serializer.serialize_element(i),
-            AnyValue::UInt8(u) => serializer.serialize_element(u),
-            AnyValue::Int16(i) => serializer.serialize_element(i),
-            AnyValue::UInt16(u) => serializer.serialize_element(u),
-            AnyValue::Int32(i) => serializer.serialize_element(i),
-            AnyValue::UInt32(u) => serializer.serialize_element(u),
-            AnyValue::Int64(i) => serializer.serialize_element(i),
-            AnyValue::UInt64(u) => serializer.serialize_element(u),
-            AnyValue::Float(f) => serializer.serialize_element(f),
-            AnyValue::Double(d) => serializer.serialize_element(d),
-            AnyValue::String(s) => serializer.serialize_element(s),
-            AnyValue::Raw(r) => serializer.serialize_element(serde_bytes::Bytes::new(r)),
-            AnyValue::Option { option, .. } => serializer.serialize_element(option),
-            AnyValue::List { list, .. } => serializer.serialize_element(list),
-            AnyValue::Map { map, .. } => {
+            Value::Void => serializer.serialize_element(&()),
+            Value::Bool(b) => serializer.serialize_element(b),
+            Value::Int8(i) => serializer.serialize_element(i),
+            Value::UInt8(u) => serializer.serialize_element(u),
+            Value::Int16(i) => serializer.serialize_element(i),
+            Value::UInt16(u) => serializer.serialize_element(u),
+            Value::Int32(i) => serializer.serialize_element(i),
+            Value::UInt32(u) => serializer.serialize_element(u),
+            Value::Int64(i) => serializer.serialize_element(i),
+            Value::UInt64(u) => serializer.serialize_element(u),
+            Value::Float(f) => serializer.serialize_element(f),
+            Value::Double(d) => serializer.serialize_element(d),
+            Value::String(s) => serializer.serialize_element(s),
+            Value::Raw(r) => serializer.serialize_element(serde_bytes::Bytes::new(r)),
+            Value::Option(option) => serializer.serialize_element(option),
+            Value::List(list) => serializer.serialize_element(list),
+            Value::Map(map) => {
                 struct AsMap<T>(T);
-                impl serde::Serialize for AsMap<&Vec<(AnyValue, AnyValue)>> {
+                impl serde::Serialize for AsMap<&Vec<(Value, Value)>> {
                     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
                     where
                         S: serde::Serializer,
@@ -39,9 +39,9 @@ impl serde::Serialize for AnyValue {
                 }
                 serializer.serialize_element(&AsMap(map))
             }
-            AnyValue::Tuple(elements) | AnyValue::TupleStruct { elements, .. } => {
+            Value::Tuple(elements) | Value::TupleStruct { elements, .. } => {
                 struct AsTuple<T>(T);
-                impl serde::Serialize for AsTuple<&Vec<AnyValue>> {
+                impl serde::Serialize for AsTuple<&Vec<Value>> {
                     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
                     where
                         S: serde::Serializer,
@@ -55,9 +55,9 @@ impl serde::Serialize for AnyValue {
                 }
                 serializer.serialize_element(&AsTuple(elements))
             }
-            AnyValue::Struct { fields, .. } => {
+            Value::Struct { fields, .. } => {
                 struct AsTuple<T>(T);
-                impl serde::Serialize for AsTuple<&IndexMap<String, AnyValue>> {
+                impl serde::Serialize for AsTuple<&IndexMap<String, Value>> {
                     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
                     where
                         S: serde::Serializer,
@@ -76,7 +76,7 @@ impl serde::Serialize for AnyValue {
     }
 }
 
-pub fn to_any_value<T>(value: &T, value_type: &Type) -> Result<AnyValue, Error>
+pub fn to_value<T>(value: &T, value_type: &Type) -> Result<Value, Error>
 where
     T: serde::Serialize + ?Sized,
 {
@@ -104,7 +104,7 @@ impl<'t> Serializer<'t> {
 }
 
 impl<'t> serde::Serializer for Serializer<'t> {
-    type Ok = AnyValue;
+    type Ok = Value;
     type Error = Error;
 
     type SerializeSeq = ListSerializer;
@@ -117,57 +117,57 @@ impl<'t> serde::Serializer for Serializer<'t> {
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::Bool)?;
-        Ok(AnyValue::Bool(v))
+        Ok(Value::Bool(v))
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::Int8)?;
-        Ok(AnyValue::Int8(v))
+        Ok(Value::Int8(v))
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::Int16)?;
-        Ok(AnyValue::Int16(v))
+        Ok(Value::Int16(v))
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::Int32)?;
-        Ok(AnyValue::Int32(v))
+        Ok(Value::Int32(v))
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::Int64)?;
-        Ok(AnyValue::Int64(v))
+        Ok(Value::Int64(v))
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::UInt8)?;
-        Ok(AnyValue::UInt8(v))
+        Ok(Value::UInt8(v))
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::UInt16)?;
-        Ok(AnyValue::UInt16(v))
+        Ok(Value::UInt16(v))
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::UInt32)?;
-        Ok(AnyValue::UInt32(v))
+        Ok(Value::UInt32(v))
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::UInt64)?;
-        Ok(AnyValue::UInt64(v))
+        Ok(Value::UInt64(v))
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::Float)?;
-        Ok(AnyValue::Float(v))
+        Ok(Value::Float(v))
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::Double)?;
-        Ok(AnyValue::Double(v))
+        Ok(Value::Double(v))
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
@@ -179,21 +179,18 @@ impl<'t> serde::Serializer for Serializer<'t> {
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::String)?;
-        Ok(AnyValue::String(v.to_string()))
+        Ok(Value::String(v.to_string()))
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::Raw)?;
         // OPTIMIZE: Do not copy bytes, but reference them
-        Ok(AnyValue::Raw(v.into()))
+        Ok(Value::Raw(v.into()))
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         match self.value_type {
-            Type::Option(value_type) => Ok(AnyValue::Option {
-                value_type: value_type.as_ref().clone(),
-                option: None,
-            }),
+            Type::Option(_value_type) => Ok(Value::Option(None)),
             _ => Err(Error::UnexpectedValueType {
                 expected: self.value_type.clone(),
                 actual: "an option type".into(),
@@ -214,18 +211,13 @@ impl<'t> serde::Serializer for Serializer<'t> {
                 });
             }
         };
-        Ok(AnyValue::Option {
-            value_type: value_type.clone(),
-            option: Some({
-                let value = to_any_value(value, value_type)?;
-                Box::new(value)
-            }),
-        })
+        let value = Box::new(to_value(value, value_type)?);
+        Ok(Value::Option(Some(value)))
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
         self.check_value_type(Type::Void)?;
-        Ok(AnyValue::Void)
+        Ok(Value::Void)
     }
 
     fn serialize_unit_struct(self, struct_name: &'static str) -> Result<Self::Ok, Self::Error> {
@@ -236,7 +228,7 @@ impl<'t> serde::Serializer for Serializer<'t> {
                 actual: format!("a unit struct type named {struct_name}"),
             });
         }
-        Ok(AnyValue::TupleStruct {
+        Ok(Value::TupleStruct {
             name: struct_name.into(),
             elements: vec![],
         })
@@ -270,8 +262,8 @@ impl<'t> serde::Serializer for Serializer<'t> {
                 });
             }
         };
-        let value = to_any_value(element, element_type)?;
-        Ok(AnyValue::TupleStruct {
+        let value = to_value(element, element_type)?;
+        Ok(Value::TupleStruct {
             name: struct_name.into(),
             elements: vec![value],
         })
@@ -394,7 +386,7 @@ impl<'t> serde::Serializer for Serializer<'t> {
 
 pub struct ListSerializer {
     value_type: Type,
-    elements: Vec<AnyValue>,
+    elements: Vec<Value>,
 }
 
 impl ListSerializer {
@@ -407,30 +399,27 @@ impl ListSerializer {
 }
 
 impl serde::ser::SerializeSeq for ListSerializer {
-    type Ok = AnyValue;
+    type Ok = Value;
     type Error = Error;
 
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
     {
-        let value = to_any_value(value, &self.value_type)?;
+        let value = to_value(value, &self.value_type)?;
         self.elements.push(value);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AnyValue::List {
-            value_type: self.value_type,
-            list: self.elements,
-        })
+        Ok(Value::List(self.elements))
     }
 }
 
 pub struct MapSerializer {
-    elements: Vec<(AnyValue, AnyValue)>,
+    elements: Vec<(Value, Value)>,
     value_type: Type,
-    key: Option<AnyValue>,
+    key: Option<Value>,
     key_type: Type,
 }
 
@@ -446,14 +435,14 @@ impl MapSerializer {
 }
 
 impl serde::ser::SerializeMap for MapSerializer {
-    type Ok = AnyValue;
+    type Ok = Value;
     type Error = Error;
 
     fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
     where
         T: serde::Serialize,
     {
-        let key = to_any_value(key, &self.key_type)?;
+        let key = to_value(key, &self.key_type)?;
         self.key = Some(key);
         Ok(())
     }
@@ -466,22 +455,18 @@ impl serde::ser::SerializeMap for MapSerializer {
             .key
             .take()
             .ok_or_else(|| Error::Custom("key was not serialized".into()))?;
-        let value = to_any_value(value, &self.value_type)?;
+        let value = to_value(value, &self.value_type)?;
         self.elements.push((key, value));
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AnyValue::Map {
-            key_type: self.key_type,
-            value_type: self.value_type,
-            map: self.elements,
-        })
+        Ok(Value::Map(self.elements))
     }
 }
 
 pub struct TupleSerializer<I> {
-    elements: Vec<AnyValue>,
+    elements: Vec<Value>,
     element_types: I,
 }
 
@@ -500,13 +485,13 @@ where
     }
 }
 
-fn serialize_tuple_element<'t, T, I>(value: &T, types: &mut I) -> Result<AnyValue, Error>
+fn serialize_tuple_element<'t, T, I>(value: &T, types: &mut I) -> Result<Value, Error>
 where
     T: serde::Serialize + ?Sized,
     I: Iterator<Item = &'t Type>,
 {
     match types.next() {
-        Some(t) => to_any_value(value, t),
+        Some(t) => to_value(value, t),
         None => unreachable!("the tuple size precondition is not verified"),
     }
 }
@@ -515,7 +500,7 @@ impl<'t, I> serde::ser::SerializeTuple for TupleSerializer<I>
 where
     I: Iterator<Item = &'t Type>,
 {
-    type Ok = AnyValue;
+    type Ok = Value;
     type Error = Error;
 
     fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
@@ -528,13 +513,13 @@ where
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AnyValue::Tuple(self.elements))
+        Ok(Value::Tuple(self.elements))
     }
 }
 
 pub struct TupleStructSerializer<I> {
     name: String,
-    elements: Vec<AnyValue>,
+    elements: Vec<Value>,
     element_types: I,
 }
 
@@ -559,7 +544,7 @@ impl<'t, I> serde::ser::SerializeTupleStruct for TupleStructSerializer<I>
 where
     I: Iterator<Item = &'t Type>,
 {
-    type Ok = AnyValue;
+    type Ok = Value;
     type Error = Error;
 
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
@@ -572,7 +557,7 @@ where
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AnyValue::TupleStruct {
+        Ok(Value::TupleStruct {
             name: self.name,
             elements: self.elements,
         })
@@ -581,7 +566,7 @@ where
 
 struct StructSerializer<I> {
     name: String,
-    fields: IndexMap<String, AnyValue>,
+    fields: IndexMap<String, Value>,
     field_types: I,
 }
 
@@ -606,7 +591,7 @@ impl<'t, I> serde::ser::SerializeStruct for StructSerializer<I>
 where
     I: Iterator<Item = (&'t String, &'t Type)> + Clone,
 {
-    type Ok = AnyValue;
+    type Ok = Value;
     type Error = Error;
 
     fn serialize_field<T: ?Sized>(
@@ -629,13 +614,13 @@ where
                 ))
             }
         };
-        let value = to_any_value(value, field_type)?;
+        let value = to_value(value, field_type)?;
         self.fields.insert(key.into(), value);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(AnyValue::Struct {
+        Ok(Value::Struct {
             name: self.name,
             fields: self.fields,
         })

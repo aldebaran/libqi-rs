@@ -1,12 +1,12 @@
 pub use super::ser::Error;
-use super::AnyValue;
+use super::Value;
 use serde::{
     de::{value::MapDeserializer, value::SeqDeserializer, IntoDeserializer},
     forward_to_deserialize_any,
 };
 
-impl<'de> serde::Deserialize<'de> for AnyValue {
-    fn deserialize<D>(deserializer: D) -> Result<AnyValue, D::Error>
+impl<'de> serde::Deserialize<'de> for Value {
+    fn deserialize<D>(deserializer: D) -> Result<Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -147,7 +147,7 @@ impl<'de> serde::Deserialize<'de> for AnyValue {
         use crate::{Signature, Type};
         struct Visitor;
         impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = AnyValue;
+            type Value = Value;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("an \"any value\" as a tuple of a signature and a value")
@@ -195,21 +195,21 @@ impl<'de> serde::Deserialize<'de> for AnyValue {
     }
 }
 
-pub fn from_any_value<T>(d: AnyValue) -> Result<T, Error>
+pub fn from_value<T>(d: Value) -> Result<T, Error>
 where
     T: serde::de::DeserializeOwned,
 {
     T::deserialize(d)
 }
 
-pub fn from_any_value_ref<'v, T>(d: &'v AnyValue) -> Result<T, Error>
+pub fn from_value_ref<'v, T>(d: &'v Value) -> Result<T, Error>
 where
     T: serde::Deserialize<'v>,
 {
     T::deserialize(d)
 }
 
-impl<'de> serde::Deserializer<'de> for AnyValue {
+impl<'de> serde::Deserializer<'de> for Value {
     type Error = Error;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -217,31 +217,29 @@ impl<'de> serde::Deserializer<'de> for AnyValue {
         V: serde::de::Visitor<'de>,
     {
         match self {
-            AnyValue::Void => visitor.visit_unit(),
-            AnyValue::Bool(b) => visitor.visit_bool(b),
-            AnyValue::Int8(i) => visitor.visit_i8(i),
-            AnyValue::UInt8(i) => visitor.visit_u8(i),
-            AnyValue::Int16(i) => visitor.visit_i16(i),
-            AnyValue::UInt16(i) => visitor.visit_u16(i),
-            AnyValue::Int32(i) => visitor.visit_i32(i),
-            AnyValue::UInt32(i) => visitor.visit_u32(i),
-            AnyValue::Int64(i) => visitor.visit_i64(i),
-            AnyValue::UInt64(i) => visitor.visit_u64(i),
-            AnyValue::Float(f) => visitor.visit_f32(f),
-            AnyValue::Double(d) => visitor.visit_f64(d),
-            AnyValue::String(s) => visitor.visit_string(s),
-            AnyValue::Raw(buf) => visitor.visit_byte_buf(buf),
-            AnyValue::Option { option, .. } => match option {
+            Value::Void => visitor.visit_unit(),
+            Value::Bool(b) => visitor.visit_bool(b),
+            Value::Int8(i) => visitor.visit_i8(i),
+            Value::UInt8(i) => visitor.visit_u8(i),
+            Value::Int16(i) => visitor.visit_i16(i),
+            Value::UInt16(i) => visitor.visit_u16(i),
+            Value::Int32(i) => visitor.visit_i32(i),
+            Value::UInt32(i) => visitor.visit_u32(i),
+            Value::Int64(i) => visitor.visit_i64(i),
+            Value::UInt64(i) => visitor.visit_u64(i),
+            Value::Float(f) => visitor.visit_f32(f),
+            Value::Double(d) => visitor.visit_f64(d),
+            Value::String(s) => visitor.visit_string(s),
+            Value::Raw(buf) => visitor.visit_byte_buf(buf),
+            Value::Option(option) => match option {
                 Some(v) => visitor.visit_some(v.into_deserializer()),
                 None => visitor.visit_none(),
             },
-            AnyValue::List { list: seq, .. }
-            | AnyValue::Tuple(seq)
-            | AnyValue::TupleStruct { elements: seq, .. } => {
+            Value::List(seq) | Value::Tuple(seq) | Value::TupleStruct { elements: seq, .. } => {
                 visitor.visit_seq(SeqDeserializer::new(seq.into_iter()))
             }
-            AnyValue::Map { map, .. } => visitor.visit_map(MapDeserializer::new(map.into_iter())),
-            AnyValue::Struct { fields, .. } => {
+            Value::Map(map) => visitor.visit_map(MapDeserializer::new(map.into_iter())),
+            Value::Struct { fields, .. } => {
                 visitor.visit_map(MapDeserializer::new(fields.into_iter()))
             }
         }
@@ -255,7 +253,7 @@ impl<'de> serde::Deserializer<'de> for AnyValue {
     }
 }
 
-impl<'de> serde::Deserializer<'de> for &'de AnyValue {
+impl<'de> serde::Deserializer<'de> for &'de Value {
     type Error = Error;
 
     forward_to_deserialize_any! {
@@ -270,39 +268,38 @@ impl<'de> serde::Deserializer<'de> for &'de AnyValue {
         V: serde::de::Visitor<'de>,
     {
         match self {
-            AnyValue::Void => visitor.visit_unit(),
-            AnyValue::Bool(b) => visitor.visit_bool(*b),
-            AnyValue::Int8(i) => visitor.visit_i8(*i),
-            AnyValue::UInt8(i) => visitor.visit_u8(*i),
-            AnyValue::Int16(i) => visitor.visit_i16(*i),
-            AnyValue::UInt16(i) => visitor.visit_u16(*i),
-            AnyValue::Int32(i) => visitor.visit_i32(*i),
-            AnyValue::UInt32(i) => visitor.visit_u32(*i),
-            AnyValue::Int64(i) => visitor.visit_i64(*i),
-            AnyValue::UInt64(i) => visitor.visit_u64(*i),
-            AnyValue::Float(f) => visitor.visit_f32(*f),
-            AnyValue::Double(d) => visitor.visit_f64(*d),
-            AnyValue::String(s) => visitor.visit_borrowed_str(s),
-            AnyValue::Raw(buf) => visitor.visit_bytes(buf),
-            AnyValue::Option { option, .. } => match option {
+            Value::Void => visitor.visit_unit(),
+            Value::Bool(b) => visitor.visit_bool(*b),
+            Value::Int8(i) => visitor.visit_i8(*i),
+            Value::UInt8(i) => visitor.visit_u8(*i),
+            Value::Int16(i) => visitor.visit_i16(*i),
+            Value::UInt16(i) => visitor.visit_u16(*i),
+            Value::Int32(i) => visitor.visit_i32(*i),
+            Value::UInt32(i) => visitor.visit_u32(*i),
+            Value::Int64(i) => visitor.visit_i64(*i),
+            Value::UInt64(i) => visitor.visit_u64(*i),
+            Value::Float(f) => visitor.visit_f32(*f),
+            Value::Double(d) => visitor.visit_f64(*d),
+            Value::String(s) => visitor.visit_borrowed_str(s),
+            Value::Raw(buf) => visitor.visit_bytes(buf),
+            Value::Option(option) => match option {
                 Some(v) => visitor.visit_some(v.as_ref()),
                 None => visitor.visit_none(),
             },
-            AnyValue::List { list, .. } => visitor.visit_seq(SeqDeserializer::new(list.iter())),
-            AnyValue::Map { map, .. } => {
+            Value::List(seq) | Value::Tuple(seq) | Value::TupleStruct { elements: seq, .. } => {
+                visitor.visit_seq(SeqDeserializer::new(seq.iter()))
+            }
+            Value::Map(map) => {
                 visitor.visit_map(MapDeserializer::new(map.iter().map(|(k, v)| (k, v))))
             }
-            AnyValue::Tuple(elements) | AnyValue::TupleStruct { elements, .. } => {
-                visitor.visit_seq(SeqDeserializer::new(elements.iter()))
-            }
-            AnyValue::Struct { fields, .. } => visitor.visit_map(MapDeserializer::new(
+            Value::Struct { fields, .. } => visitor.visit_map(MapDeserializer::new(
                 fields.iter().map(|(k, v)| (k.as_str(), v)),
             )),
         }
     }
 }
 
-impl<'de> serde::de::IntoDeserializer<'de, Error> for AnyValue {
+impl<'de> serde::de::IntoDeserializer<'de, Error> for Value {
     type Deserializer = Self;
 
     fn into_deserializer(self) -> Self::Deserializer {
@@ -310,7 +307,7 @@ impl<'de> serde::de::IntoDeserializer<'de, Error> for AnyValue {
     }
 }
 
-impl<'de> serde::de::IntoDeserializer<'de, Error> for &'de AnyValue {
+impl<'de> serde::de::IntoDeserializer<'de, Error> for &'de Value {
     type Deserializer = Self;
 
     fn into_deserializer(self) -> Self::Deserializer {

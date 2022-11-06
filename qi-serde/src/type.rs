@@ -40,6 +40,15 @@ pub enum Type {
     KwArgs(Box<Type>),
 }
 
+impl Type {
+    pub fn common_type(&self, _t: &Type) -> Option<Type> {
+        todo!()
+    }
+    pub fn castable_to(&self, _t: &Type) -> bool {
+        todo!()
+    }
+}
+
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn fmt_list<I>(iter: I, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result

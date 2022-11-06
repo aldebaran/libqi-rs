@@ -1,14 +1,7 @@
-use crate::{anyvalue, AnyValue, Type};
+use crate::Type;
 
-pub trait Value {
+pub trait Reflect {
     fn get_type<'t>() -> &'t Type;
-
-    fn to_any_value(&self) -> Result<AnyValue, anyvalue::ser::Error>
-    where
-        Self: serde::Serialize,
-    {
-        anyvalue::to_any_value(&self, Self::get_type())
-    }
 }
 
 // use std::{
