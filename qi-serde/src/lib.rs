@@ -1,26 +1,65 @@
-// TODO: #![warn(missing_docs)]
+// TODO: #![deny(missing_docs)]
 
-pub mod format;
-pub mod message;
-pub mod reflect;
-pub mod signature;
-pub mod r#type;
+mod de;
+mod ser;
+mod signature;
+mod r#type;
 pub mod value;
 
-pub use format::{
-    from_bytes, from_message, from_reader, to_bytes, to_message, to_writer, Deserializer, Error,
-    Result, Serializer,
-};
-pub use message::Message;
+#[doc(inline)]
 pub use r#type::Type;
-pub use reflect::Reflect;
+
+#[doc(inline)]
 pub use signature::Signature;
-pub use value::{from_value_ref, to_value, Value};
+
+#[doc(inline)]
+pub use value::{from_borrowed_value, from_value, to_value, AnnotatedValue, Value};
+
+#[doc(inline)]
+pub use ser::{to_bytes, to_writer, Serializer};
+
+#[doc(inline)]
+pub use de::{from_bytes, from_reader, Deserializer};
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("the type of the data is unknown (the `qi` format is not self-describing)")]
+    UnknownDataType,
+
+    #[error("size conversion failed: {0}")]
+    BadSize(std::num::TryFromIntError),
+
+    #[error("payload size was expected but none was found")]
+    NoPayloadSize,
+
+    #[error("list size must be known to be serialized")]
+    UnknownListSize,
+
+    #[error("unexpected message field {0}")]
+    UnexpectedMessageField(&'static str),
+
+    #[error("duplicate message field {0}")]
+    DuplicateMessageField(&'static str),
+
+    #[error("missing message field {0}")]
+    MissingMessageField(&'static str),
+
+    #[error("string data is not valid UTF-8: {0}")]
+    InvalidUtf8(#[from] std::str::Utf8Error),
+
+    #[error("{0}")]
+    Custom(String),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use indexmap::indexmap;
+    use pretty_assertions::assert_eq;
     use std::collections::BTreeMap;
 
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
@@ -57,100 +96,81 @@ pub(crate) mod tests {
             })
         }
 
-        pub fn sample_as_value() -> Value {
-            let t = Value::Tuple(vec![
+        pub fn sample_as_value() -> Value<'static> {
+            use value::*;
+            let t = Value::Tuple(Tuple::new(vec![
                 Value::Int8(-8),
-                Value::UInt8(8),
+                Value::UnsignedInt8(8),
                 Value::Int16(-16),
-                Value::UInt16(16),
+                Value::UnsignedInt16(16),
                 Value::Int32(-32),
-                Value::UInt32(32),
+                Value::UnsignedInt32(32),
                 Value::Int64(-64),
-                Value::UInt64(64),
-                Value::Float(32.32),
-                Value::Double(64.64),
-            ]);
-            let r = Value::Raw(vec![51, 52, 53, 54]);
+                Value::UnsignedInt64(64),
+                Value::Float32(32.32),
+                Value::Float64(64.64),
+            ]));
+            let r = Value::Raw(vec![51, 52, 53, 54].into());
             let o = Value::Option(Some(Value::Bool(false).into()));
-            let s1 = Value::TupleStruct {
-                name: "S1".into(),
-                elements: vec![
-                    Value::String("bananas".into()),
-                    Value::String("oranges".into()),
-                ],
-            };
-            let l = Value::List(vec![
-                Value::String("cookies".into()),
-                Value::String("muffins".into()),
-            ]);
-            let m = Value::Map(vec![
-                (Value::Int32(1), Value::String("hello".to_string())),
-                (Value::Int32(2), Value::String("world".to_string())),
-            ]);
-            let s0 = Value::Struct {
-                name: "S0".into(),
-                fields: indexmap![
-                    "t".into() => t,
-                    "r".into() => r,
-                    "o".into() => o,
-                    "s".into() => s1,
-                    "l".into() => l,
-                    "m".into() => m,
-                ],
-            };
-            Value::TupleStruct {
-                name: "Serializable".into(),
-                elements: vec![s0],
-            }
+            let s1 = Tuple::new(vec![Value::from("bananas"), Value::from("oranges")]);
+            let s = Value::from(s1);
+            let l = Value::List(vec![Value::from("cookies"), Value::from("muffins")]);
+            let m = Value::Map(Map::from(vec![
+                (Value::Int32(1), Value::String("hello".into())),
+                (Value::Int32(2), Value::String("world".into())),
+            ]));
+            let s0 = Value::from(Tuple::new(vec![t, r, o, s, l, m]));
+            Value::from(Tuple::new(vec![s0]))
         }
     }
 
-    impl Reflect for Serializable {
-        fn get_type<'t>() -> &'t Type {
-            use once_cell::sync::OnceCell;
-            static TYPE: OnceCell<Type> = OnceCell::new();
-            TYPE.get_or_init(|| {
-                let s0 = {
-                    let t = Type::Tuple(vec![
-                        Type::Int8,
-                        Type::UInt8,
-                        Type::Int16,
-                        Type::UInt16,
-                        Type::Int32,
-                        Type::UInt32,
-                        Type::Int64,
-                        Type::UInt64,
-                        Type::Float,
-                        Type::Double,
-                    ]);
-                    let r = Type::Raw;
-                    let o = Type::Option(Type::Bool.into());
-                    let s = Type::TupleStruct {
-                        name: "S1".into(),
-                        elements: vec![Type::String, Type::String],
-                    };
-                    let l = Type::List(Type::String.into());
-                    let m = Type::Map {
-                        key: Type::Int32.into(),
-                        value: Type::String.into(),
-                    };
-                    Type::Struct {
-                        name: "S0".into(),
-                        fields: indexmap! {
-                            "t".into() => t,
-                            "r".into() => r,
-                            "o".into() => o,
-                            "s".into() => s,
-                            "l".into() => l,
-                            "m".into() => m,
-                        },
-                    }
-                };
-                Type::TupleStruct {
-                    name: "S".into(),
-                    elements: vec![s0],
-                }
-            })
-        }
+    #[test]
+    fn test_to_from_bytes_serializable() {
+        let sample = Serializable::sample();
+        let bytes = to_bytes(&sample).unwrap();
+        let sample2: Serializable = from_bytes(&bytes).unwrap();
+        assert_eq!(sample, sample2);
+    }
+
+    #[test]
+    fn test_to_from_bytes_annotated_value() {
+        let value_before = AnnotatedValue::new(Serializable::sample_as_value());
+        let bytes = to_bytes(&value_before).unwrap();
+        let value_after: AnnotatedValue = from_bytes(&bytes).unwrap();
+        assert_eq!(value_before, value_after);
+    }
+
+    #[test]
+    fn test_option_i32_to_bytes() {
+        assert_eq!(
+            to_bytes(&Some(42)).unwrap(),
+            vec![0x01, 0x2a, 0x00, 0x00, 0x00]
+        );
+        assert_eq!(to_bytes(&Option::<i32>::None).unwrap(), vec![0x00]);
+    }
+
+    // Tuple size is not prepended.
+    #[test]
+    fn test_tuple_to_bytes() {
+        assert_eq!(
+            to_bytes(&(42u16, "str", true)).unwrap(),
+            vec![
+                42, 0, // u16
+                3, 0, 0, 0, 0x73, 0x74, 0x72, // string, prepended with its length
+                1     // bool
+            ]
+        );
+    }
+
+    #[test]
+    fn test_option_char_from_bytes() {
+        assert_eq!(
+            from_bytes::<Option<char>>(&[0x01, 0x01, 0x00, 0x00, 0x00, 0x61, 0x62, 0x63]).unwrap(),
+            Some('a')
+        );
+        assert_eq!(
+            from_bytes::<Option<char>>(&[0x00, 0x01, 0x02, 0x03, 0x04]).unwrap(),
+            None,
+        );
     }
 }

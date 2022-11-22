@@ -1,5 +1,4 @@
 use super::{Error, Result};
-use crate::{message::MagicCookie, Message};
 
 pub fn from_reader<'de, R, T>(reader: R) -> Result<T>
 where
@@ -17,13 +16,6 @@ where
     from_reader(bytes)
 }
 
-pub fn from_message<'msg, T>(msg: &'msg Message) -> Result<T>
-where
-    T: serde::de::Deserialize<'msg>,
-{
-    from_bytes(msg.payload.as_slice())
-}
-
 #[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Deserializer<R> {
     reader: R,
@@ -37,16 +29,8 @@ where
         Self { reader }
     }
 
-    fn read_seq<'de, V>(&mut self, len: usize, visitor: V, is_map: bool) -> Result<V::Value>
-    where
-        V: serde::de::Visitor<'de>,
-    {
-        let deserializer = SeqDeserializer::from_size_and_deserializer(len, self.reader.by_ref());
-        if is_map {
-            visitor.visit_map(deserializer)
-        } else {
-            visitor.visit_seq(deserializer)
-        }
+    fn deserialize_tuple(&mut self, len: usize) -> DeserializeTuple<&mut R> {
+        DeserializeTuple::from_size_and_deserializer(len, self.reader.by_ref())
     }
 }
 
@@ -56,12 +40,15 @@ where
 {
     type Error = Error;
 
+    fn is_human_readable(&self) -> bool {
+        false
+    }
+
     fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,
     {
-        // TODO: deserialize a signature, looking for a dynamic value.
-        todo!()
+        Err(Error::UnknownDataType)
     }
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>
@@ -233,14 +220,16 @@ where
         V: serde::de::Visitor<'de>,
     {
         let size = read_size(&mut self.reader)?;
-        self.read_seq(size, visitor, false)
+        let deserializer = self.deserialize_tuple(size);
+        visitor.visit_seq(deserializer)
     }
 
     fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,
     {
-        self.read_seq(len, visitor, false)
+        let deserializer = self.deserialize_tuple(len);
+        visitor.visit_seq(deserializer)
     }
 
     fn deserialize_tuple_struct<V>(
@@ -252,7 +241,8 @@ where
     where
         V: serde::de::Visitor<'de>,
     {
-        self.read_seq(len, visitor, false)
+        let deserializer = self.deserialize_tuple(len);
+        visitor.visit_seq(deserializer)
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
@@ -260,25 +250,21 @@ where
         V: serde::de::Visitor<'de>,
     {
         let size = read_size(&mut self.reader)?;
-        self.read_seq(size, visitor, true)
+        let deserializer = self.deserialize_tuple(size);
+        visitor.visit_map(deserializer)
     }
 
     fn deserialize_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,
     {
-        match name {
-            Message::TOKEN => {
-                debug_assert!(fields == Message::FIELDS);
-                visitor.visit_map(MessageStructDeserializer::from_reader(self.reader.by_ref()))
-            }
-            _ => self.read_seq(fields.len(), visitor, false),
-        }
+        let deserializer = self.deserialize_tuple(fields.len());
+        visitor.visit_seq(deserializer)
     }
 
     fn deserialize_enum<V>(
@@ -347,23 +333,25 @@ where
     where
         V: serde::de::Visitor<'de>,
     {
-        self.read_seq(len, visitor, false)
+        let deserializer = self.deserialize_tuple(len);
+        visitor.visit_seq(deserializer)
     }
 
     fn struct_variant<V>(self, fields: &'static [&'static str], visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,
     {
-        self.read_seq(fields.len(), visitor, false)
+        let deserializer = self.deserialize_tuple(fields.len());
+        visitor.visit_seq(deserializer)
     }
 }
 
-struct SeqDeserializer<R> {
+struct DeserializeTuple<R> {
     iter: std::ops::Range<usize>,
     reader: R,
 }
 
-impl<R> SeqDeserializer<R>
+impl<R> DeserializeTuple<R>
 where
     R: std::io::Read,
 {
@@ -387,7 +375,7 @@ where
     }
 }
 
-impl<'de, R> serde::de::SeqAccess<'de> for SeqDeserializer<R>
+impl<'de, R> serde::de::SeqAccess<'de> for DeserializeTuple<R>
 where
     R: std::io::Read,
 {
@@ -401,7 +389,7 @@ where
     }
 }
 
-impl<'de, R> serde::de::MapAccess<'de> for SeqDeserializer<R>
+impl<'de, R> serde::de::MapAccess<'de> for DeserializeTuple<R>
 where
     R: std::io::Read,
 {
@@ -419,106 +407,6 @@ where
         V: serde::de::DeserializeSeed<'de>,
     {
         from_reader_and_seed(self.reader.by_ref(), seed)
-    }
-}
-
-struct MessageStructDeserializer<R> {
-    reader: R,
-    fields_iter: std::slice::Iter<'static, &'static str>,
-    current_field: Option<&'static str>,
-    payload_size: Option<usize>,
-}
-
-impl<R> MessageStructDeserializer<R>
-where
-    R: std::io::Read,
-{
-    fn from_reader(reader: R) -> Self {
-        Self {
-            reader,
-            fields_iter: Message::FIELDS.iter(),
-            current_field: None,
-            payload_size: None,
-        }
-    }
-}
-
-impl<'de, R> serde::de::MapAccess<'de> for MessageStructDeserializer<R>
-where
-    R: std::io::Read,
-{
-    type Error = Error;
-
-    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
-    where
-        K: serde::de::DeserializeSeed<'de>,
-    {
-        match self.fields_iter.next() {
-            Some(&field) => {
-                use serde::de::IntoDeserializer;
-                self.current_field = Some(field);
-                let key: Result<_> = seed.deserialize(field.into_deserializer());
-                Ok(Some(key?))
-            }
-            None => Ok(None),
-        }
-    }
-
-    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
-    where
-        V: serde::de::DeserializeSeed<'de>,
-    {
-        use serde::de::{Deserialize, IntoDeserializer};
-        let mut deserializer = Deserializer::from_reader(self.reader.by_ref());
-        match self.current_field {
-            None => unreachable!(),
-            Some(field) => match field {
-                Message::ID_TOKEN => {
-                    // Before the ID comes the MagicCookie
-                    MagicCookie::deserialize(&mut deserializer)?;
-                    let id = read_u32(&mut self.reader)?;
-                    let id: Result<_> = seed.deserialize(id.into_deserializer());
-                    Ok(id?)
-                }
-                Message::VERSION_TOKEN => {
-                    // Before the version comes the payload size
-                    self.payload_size.replace(read_size(&mut self.reader)?);
-                    let version = read_u16(&mut self.reader)?;
-                    let version: Result<_> = seed.deserialize(version.into_deserializer());
-                    Ok(version?)
-                }
-                Message::KIND_TOKEN => {
-                    let kind = read_byte(&mut self.reader)?;
-                    let kind: Result<_> = seed.deserialize(kind.into_deserializer());
-                    Ok(kind?)
-                }
-                Message::FLAGS_TOKEN => {
-                    let flags = read_byte(&mut self.reader)?;
-                    let flags: Result<_> = seed.deserialize(flags.into_deserializer());
-                    Ok(flags?)
-                }
-                Message::SUBJECT_TOKEN => {
-                    let service = read_u32(&mut self.reader)?;
-                    let object = read_u32(&mut self.reader)?;
-                    let action = read_u32(&mut self.reader)?;
-                    let deser = serde::de::value::SeqDeserializer::new(
-                        [service, object, action].into_iter(),
-                    );
-                    let subject: Result<_> = seed.deserialize(deser);
-                    Ok(subject?)
-                }
-                Message::PAYLOAD_TOKEN => {
-                    let size = self
-                        .payload_size
-                        .ok_or(Error::MissingMessageField("payload_size"))?;
-                    let mut payload = vec![0; size];
-                    self.reader.read_exact(&mut payload)?;
-                    let payload: Result<_> = seed.deserialize(payload.into_deserializer());
-                    Ok(payload?)
-                }
-                _ => unreachable!(),
-            },
-        }
     }
 }
 
@@ -565,14 +453,6 @@ where
     Ok(u32::from_le_bytes(bytes))
 }
 
-fn read_u16<R>(reader: &mut R) -> std::io::Result<u16>
-where
-    R: std::io::Read,
-{
-    let bytes = read_bytes(reader)?;
-    Ok(u16::from_le_bytes(bytes))
-}
-
 fn read_size<R>(reader: &mut R) -> Result<usize>
 where
     R: std::io::Read,
@@ -601,124 +481,4 @@ where
     T: serde::de::DeserializeSeed<'de>,
 {
     seed.deserialize(&mut Deserializer::from_reader(reader))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use assert_matches::assert_matches;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn test_message_from_bytes() {
-        let input = &[
-            0x42, 0xde, 0xad, 0x42, // cookie
-            0xb8, 0x9a, 0x00, 0x00, // id
-            0x28, 0x00, 0x00, 0x00, // size
-            0xaa, 0x00, 0x02, 0x00, // version, type, flags
-            0x27, 0x00, 0x00, 0x00, // service
-            0x09, 0x00, 0x00, 0x00, // object
-            0x68, 0x00, 0x00, 0x00, // action
-            // payload
-            0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d, 0x65,
-            0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35, 0x32, 0x2d,
-            0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30, 0x33,
-            // garbage at the end, should be ignored
-            0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00, 0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
-            0x00, 0x00, 0x42, 0x42, 0x42, 0x42, 0x00,
-        ];
-        let msg: Message = from_bytes(input).unwrap();
-        use crate::message::{subject::*, *};
-        assert_eq!(
-            msg,
-            Message {
-                id: 39608,
-                version: 170,
-                kind: Kind::Reply,
-                flags: Flags::empty(),
-                subject: Subject::try_from_values(service::Id(39), object::Id(9), action::Id(104),)
-                    .unwrap(),
-                payload: vec![
-                    0x24, 0x00, 0x00, 0x00, 0x39, 0x32, 0x39, 0x36, 0x33, 0x31, 0x36, 0x34, 0x2d,
-                    0x65, 0x30, 0x37, 0x66, 0x2d, 0x34, 0x36, 0x35, 0x30, 0x2d, 0x39, 0x64, 0x35,
-                    0x32, 0x2d, 0x39, 0x39, 0x35, 0x37, 0x39, 0x38, 0x61, 0x39, 0x61, 0x65, 0x30,
-                    0x33,
-                ],
-            }
-        );
-    }
-
-    #[test]
-    fn test_message_from_bytes_then_string_from_message() {
-        let input = &[
-            0x42, 0xde, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
-            0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72,
-            0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
-            0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
-        ];
-        let msg = from_bytes::<Message>(input).unwrap();
-        use crate::message::{subject::*, *};
-        assert_eq!(
-            msg,
-            Message {
-                id: 990340,
-                version: 0,
-                kind: Kind::Error,
-                flags: Flags::empty(),
-                subject: Subject::try_from_values(service::Id(47), object::Id(1), action::Id(178))
-                    .unwrap(),
-                payload: vec![
-                    0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20,
-                    0x72, 0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20,
-                    0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64
-                ],
-            }
-        );
-        let s = from_message::<String>(&msg).unwrap();
-        assert_eq!(s, "s");
-    }
-
-    #[test]
-    fn test_message_from_bytes_bad_cookie() {
-        let input = &[
-            0x42, 0xdf, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
-            0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72,
-            0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
-            0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
-        ];
-        let msg: Result<Message> = from_bytes(input);
-        assert_matches!(msg, Err(Error::Custom(err)) => {
-            assert!(err.starts_with("invalid value"), "error does not start with \"invalid value\": \"{}\"", err);
-            assert!(err.ends_with("0x42adde42"), "error does not end with magic cookie value: \"{}\"", err);
-        });
-    }
-
-    #[test]
-    fn test_message_from_bytes_bad_size() {
-        let input = &[
-            0x42, 0xde, 0xad, 0x42, // cookie,
-            0x84, 0x1c, 0x0f, 0x00, // id
-            0x23, 0x00, 0x00, 0x00, // size
-            0x00, 0x00, 0x03, 0x00, // version, type, flags
-            0x2f, 0x00, 0x00, 0x00, // service
-            0x01, 0x00, 0x00, 0x00, // object
-            0xb2, 0x00, 0x00, // action, 1 byte short
-        ];
-        let msg: Result<Message> = from_bytes(input);
-        assert_matches!(msg, Err(Error::Io(_)));
-    }
-
-    #[test]
-    fn test_option_char_from_bytes() {
-        assert_eq!(
-            from_bytes::<Option<char>>(&[0x01, 0x01, 0x00, 0x00, 0x00, 0x61, 0x62, 0x63]).unwrap(),
-            Some('a')
-        );
-        assert_eq!(
-            from_bytes::<Option<char>>(&[0x00, 0x01, 0x02, 0x03, 0x04]).unwrap(),
-            None,
-        );
-    }
 }

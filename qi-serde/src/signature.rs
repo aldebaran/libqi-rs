@@ -1,13 +1,17 @@
 use super::r#type::Type;
 
-#[derive(Debug, Default, PartialEq, Eq, Clone)]
+use derive_more::{From, Into};
+use derive_new::new;
+
+#[derive(new, Debug, Default, PartialEq, Eq, Clone, From, Into)]
+#[into(owned, ref, ref_mut)]
 pub struct Signature(Type);
 
 fn advance_once<I>(mut iter: I)
 where
     I: Iterator,
 {
-    if let None = iter.next() {
+    if iter.next().is_none() {
         unreachable!(
             "the precondition over the presence of an element on the iterator is not verified"
         )
@@ -327,18 +331,6 @@ impl Signature {
 struct Annotations {
     name: Option<String>,
     field_names: Option<Vec<String>>,
-}
-
-impl From<Type> for Signature {
-    fn from(t: Type) -> Self {
-        Self(t)
-    }
-}
-
-impl From<Signature> for Type {
-    fn from(s: Signature) -> Self {
-        s.0
-    }
 }
 
 fn write_type(t: &Type, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -44,9 +44,6 @@ impl Type {
     pub fn common_type(&self, _t: &Type) -> Option<Type> {
         todo!()
     }
-    pub fn castable_to(&self, _t: &Type) -> bool {
-        todo!()
-    }
 }
 
 impl std::fmt::Display for Type {
@@ -118,8 +115,6 @@ impl std::fmt::Display for Type {
         }
     }
 }
-
-// TODO: type! macro ?
 
 #[cfg(test)]
 mod tests {
