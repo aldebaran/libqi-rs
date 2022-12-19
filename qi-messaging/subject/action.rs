@@ -182,6 +182,13 @@ pub enum BoundObject {
     SetProperty,
     Properties,
     RegisterEventWithSignature,
+    IsStatsEnabled,
+    EnableStats,
+    Stats,
+    ClearStats,
+    IsTraceEnabled,
+    EnableTrace,
+    TraceObject,
     BoundFunction(Id),
 }
 
@@ -194,6 +201,13 @@ impl BoundObject {
     const ID_SET_PROPERTY: u32 = 6;
     const ID_PROPERTIES: u32 = 7;
     const ID_REGISTER_EVENT_WITH_SIGNATURE: u32 = 8;
+    const ID_IS_STATS_ENABLED: u32 = 80;
+    const ID_ENABLE_STATS: u32 = 81;
+    const ID_STATS: u32 = 82;
+    const ID_CLEAR_STATS: u32 = 83;
+    const ID_IS_TRACE_ENABLED: u32 = 84;
+    const ID_ENABLE_TRACE: u32 = 85;
+    const ID_TRACE_OBJECT: u32 = 86;
 }
 
 impl From<Id> for BoundObject {
@@ -207,6 +221,13 @@ impl From<Id> for BoundObject {
             Id(Self::ID_SET_PROPERTY) => Self::SetProperty,
             Id(Self::ID_PROPERTIES) => Self::Properties,
             Id(Self::ID_REGISTER_EVENT_WITH_SIGNATURE) => Self::RegisterEventWithSignature,
+            Id(Self::ID_IS_STATS_ENABLED) => Self::IsStatsEnabled,
+            Id(Self::ID_ENABLE_STATS) => Self::EnableStats,
+            Id(Self::ID_STATS) => Self::Stats,
+            Id(Self::ID_CLEAR_STATS) => Self::ClearStats,
+            Id(Self::ID_IS_TRACE_ENABLED) => Self::IsTraceEnabled,
+            Id(Self::ID_ENABLE_TRACE) => Self::EnableTrace,
+            Id(Self::ID_TRACE_OBJECT) => Self::TraceObject,
             id => Self::BoundFunction(id),
         }
     }
@@ -214,18 +235,26 @@ impl From<Id> for BoundObject {
 
 impl From<BoundObject> for Id {
     fn from(bo: BoundObject) -> Self {
-        match bo {
-            BoundObject::RegisterEvent => BoundObject::ID_REGISTER_EVENT.into(),
-            BoundObject::UnregisterEvent => BoundObject::ID_UNREGISTER_EVENT.into(),
-            BoundObject::Metaobject => BoundObject::ID_METAOBJECT.into(),
-            BoundObject::Terminate => BoundObject::ID_TERMINATE.into(),
-            BoundObject::Property => BoundObject::ID_PROPERTY.into(),
-            BoundObject::SetProperty => BoundObject::ID_SET_PROPERTY.into(),
-            BoundObject::Properties => BoundObject::ID_PROPERTIES.into(),
+        let id = match bo {
+            BoundObject::RegisterEvent => BoundObject::ID_REGISTER_EVENT,
+            BoundObject::UnregisterEvent => BoundObject::ID_UNREGISTER_EVENT,
+            BoundObject::Metaobject => BoundObject::ID_METAOBJECT,
+            BoundObject::Terminate => BoundObject::ID_TERMINATE,
+            BoundObject::Property => BoundObject::ID_PROPERTY,
+            BoundObject::SetProperty => BoundObject::ID_SET_PROPERTY,
+            BoundObject::Properties => BoundObject::ID_PROPERTIES,
             BoundObject::RegisterEventWithSignature => {
-                BoundObject::ID_REGISTER_EVENT_WITH_SIGNATURE.into()
+                BoundObject::ID_REGISTER_EVENT_WITH_SIGNATURE
             }
-            BoundObject::BoundFunction(id) => id,
-        }
+            BoundObject::IsStatsEnabled => BoundObject::ID_IS_STATS_ENABLED,
+            BoundObject::EnableStats => BoundObject::ID_ENABLE_STATS,
+            BoundObject::Stats => BoundObject::ID_STATS,
+            BoundObject::ClearStats => BoundObject::ID_CLEAR_STATS,
+            BoundObject::IsTraceEnabled => BoundObject::ID_IS_TRACE_ENABLED,
+            BoundObject::EnableTrace => BoundObject::ID_ENABLE_TRACE,
+            BoundObject::TraceObject => BoundObject::ID_TRACE_OBJECT,
+            BoundObject::BoundFunction(id) => return id,
+        };
+        Self(id)
     }
 }

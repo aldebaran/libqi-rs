@@ -1,4 +1,8 @@
-use super::{Error, Result};
+use crate::{
+    num_bool::{FALSE_BOOL, TRUE_BOOL},
+    Error, Result,
+};
+use std::convert::TryInto;
 
 pub fn from_reader<'de, R, T>(reader: R) -> Result<T>
 where
@@ -31,6 +35,10 @@ where
 
     fn deserialize_tuple(&mut self, len: usize) -> DeserializeTuple<&mut R> {
         DeserializeTuple::from_size_and_deserializer(len, self.reader.by_ref())
+    }
+
+    fn by_ref(&mut self) -> &mut Self {
+        self
     }
 }
 
@@ -428,7 +436,7 @@ where
     Ok(buf[0])
 }
 
-fn read_bytes<const N: usize, R>(reader: &mut R) -> std::io::Result<[u8; N]>
+fn read_bytes<R, const N: usize>(reader: &mut R) -> std::io::Result<[u8; N]>
 where
     R: std::io::Read,
 {
@@ -437,12 +445,16 @@ where
     Ok(buf)
 }
 
-fn read_bool<R>(reader: &mut R) -> std::io::Result<bool>
+fn read_bool<R>(reader: &mut R) -> Result<bool>
 where
     R: std::io::Read,
 {
     let byte = read_byte(reader)?;
-    Ok(byte != 0)
+    match byte {
+        FALSE_BOOL => Ok(false),
+        TRUE_BOOL => Ok(true),
+        _ => Err(Error::NotABoolValue(byte)),
+    }
 }
 
 fn read_u32<R>(reader: &mut R) -> std::io::Result<u32>
@@ -457,7 +469,6 @@ fn read_size<R>(reader: &mut R) -> Result<usize>
 where
     R: std::io::Read,
 {
-    // Sizes are always deserialized as u32 in libqi.
     let size_bytes = read_bytes(reader)?;
     let size = u32::from_le_bytes(size_bytes)
         .try_into()
@@ -481,4 +492,14 @@ where
     T: serde::de::DeserializeSeed<'de>,
 {
     seed.deserialize(&mut Deserializer::from_reader(reader))
+}
+
+#[cfg(test)]
+mod tests {
+    // ! TODO !
+
+    #[test]
+    fn test_deserializer_error_rewind_reader() {
+        todo!()
+    }
 }

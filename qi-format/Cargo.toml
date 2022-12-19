@@ -1,12 +1,12 @@
 [package]
-name = "qi-serde"
+name = "qi-format"
 version = "0.1.0"
-edition = "2021"
+edition = "2018"
 
 [dependencies]
 derive-new = "0.5.9"
 derive_more = "0.99.17"
-indexmap = { version = "1.9.2", features = ["serde"] }
+ordered-float = { version = "3.4.0", features = ["serde"] }
 serde = { version = "1.0.147", features = ["derive"] }
 thiserror = "1.0.37"
 

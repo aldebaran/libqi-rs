@@ -28,78 +28,75 @@ impl serde::Serializer for Serializer {
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Int8(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Int16(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Int32(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Int64(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::UnsignedInt8(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::UnsignedInt16(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::UnsignedInt32(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::UnsignedInt64(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Float32(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Float64(v))
+        Ok(Value::from(Number::from(v)))
     }
 
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        let mut buf = [0; 4];
-        let s = v.encode_utf8(&mut buf);
-        self.serialize_str(s)
+        self.serialize_str(v.encode_utf8(&mut [0; 4]))
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::String(v.to_owned().into()))
+        Ok(Value::from(String::from(v.to_owned())))
     }
 
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Raw(v.to_owned().into()))
+        Ok(Value::from(Raw::from(v.to_owned())))
     }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Option(None))
+        Ok(Value::from(None))
     }
 
     fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
     where
         T: serde::Serialize,
     {
-        let value = to_value(value);
-        let value = Box::new(value);
-        Ok(Value::Option(Some(value)))
+        let value = value.serialize(self)?;
+        Ok(Value::from(Some(value)))
     }
 
     fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Unit)
+        Ok(Value::unit())
     }
 
     fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Tuple(Tuple { elements: vec![] }))
+        Ok(Value::from(Tuple::new(vec![])))
     }
 
     fn serialize_unit_variant(
@@ -119,10 +116,8 @@ impl serde::Serializer for Serializer {
     where
         T: serde::Serialize,
     {
-        let value = to_value(element);
-        Ok(Value::Tuple(Tuple {
-            elements: vec![value],
-        }))
+        let value = element.serialize(self)?;
+        Ok(Value::from(Tuple::new(vec![value])))
     }
 
     fn serialize_newtype_variant<T: ?Sized>(
@@ -138,20 +133,23 @@ impl serde::Serializer for Serializer {
         todo!("enums are not yet supported as values")
     }
 
-    fn serialize_seq(self, _len: StdOption<usize>) -> Result<Self::SerializeSeq, Self::Error> {
+    fn serialize_seq(
+        self,
+        _len: std::option::Option<usize>,
+    ) -> Result<Self::SerializeSeq, Self::Error> {
         Ok(SerializeSeq::new())
     }
 
-    fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        Ok(SerializeTuple::new())
+    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+        Ok(SerializeTuple::new(len))
     }
 
     fn serialize_tuple_struct(
         self,
         _name: &'static str,
-        _len: usize,
+        len: usize,
     ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        Ok(SerializeTuple::new())
+        Ok(SerializeTuple::new(len))
     }
 
     fn serialize_tuple_variant(
@@ -164,16 +162,19 @@ impl serde::Serializer for Serializer {
         todo!("enums are not yet supported as values")
     }
 
-    fn serialize_map(self, _len: StdOption<usize>) -> Result<Self::SerializeMap, Self::Error> {
+    fn serialize_map(
+        self,
+        _len: std::option::Option<usize>,
+    ) -> Result<Self::SerializeMap, Self::Error> {
         Ok(SerializeMap::new())
     }
 
     fn serialize_struct(
         self,
         _name: &'static str,
-        _len: usize,
+        len: usize,
     ) -> Result<Self::SerializeStruct, Self::Error> {
-        Ok(SerializeTuple::new())
+        Ok(SerializeTuple::new(len))
     }
 
     fn serialize_struct_variant(
@@ -205,7 +206,7 @@ impl serde::ser::SerializeSeq for SerializeSeq {
     where
         T: serde::Serialize,
     {
-        let value = to_value(value);
+        let value = value.serialize(Serializer)?;
         self.list.push(value);
         Ok(())
     }
@@ -217,7 +218,7 @@ impl serde::ser::SerializeSeq for SerializeSeq {
 
 pub struct SerializeMap {
     map: Map<'static>,
-    key: StdOption<Value<'static>>,
+    key: std::option::Option<Value<'static>>,
 }
 
 impl SerializeMap {
@@ -237,7 +238,7 @@ impl serde::ser::SerializeMap for SerializeMap {
     where
         T: serde::Serialize,
     {
-        let key = to_value(key);
+        let key = key.serialize(Serializer)?;
         self.key = Some(key);
         Ok(())
     }
@@ -250,7 +251,7 @@ impl serde::ser::SerializeMap for SerializeMap {
             .key
             .take()
             .expect("logic error: missing key before value");
-        let value = to_value(value);
+        let value = value.serialize(Serializer)?;
         self.map.0.push((key, value));
         Ok(())
     }
@@ -261,13 +262,13 @@ impl serde::ser::SerializeMap for SerializeMap {
 }
 
 pub struct SerializeTuple {
-    tuple: Tuple<'static>,
+    elements: Vec<Value<'static>>,
 }
 
 impl SerializeTuple {
-    fn new() -> Self {
+    fn new(len: usize) -> Self {
         Self {
-            tuple: Tuple::default(),
+            elements: Vec::with_capacity(len),
         }
     }
 }
@@ -280,13 +281,13 @@ impl serde::ser::SerializeTuple for SerializeTuple {
     where
         T: serde::Serialize + ?Sized,
     {
-        let element = to_value(value);
-        self.tuple.elements.push(element);
+        let element = value.serialize(Serializer)?;
+        self.elements.push(element);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Tuple(self.tuple))
+        Ok(Value::from(Tuple::new(self.elements)))
     }
 }
 
@@ -298,13 +299,13 @@ impl serde::ser::SerializeTupleStruct for SerializeTuple {
     where
         T: serde::Serialize,
     {
-        let element = to_value(value);
-        self.tuple.elements.push(element);
+        let element = value.serialize(Serializer)?;
+        self.elements.push(element);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Tuple(self.tuple))
+        Ok(Value::from(Tuple::new(self.elements)))
     }
 }
 
@@ -320,13 +321,13 @@ impl serde::ser::SerializeStruct for SerializeTuple {
     where
         T: serde::Serialize,
     {
-        let element = to_value(value);
-        self.tuple.elements.push(element);
+        let element = value.serialize(Serializer)?;
+        self.elements.push(element);
         Ok(())
     }
 
     fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(Value::Tuple(self.tuple))
+        Ok(Value::from(Tuple::new(self.elements)))
     }
 }
 
@@ -347,34 +348,14 @@ impl<'v> Serialize for Value<'v> {
         S: serde::Serializer,
     {
         match self {
-            Value::Unit => serializer.serialize_unit(),
-            Value::Bool(b) => serializer.serialize_bool(*b),
-            Value::Int8(i) => serializer.serialize_i8(*i),
-            Value::UnsignedInt8(u) => serializer.serialize_u8(*u),
-            Value::Int16(i) => serializer.serialize_i16(*i),
-            Value::UnsignedInt16(u) => serializer.serialize_u16(*u),
-            Value::Int32(i) => serializer.serialize_i32(*i),
-            Value::UnsignedInt32(u) => serializer.serialize_u32(*u),
-            Value::Int64(i) => serializer.serialize_i64(*i),
-            Value::UnsignedInt64(u) => serializer.serialize_u64(*u),
-            Value::Float32(f) => serializer.serialize_f32(*f),
-            Value::Float64(d) => serializer.serialize_f64(*d),
-            Value::String(s) => serializer.serialize_str(s),
-            Value::Raw(r) => serializer.serialize_bytes(r),
-            Value::Option(o) => match o {
-                Some(v) => serializer.serialize_some(v),
-                None => serializer.serialize_none(),
-            },
-            Value::List(l) => serializer.collect_seq(l.iter()),
-            Value::Map(m) => serializer.collect_map(m.into_iter().map(|(k, v)| (k, v))),
-            Value::Tuple(Tuple { elements }) => {
-                use serde::ser::SerializeTuple;
-                let mut serializer = serializer.serialize_tuple(elements.len())?;
-                for elem in elements {
-                    serializer.serialize_element(elem)?;
-                }
-                serializer.end()
-            }
+            Value::Bool(b) => b.serialize(serializer),
+            Value::Number(n) => n.serialize(serializer),
+            Value::String(s) => s.serialize(serializer),
+            Value::Raw(r) => r.serialize(serializer),
+            Value::Option(o) => o.serialize(serializer),
+            Value::List(l) => l.serialize(serializer),
+            Value::Map(m) => m.serialize(serializer),
+            Value::Tuple(tuple) => tuple.serialize(serializer),
         }
     }
 }
@@ -393,16 +374,11 @@ impl<'v> Serialize for Map<'v> {
     }
 }
 
-impl<'v> Serialize for Tuple<'v> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+impl<'v> Serialize for AnnotatedValue<'v> {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        use serde::ser::SerializeTuple;
-        let mut serializer = serializer.serialize_tuple(self.elements.len())?;
-        for element in &self.elements {
-            serializer.serialize_element(element)?;
-        }
-        serializer.end()
+        todo!()
     }
 }
