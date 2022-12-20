@@ -56,7 +56,7 @@ where
     where
         V: serde::de::Visitor<'de>,
     {
-        Err(Error::UnknownDataType)
+        Err(Error::CannotDeserializeAny)
     }
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>

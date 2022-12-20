@@ -120,14 +120,14 @@ deserialization.
 | `string` | `bytes` [^string-as-bytes] |
 | `byte_buf` [^de-only] | `bytes` |
 | `struct(T...)` | `tuple(T...)` |
-| `newtype_struct(T)` | `tuple(T)` |
+| `newtype_struct(T)` | `tuple(T)` = `T` |
 | `unit_struct` | `unit` |
 | `tuple_struct(T...)` | `tuple(T...)` |
-| `unit_variant` [^ser-only] | `tuple(uint_32, unit)` where the first element is the variant index |
-| `newtype_variant(T)` [^ser-only] | `tuple(uint_32, T)` where the first element is the variant index |
-| `tuple_variant(T...)` [^ser-only] | `tuple(uint_32, tuple(T...))` where the first element is the variant index |
-| `struct_variant(T...)` [^ser-only] | `tuple(uint_32, tuple(T...))` where the first element is the variant index |
-| `enum` [^de-only] | `tuple(uint_32,T)` where the first element is the variant index and the second is the associated value |
+| `unit_variant(idx)` [^ser-only] | `tuple(idx: uint_32, unit)` |
+| `newtype_variant(idx,T)` [^ser-only] | `tuple(idx: uint_32, tuple(T))` |
+| `tuple_variant(idx,T...)` [^ser-only] | `tuple(idx: uint_32, tuple(T...))` |
+| `struct_variant(idx,T...)` [^ser-only] | `tuple(idx: uint_32, tuple(T...))` |
+| `enum(idx,T)` [^de-only] | `tuple(idx: uint_32,T)` |
 | `identifier` [^de-only] | `unit` [^no-ident] |
 
 | `qi` | associated `qi` type |

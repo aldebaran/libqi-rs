@@ -54,29 +54,20 @@ pub enum Error {
     #[error("the value '{0}' is not a `bool` value")]
     NotABoolValue(u8),
 
-    #[error("the type of the data is unknown (the `qi` format is not self-describing)")]
-    UnknownDataType,
+    #[error("cannot deserialize any data, the type information of the expected value is required (the `qi` format is not self-describing)")]
+    CannotDeserializeAny,
 
     #[error("bad size: {0}")]
     BadSize(std::num::TryFromIntError),
 
-    #[error("payload size was expected but none was found")]
-    NoPayloadSize,
+    #[error("list and maps size must be known to be serialized")]
+    SizeIsRequired,
 
-    #[error("list size must be known to be serialized")]
-    ExpectedListSize,
-
-    #[error("unexpected message field {0}")]
-    UnexpectedMessageField(&'static str),
-
-    #[error("duplicate message field {0}")]
-    DuplicateMessageField(&'static str),
-
-    #[error("missing message field {0}")]
-    MissingMessageField(&'static str),
+    #[error("expected {0} elements, got one more")]
+    UnexpectedElement(usize),
 
     #[error("string data is not valid UTF-8: {0}")]
-    InvalidUtf8(#[from] std::str::Utf8Error),
+    InvalidStringUtf8(#[from] std::str::Utf8Error),
 
     #[error("{0}")]
     Custom(std::string::String),
