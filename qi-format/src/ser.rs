@@ -311,15 +311,18 @@ where
         Ok(map_ser)
     }
 
-    // equivalence: struct(T...) -> tuple(T...)
+    // equivalence: newtype_struct(T) -> tuple(T)
     fn serialize_newtype_struct<T: ?Sized>(self, _name: &'static str, value: &T) -> Result<Self::Ok>
     where
         T: Serialize,
     {
-        value.serialize(self)
+        let mut tuple_ser = self.serialize_tuple(1)?;
+        use serde::ser::SerializeTuple;
+        tuple_ser.serialize_element(value)?;
+        tuple_ser.end()
     }
 
-    // equivalence: tuple_variant(idx, T...) -> tuple(idx: uint_32, tuple(T...)) = tuple(idx, T...)
+    // equivalence: tuple_variant(idx, T...) -> tuple(idx: uint_32, tuple(T...))
     fn serialize_tuple_variant(
         mut self,
         _name: &'static str,
@@ -328,7 +331,7 @@ where
         len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
         write_u32(self.writer.by_ref(), variant_index)?;
-        Ok(SeqSerializer::new_tuple(self.writer, len))
+        self.serialize_tuple(len)
     }
 
     // equivalence: unit_variant(idx) -> tuple(idx: uint_32, unit) = tuple_variant(idx, unit)
