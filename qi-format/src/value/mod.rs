@@ -273,26 +273,29 @@ mod tests {
     }
 
     #[test]
-    fn test_to_value() {
+    fn test_to_value() -> Result<()> {
         let s = Serializable::sample();
         let expected = Serializable::sample_as_value();
-        let value = to_value(&s);
+        let value = to_value(&s)?;
         assert_eq!(value, expected);
+        Ok(())
     }
 
     #[test]
-    fn test_value_to_value() {
+    fn test_value_to_value() -> Result<()> {
         let src_value = Serializable::sample_as_value();
-        let value = to_value(&src_value);
+        let value = to_value(&src_value)?;
         assert_eq!(value, src_value);
+        Ok(())
     }
 
     #[test]
-    fn test_from_value() {
+    fn test_from_value() -> Result<()> {
         let expected = Serializable::sample();
         let value = Serializable::sample_as_value();
-        let s: Serializable = from_value(value).unwrap();
+        let s: Serializable = from_value(value)?;
         assert_eq!(s, expected);
+        Ok(())
     }
 
     // Type information is lost each time we serialize or deserialize a value because of
@@ -340,10 +343,11 @@ mod tests {
     }
 
     #[test]
-    fn test_to_from_value_invariant() {
+    fn test_to_from_value_invariant() -> Result<()> {
         let src_s = Serializable::sample();
-        let s: Serializable = from_value(to_value(&src_s)).unwrap();
+        let s: Serializable = from_value(to_value(&src_s)?)?;
         assert_eq!(s, src_s);
+        Ok(())
     }
 
     struct SampleTupleValue;

@@ -3,7 +3,7 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-mod value;
+pub mod value;
 #[doc(inline)]
 pub use value::{from_value, from_value_ref, to_value, AnnotatedValue, Value};
 
@@ -38,11 +38,13 @@ mod signature;
 #[doc(inline)]
 pub use signature::Signature;
 
-mod ser;
+mod read;
+
+pub mod ser;
 #[doc(inline)]
 pub use ser::*;
 
-mod de;
+pub mod de;
 #[doc(inline)]
 pub use de::*;
 
@@ -83,6 +85,7 @@ mod tests {
 
     #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
     struct S0 {
+        u: (),
         t: (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64),
         #[serde(with = "serde_bytes")]
         r: Vec<u8>,
@@ -101,6 +104,7 @@ mod tests {
     impl Serializable {
         pub fn sample() -> Self {
             Self(S0 {
+                u: (),
                 t: (-8, 8, -16, 16, -32, 32, -64, 64, 32.32, 64.64),
                 r: vec![51, 52, 53, 54],
                 o: Some(false),
@@ -117,6 +121,7 @@ mod tests {
 
         pub fn sample_as_value() -> Value<'static> {
             use {num_bool::*, value::*};
+            let unit = Value::unit();
             let tuple = Value::from(Tuple::new(vec![
                 Value::from(Number::Int8(-8)),
                 Value::from(Number::UInt8(8)),
@@ -138,7 +143,9 @@ mod tests {
                 (Value::from(1i32), Value::from("hello")),
                 (Value::from(2i32), Value::from("world")),
             ]));
-            let s0 = Value::from(Tuple::new(vec![tuple, raw, opt, structure, list, map]));
+            let s0 = Value::from(Tuple::new(vec![
+                unit, tuple, raw, opt, structure, list, map,
+            ]));
             Value::from(Tuple::new(vec![s0]))
         }
     }

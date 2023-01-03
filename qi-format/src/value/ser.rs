@@ -1,19 +1,18 @@
 use super::*;
+use crate::{Error, Result};
 
-pub fn to_value<T>(value: &T) -> Value<'static>
+pub fn to_value<T>(value: &T) -> Result<Value<'static>>
 where
     T: serde::Serialize + ?Sized,
 {
-    value
-        .serialize(Serializer)
-        .expect("logic error: serializing into a value is infallible")
+    value.serialize(Serializer)
 }
 
 struct Serializer;
 
 impl serde::Serializer for Serializer {
     type Ok = Value<'static>;
-    type Error = Infallible;
+    type Error = Error;
 
     type SerializeSeq = SerializeSeq;
     type SerializeTuple = SerializeTuple;
@@ -23,67 +22,67 @@ impl serde::Serializer for Serializer {
     type SerializeStruct = SerializeTuple;
     type SerializeStructVariant = serde::ser::Impossible<Self::Ok, Self::Error>;
 
-    fn serialize_bool(self, v: bool) -> Result<Self::Ok, Self::Error> {
+    fn serialize_bool(self, v: bool) -> Result<Self::Ok> {
         Ok(Value::Bool(v))
     }
 
-    fn serialize_i8(self, v: i8) -> Result<Self::Ok, Self::Error> {
+    fn serialize_i8(self, v: i8) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_i16(self, v: i16) -> Result<Self::Ok, Self::Error> {
+    fn serialize_i16(self, v: i16) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_i32(self, v: i32) -> Result<Self::Ok, Self::Error> {
+    fn serialize_i32(self, v: i32) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
+    fn serialize_i64(self, v: i64) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_u8(self, v: u8) -> Result<Self::Ok, Self::Error> {
+    fn serialize_u8(self, v: u8) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_u16(self, v: u16) -> Result<Self::Ok, Self::Error> {
+    fn serialize_u16(self, v: u16) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_u32(self, v: u32) -> Result<Self::Ok, Self::Error> {
+    fn serialize_u32(self, v: u32) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
+    fn serialize_u64(self, v: u64) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error> {
+    fn serialize_f32(self, v: f32) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error> {
+    fn serialize_f64(self, v: f64) -> Result<Self::Ok> {
         Ok(Value::from(Number::from(v)))
     }
 
-    fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
+    fn serialize_char(self, v: char) -> Result<Self::Ok> {
         self.serialize_str(v.encode_utf8(&mut [0; 4]))
     }
 
-    fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
+    fn serialize_str(self, v: &str) -> Result<Self::Ok> {
         Ok(Value::from(String::from(v.to_owned())))
     }
 
-    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok> {
         Ok(Value::from(Raw::from(v.to_owned())))
     }
 
-    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
+    fn serialize_none(self) -> Result<Self::Ok> {
         Ok(Value::from(None))
     }
 
-    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok>
     where
         T: serde::Serialize,
     {
@@ -91,11 +90,11 @@ impl serde::Serializer for Serializer {
         Ok(Value::from(Some(value)))
     }
 
-    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
+    fn serialize_unit(self) -> Result<Self::Ok> {
         Ok(Value::unit())
     }
 
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
+    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok> {
         Ok(Value::from(Tuple::new(vec![])))
     }
 
@@ -104,7 +103,7 @@ impl serde::Serializer for Serializer {
         _name: &'static str,
         _variant_index: u32,
         _variant: &'static str,
-    ) -> Result<Self::Ok, Self::Error> {
+    ) -> Result<Self::Ok> {
         todo!("enums are not yet supported as values")
     }
 
@@ -112,7 +111,7 @@ impl serde::Serializer for Serializer {
         self,
         _name: &'static str,
         element: &T,
-    ) -> Result<Self::Ok, Self::Error>
+    ) -> Result<Self::Ok>
     where
         T: serde::Serialize,
     {
@@ -126,21 +125,18 @@ impl serde::Serializer for Serializer {
         _variant_index: u32,
         _variant: &'static str,
         _value: &T,
-    ) -> Result<Self::Ok, Self::Error>
+    ) -> Result<Self::Ok>
     where
         T: serde::Serialize,
     {
         todo!("enums are not yet supported as values")
     }
 
-    fn serialize_seq(
-        self,
-        _len: std::option::Option<usize>,
-    ) -> Result<Self::SerializeSeq, Self::Error> {
+    fn serialize_seq(self, _len: std::option::Option<usize>) -> Result<Self::SerializeSeq> {
         Ok(SerializeSeq::new())
     }
 
-    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
+    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
         Ok(SerializeTuple::new(len))
     }
 
@@ -148,7 +144,7 @@ impl serde::Serializer for Serializer {
         self,
         _name: &'static str,
         len: usize,
-    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
+    ) -> Result<Self::SerializeTupleStruct> {
         Ok(SerializeTuple::new(len))
     }
 
@@ -158,22 +154,15 @@ impl serde::Serializer for Serializer {
         _variant_index: u32,
         _variant: &'static str,
         _len: usize,
-    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
+    ) -> Result<Self::SerializeTupleVariant> {
         todo!("enums are not yet supported as values")
     }
 
-    fn serialize_map(
-        self,
-        _len: std::option::Option<usize>,
-    ) -> Result<Self::SerializeMap, Self::Error> {
+    fn serialize_map(self, _len: std::option::Option<usize>) -> Result<Self::SerializeMap> {
         Ok(SerializeMap::new())
     }
 
-    fn serialize_struct(
-        self,
-        _name: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeStruct, Self::Error> {
+    fn serialize_struct(self, _name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
         Ok(SerializeTuple::new(len))
     }
 
@@ -183,7 +172,7 @@ impl serde::Serializer for Serializer {
         _variant_index: u32,
         _variant: &'static str,
         _len: usize,
-    ) -> Result<Self::SerializeStructVariant, Self::Error> {
+    ) -> Result<Self::SerializeStructVariant> {
         todo!("enums are not yet supported as values")
     }
 }
@@ -202,7 +191,7 @@ impl serde::ser::SerializeSeq for SerializeSeq {
     type Ok = Value<'static>;
     type Error = Error;
 
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
     where
         T: serde::Serialize,
     {
@@ -211,7 +200,7 @@ impl serde::ser::SerializeSeq for SerializeSeq {
         Ok(())
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
+    fn end(self) -> Result<Self::Ok> {
         Ok(Value::List(self.list))
     }
 }
@@ -234,7 +223,7 @@ impl serde::ser::SerializeMap for SerializeMap {
     type Ok = Value<'static>;
     type Error = Error;
 
-    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<(), Self::Error>
+    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<()>
     where
         T: serde::Serialize,
     {
@@ -243,7 +232,7 @@ impl serde::ser::SerializeMap for SerializeMap {
         Ok(())
     }
 
-    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<()>
     where
         T: serde::Serialize,
     {
@@ -256,7 +245,7 @@ impl serde::ser::SerializeMap for SerializeMap {
         Ok(())
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
+    fn end(self) -> Result<Self::Ok> {
         Ok(Value::Map(self.map))
     }
 }
@@ -277,7 +266,7 @@ impl serde::ser::SerializeTuple for SerializeTuple {
     type Ok = Value<'static>;
     type Error = Error;
 
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
         T: serde::Serialize + ?Sized,
     {
@@ -286,7 +275,7 @@ impl serde::ser::SerializeTuple for SerializeTuple {
         Ok(())
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
+    fn end(self) -> Result<Self::Ok> {
         Ok(Value::from(Tuple::new(self.elements)))
     }
 }
@@ -295,7 +284,7 @@ impl serde::ser::SerializeTupleStruct for SerializeTuple {
     type Ok = Value<'static>;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<(), Self::Error>
+    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<()>
     where
         T: serde::Serialize,
     {
@@ -304,7 +293,7 @@ impl serde::ser::SerializeTupleStruct for SerializeTuple {
         Ok(())
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
+    fn end(self) -> Result<Self::Ok> {
         Ok(Value::from(Tuple::new(self.elements)))
     }
 }
@@ -313,11 +302,7 @@ impl serde::ser::SerializeStruct for SerializeTuple {
     type Ok = Value<'static>;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(
-        &mut self,
-        _key: &'static str,
-        value: &T,
-    ) -> Result<(), Self::Error>
+    fn serialize_field<T: ?Sized>(&mut self, _key: &'static str, value: &T) -> Result<()>
     where
         T: serde::Serialize,
     {
@@ -326,24 +311,13 @@ impl serde::ser::SerializeStruct for SerializeTuple {
         Ok(())
     }
 
-    fn end(self) -> Result<Self::Ok, Self::Error> {
+    fn end(self) -> Result<Self::Ok> {
         Ok(Value::from(Tuple::new(self.elements)))
     }
 }
 
-#[derive(thiserror::Error, Debug, PartialEq, Eq)]
-pub enum Infallible {}
-
-impl serde::ser::Error for Infallible {
-    fn custom<T: std::fmt::Display>(_: T) -> Self {
-        unreachable!("infaillible serialization")
-    }
-}
-
-pub type Error = Infallible;
-
 impl<'v> Serialize for Value<'v> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -361,7 +335,7 @@ impl<'v> Serialize for Value<'v> {
 }
 
 impl<'v> Serialize for Map<'v> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -375,7 +349,7 @@ impl<'v> Serialize for Map<'v> {
 }
 
 impl<'v> Serialize for AnnotatedValue<'v> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, _serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {

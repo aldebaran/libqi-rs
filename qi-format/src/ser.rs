@@ -1,6 +1,6 @@
 use crate::{
     num_bool::{FALSE_BOOL, TRUE_BOOL},
-    Error, Result,
+    Error, Raw, Result, String,
 };
 use serde::Serialize;
 
@@ -61,12 +61,6 @@ where
 {
     write_byte(writer, if val { TRUE_BOOL } else { FALSE_BOOL })
 }
-
-// LibQi does not handle endianness correctly, and as such always
-// serialize integers with native byte order. However, as it mostly
-// executes on little endian systems, we assume they are always
-// encoded as such, to ensure portability with systems that are not
-// little endian.
 
 pub fn write_u8<W>(writer: W, val: u8) -> Result<()>
 where
@@ -146,20 +140,20 @@ where
     write_u32(writer, size)
 }
 
-// equivalence: string -> raw
-pub fn write_string<W>(writer: W, str: &str) -> Result<()>
+pub fn write_string<W>(writer: W, str: String) -> Result<()>
 where
     W: std::io::Write,
 {
-    write_raw(writer, str.as_bytes())
+    write_raw(writer, Raw::from(str))
 }
 
-pub fn write_raw<W>(mut writer: W, raw: &[u8]) -> Result<()>
+pub fn write_raw<W>(mut writer: W, raw: Raw) -> Result<()>
 where
     W: std::io::Write,
 {
-    write_size(writer.by_ref(), raw.len())?;
-    writer.write_all(raw)?;
+    let bytes = raw.as_bytes();
+    write_size(writer.by_ref(), bytes.len())?;
+    writer.write_all(bytes)?;
     Ok(())
 }
 
@@ -238,19 +232,18 @@ where
 
     // bytes -> raw
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok> {
-        write_raw(self.writer, v)
+        write_raw(self.writer, Raw::from(v))
     }
 
-    // simple type: str
     fn serialize_str(self, v: &str) -> Result<Self::Ok> {
-        write_string(self.writer, v)
+        write_string(self.writer, String::from(v))
     }
 
-    // equivalence: char -> string = raw
+    // equivalence: char -> string
     fn serialize_char(self, v: char) -> Result<Self::Ok> {
         let buf = &mut [0; 4];
         let str = v.encode_utf8(buf);
-        write_string(self.writer, str)
+        self.serialize_str(str)
     }
 
     // option -> optional
@@ -582,7 +575,7 @@ mod tests {
     use assert_matches::assert_matches;
 
     // --------------------------------------------------------------
-    // Qi simple types
+    // Basic types
     // --------------------------------------------------------------
 
     #[test]
@@ -691,6 +684,12 @@ mod tests {
         let mut buf = Vec::new();
         write_f32(&mut buf, 1.0).unwrap();
         assert_eq!(buf, [0, 0, 128, 63]);
+
+        let mut buf = Vec::new();
+        write_f32(&mut buf, 1.0).unwrap();
+        assert_eq!(buf, [0, 0, 128, 63]);
+
+        todo!("nan, +-infinity, +-0");
     }
 
     #[test]
@@ -698,6 +697,7 @@ mod tests {
         let mut buf = Vec::new();
         write_f64(&mut buf, 1.0).unwrap();
         assert_eq!(buf, [0, 0, 0, 0, 0, 0, 240, 63]);
+        todo!("nan, +-infinity, +-0");
     }
 
     #[test]
@@ -710,14 +710,14 @@ mod tests {
     #[test]
     fn test_write_string() {
         let mut buf = Vec::new();
-        write_string(&mut buf, "abc").unwrap();
+        write_string(&mut buf, String::from("abc")).unwrap();
         assert_eq!(buf, [3, 0, 0, 0, 97, 98, 99]);
     }
 
     #[test]
     fn test_write_raw() {
         let mut buf = Vec::new();
-        write_raw(&mut buf, &[1, 11, 111]).unwrap();
+        write_raw(&mut buf, Raw::from(&[1, 11, 111][..])).unwrap();
         assert_eq!(buf, [3, 0, 0, 0, 1, 11, 111]);
     }
 

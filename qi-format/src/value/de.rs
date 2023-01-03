@@ -1,17 +1,18 @@
 use super::*;
+use crate::Error;
 use serde::{
     de::{value::MapDeserializer, value::SeqDeserializer},
     forward_to_deserialize_any,
 };
 
-pub fn from_value<'v, T>(d: Value<'v>) -> Result<T, serde::de::value::Error>
+pub fn from_value<'v, T>(d: Value<'v>) -> Result<T, Error>
 where
     T: serde::de::Deserialize<'v>,
 {
     T::deserialize(d)
 }
 
-pub fn from_value_ref<'v, T>(d: &'v Value<'v>) -> Result<T, serde::de::value::Error>
+pub fn from_value_ref<'v, T>(d: &'v Value<'v>) -> Result<T, Error>
 where
     T: serde::Deserialize<'v>,
 {
@@ -19,7 +20,7 @@ where
 }
 
 impl<'de> serde::Deserializer<'de> for Value<'de> {
-    type Error = serde::de::value::Error;
+    type Error = Error;
 
     fn is_human_readable(&self) -> bool {
         false
@@ -63,7 +64,7 @@ impl<'de> serde::Deserializer<'de> for Value<'de> {
 }
 
 impl<'de> serde::Deserializer<'de> for &'de Value<'de> {
-    type Error = serde::de::value::Error;
+    type Error = Error;
 
     fn is_human_readable(&self) -> bool {
         false
@@ -102,7 +103,7 @@ impl<'de> serde::Deserializer<'de> for &'de Value<'de> {
     }
 }
 
-impl<'de> serde::de::IntoDeserializer<'de, serde::de::value::Error> for Value<'de> {
+impl<'de> serde::de::IntoDeserializer<'de, Error> for Value<'de> {
     type Deserializer = Self;
 
     fn into_deserializer(self) -> Self::Deserializer {
@@ -110,7 +111,7 @@ impl<'de> serde::de::IntoDeserializer<'de, serde::de::value::Error> for Value<'d
     }
 }
 
-impl<'de> serde::de::IntoDeserializer<'de, serde::de::value::Error> for &'de Value<'de> {
+impl<'de> serde::de::IntoDeserializer<'de, Error> for &'de Value<'de> {
     type Deserializer = Self;
 
     fn into_deserializer(self) -> Self::Deserializer {

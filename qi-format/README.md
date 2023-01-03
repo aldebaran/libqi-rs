@@ -7,7 +7,7 @@ communicating values in the `qi` messaging protocol.
 
 # Minimum Rust Required Version (MSRV)
 
-This crate requires Rust 1.54+.
+This crate requires Rust 1.59+.
 
 # Getting started
 
@@ -33,48 +33,6 @@ You may refer to the `qi` type system and format specification (reference
 `spec:/aldebaran/framework/2022/h`) document for details.
 
 # Implementation of the format
-
-## Definition of serialization
-
-Let `T` be a type and `F` a format type, i.e. the set of all values
-representable by the format.
-
-`T` is serializable into `F` if there is a function: `serialize: T -> F`.
-
-`T` is deserializable from `F` if there is a function: `deserialize: F -> T`.
-
-Additionally, to ensure the consistency of the meaning of types between the
-serializer and the deserializer, each of these functions must be bijections and
-the inverse of the other.
-
-This means that, assuming that values of `T` and `F` are equality-comparable,
-for `t: T` and `f: F`:
-
-`deserialize(serialize(t)) == t && serialize(deserialize(f)) == f`
-
-This also means that the meaning of a type is preserved through serialization
-in a format.
-
-## `serde`
-
-Each type that implements [`serde::Serialize`] and/or [`serde::Deserialize`]
-defines its representation in the Serde data model.
-
-Serializers and deserializers types that implement respectively
-[`serde::ser::Serializer`] and
-[`serde::de::Deserializer`] then define an association
-between the Serde data model and the types of their format.
-
-We denote the following types:
-
-- `Serde` be the sum of the types of all values in the `serde` data model.
-- `SerdeKind` be the kind of the types of values in the `serde` data model.
-- `Qi` to be a format type.
-
-You may refer to the documentation of the `serde` crate for details on the
-types of the data model.
-
-## `Serializer` and `Deserializer` for the `qi` format
 
 Let `Qi` be the type of all values representable in the `qi` format (equivalent
 to the `qi` type system).
@@ -115,7 +73,7 @@ deserialization.
 
 | `serde` | associated `serde` type |
 | - | - |
-| `char` | `bytes` of a single element[^string-as-bytes] |
+| `char` | `str` of a single element[^string-as-bytes] |
 | `str` [^de-only] | `bytes` [^string-as-bytes] |
 | `string` | `bytes` [^string-as-bytes] |
 | `byte_buf` [^de-only] | `bytes` |
@@ -164,17 +122,3 @@ UTF-8. Therefore `qi` strings are mapped to byte arrays.
 The crate defines a Rust type (or at least a type alias) for each `qi` type, and more.
 Each of those types implements [`serde::Serialize`] and [`serde::Deserialize`], which
 means they can be represented into and interpreted from the format.
-
-### Value
-
-The [`Value`] enumeration, that represents any value of the `qi` format,
-implements [`serde::ser::Serializer`] and [`serde::de::Deserializer`] (with
-[`serde::de::IntoDeserializer`]).
-
-This means that:
-
-- any type that implements [`serde::Serialize`] can be serialized
-into a `Value` through the [`to_value`] function,
-- any type that implements [`serde::Deserialize`]
-can be deserialized from a `Value` through the [`from_value`] (or
-[`from_value_owned`]) function (assuming the value is of the right type).
