@@ -39,6 +39,12 @@ mod signature;
 pub use signature::Signature;
 
 mod read;
+#[doc(inline)]
+pub use read::*;
+
+mod write;
+#[doc(inline)]
+pub use write::*;
 
 pub mod ser;
 #[doc(inline)]
@@ -59,11 +65,11 @@ pub enum Error {
     #[error("cannot deserialize any data, the type information of the expected value is required (the `qi` format is not self-describing)")]
     CannotDeserializeAny,
 
-    #[error("bad size: {0}")]
-    BadSize(std::num::TryFromIntError),
+    #[error("size conversion error: {0}")]
+    SizeConversionError(std::num::TryFromIntError),
 
     #[error("list and maps size must be known to be serialized")]
-    SizeIsRequired,
+    UnspecifiedListMapSize,
 
     #[error("expected {0} elements, got one more")]
     UnexpectedElement(usize),

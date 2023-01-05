@@ -14,6 +14,8 @@ pub trait Read: private::Sealed {
 
     fn read_byte(&mut self) -> Result<u8>;
     fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]>;
+    fn read_string(&mut self) -> Result<Self::String>;
+    fn read_raw(&mut self) -> Result<Self::Raw>;
 
     fn read_word(&mut self) -> Result<[u8; 2]> {
         self.read_bytes()
@@ -90,12 +92,39 @@ pub trait Read: private::Sealed {
         let size_bytes = self.read_bytes()?;
         let size = u32::from_le_bytes(size_bytes)
             .try_into()
-            .map_err(Error::BadSize)?;
+            .map_err(Error::SizeConversionError)?;
         Ok(size)
     }
 
-    fn read_string(&mut self) -> Result<Self::String>;
-    fn read_raw(&mut self) -> Result<Self::Raw>;
+    fn as_ref(&mut self) -> &mut Self {
+        self
+    }
+}
+
+impl<R> private::Sealed for &mut R where R: Read {}
+
+impl<R> Read for &mut R
+where
+    R: Read,
+{
+    type String = <R as Read>::String;
+    type Raw = <R as Read>::Raw;
+
+    fn read_byte(&mut self) -> Result<u8> {
+        (*self).read_byte()
+    }
+
+    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+        (*self).read_bytes()
+    }
+
+    fn read_string(&mut self) -> Result<Self::String> {
+        (*self).read_string()
+    }
+
+    fn read_raw(&mut self) -> Result<Self::Raw> {
+        (*self).read_raw()
+    }
 }
 
 #[derive(new, Debug)]

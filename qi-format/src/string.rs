@@ -132,6 +132,8 @@ impl<'s> From<String<'s>> for Raw<'s> {
     }
 }
 
+// TODO: PartialEq + Eq String with str
+
 impl<'s> IntoIterator for &'s String<'s> {
     type Item = &'s u8;
     type IntoIter = std::slice::Iter<'s, u8>;
