@@ -81,8 +81,8 @@ impl Signature {
             Self::CHAR_UINT32 => Type::UInt32,
             Self::CHAR_INT64 => Type::Int64,
             Self::CHAR_UINT64 => Type::UInt64,
-            Self::CHAR_FLOAT => Type::Float,
-            Self::CHAR_DOUBLE => Type::Double,
+            Self::CHAR_FLOAT => Type::Float32,
+            Self::CHAR_DOUBLE => Type::Float64,
             Self::CHAR_STRING => Type::String,
             Self::CHAR_RAW => Type::Raw,
             Self::CHAR_OBJECT => Type::Object,
@@ -344,8 +344,8 @@ fn write_type(t: &Type, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Type::UInt32 => f.write_char(Signature::CHAR_UINT32),
         Type::Int64 => f.write_char(Signature::CHAR_INT64),
         Type::UInt64 => f.write_char(Signature::CHAR_UINT64),
-        Type::Float => f.write_char(Signature::CHAR_FLOAT),
-        Type::Double => f.write_char(Signature::CHAR_DOUBLE),
+        Type::Float32 => f.write_char(Signature::CHAR_FLOAT),
+        Type::Float64 => f.write_char(Signature::CHAR_DOUBLE),
         Type::String => f.write_char(Signature::CHAR_STRING),
         Type::Raw => f.write_char(Signature::CHAR_RAW),
         Type::Object => f.write_char(Signature::CHAR_OBJECT),
@@ -565,8 +565,8 @@ mod tests {
         assert_sig_from_to_str!(Type::UInt32, "I");
         assert_sig_from_to_str!(Type::Int64, "l");
         assert_sig_from_to_str!(Type::UInt64, "L");
-        assert_sig_from_to_str!(Type::Float, "f");
-        assert_sig_from_to_str!(Type::Double, "d");
+        assert_sig_from_to_str!(Type::Float32, "f");
+        assert_sig_from_to_str!(Type::Float64, "d");
         assert_sig_from_to_str!(Type::String, "s");
         assert_sig_from_to_str!(Type::Raw, "r");
         assert_sig_from_to_str!(Type::Object, "o");
@@ -583,14 +583,14 @@ mod tests {
         );
         assert_sig_from_to_str!(
             Type::Map {
-                key: Box::new(Type::Float),
+                key: Box::new(Type::Float32),
                 value: Box::new(Type::String),
             },
             "{fs}"
         );
         assert_sig_from_to_str!(
             Type::Tuple {
-                elements: vec![Type::Float, Type::String, Type::UInt32],
+                elements: vec![Type::Float32, Type::String, Type::UInt32],
                 annotations: None
             },
             "(fsI)"
@@ -599,7 +599,7 @@ mod tests {
             Type::Tuple {
                 elements: vec![
                     Type::List(Box::new(Type::Tuple {
-                        elements: vec![Type::Double, Type::Double],
+                        elements: vec![Type::Float64, Type::Float64],
                         annotations: None
                     })),
                     Type::UInt64,
@@ -615,7 +615,7 @@ mod tests {
             Type::Tuple {
                 elements: vec![
                     Type::List(Box::new(Type::Tuple {
-                        elements: vec![Type::Double, Type::Double],
+                        elements: vec![Type::Float64, Type::Float64],
                         annotations: Some(Annotations {
                             name: "Point".to_owned(),
                             fields: vec!["x".to_owned(), "y".to_owned()]
@@ -647,7 +647,7 @@ mod tests {
         assert_sig_from_to_str!("()<>" => Type::Tuple{ elements: vec![], annotations: None } => "()");
         assert_sig_from_to_str!("(i)<>" => Type::Tuple{ elements: vec![Type::Int32], annotations: None } => "(i)");
         assert_sig_from_to_str!("(i)<,,,,,,,>" => Type::Tuple{ elements: vec![Type::Int32], annotations: None } => "(i)");
-        assert_sig_from_to_str!("(ff)<,x,y>" => Type::Tuple{ elements: vec![Type::Float, Type::Float], annotations: None } => "(ff)");
+        assert_sig_from_to_str!("(ff)<,x,y>" => Type::Tuple{ elements: vec![Type::Float32, Type::Float32], annotations: None } => "(ff)");
         // Some complex type for fun.
         assert_sig_from_to_str!(
             Type::Tuple {
@@ -926,7 +926,7 @@ mod tests {
         use serde_test::{assert_tokens, Token};
         assert_tokens(
             &Signature(Type::Tuple {
-                elements: vec![Type::Double, Type::Double],
+                elements: vec![Type::Float64, Type::Float64],
                 annotations: Some(Annotations {
                     name: "Point".to_owned(),
                     fields: vec!["x".to_owned(), "y".to_owned()],
