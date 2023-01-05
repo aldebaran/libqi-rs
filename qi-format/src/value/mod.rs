@@ -3,11 +3,13 @@ pub use de::*;
 pub mod ser;
 pub use ser::*;
 
-use crate::{Bool, Number, Option, Raw, String, Tuple, Type};
+use crate::{Bool, Number, Raw, String, Tuple, Type};
 use derive_more::{From, Index, IndexMut, Into, IntoIterator, TryInto};
 use derive_new::new;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, iter::FromIterator};
+
+pub type Option<'v> = std::option::Option<Value<'v>>;
 
 /// The [`Value`] structure represents the `value` type in the `qi` format and
 /// is is an enumeration of every types of values defined in the format.
