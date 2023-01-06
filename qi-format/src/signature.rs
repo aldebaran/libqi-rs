@@ -6,388 +6,9 @@ use derive_new::new;
 #[into(owned, ref, ref_mut)]
 pub struct Signature(pub(crate) Type);
 
-fn advance_once<I>(mut iter: I)
-where
-    I: Iterator,
-{
-    if iter.next().is_none() {
-        unreachable!(
-            "the precondition over the presence of an element on the iterator is not verified"
-        )
-    }
-}
-
 impl Signature {
     pub fn into_type(self) -> Type {
         self.0
-    }
-
-    const CHAR_VOID: char = 'v';
-    const CHAR_BOOL: char = 'b';
-    const CHAR_INT8: char = 'c';
-    const CHAR_UINT8: char = 'C';
-    const CHAR_INT16: char = 'w';
-    const CHAR_UINT16: char = 'W';
-    const CHAR_INT32: char = 'i';
-    const CHAR_UINT32: char = 'I';
-    const CHAR_INT64: char = 'l';
-    const CHAR_UINT64: char = 'L';
-    const CHAR_FLOAT: char = 'f';
-    const CHAR_DOUBLE: char = 'd';
-    const CHAR_STRING: char = 's';
-    const CHAR_RAW: char = 'r';
-    const CHAR_OBJECT: char = 'o';
-    const CHAR_DYNAMIC: char = 'm';
-    const CHAR_MARK_OPTION: char = '+';
-    const CHAR_LIST_BEGIN: char = '[';
-    const CHAR_LIST_END: char = ']';
-    const CHAR_MAP_BEGIN: char = '{';
-    const CHAR_MAP_END: char = '}';
-    const CHAR_TUPLE_BEGIN: char = '(';
-    const CHAR_TUPLE_END: char = ')';
-    const CHAR_MARK_VAR_ARGS: char = '#';
-    const CHAR_ANNOTATIONS_BEGIN: char = '<';
-    const CHAR_ANNOTATIONS_SEP: char = ',';
-    const CHAR_ANNOTATIONS_END: char = '>';
-
-    fn parse_type(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
-        let type_str = iter.as_str();
-        // Multiple characters types are read from the beginning. Therefore we clone the iterator,
-        // read one char, and if we detect any marker of those types, pass the original iterator to
-        // the sub parsing function and return its result immediately.
-        let c = iter.clone().next().ok_or(FromStrError::EndOfInput)?;
-        let multi_chars_type = match c {
-            Self::CHAR_MARK_OPTION => Some(Self::parse_option(iter)?),
-            Self::CHAR_MARK_VAR_ARGS => Some(Self::parse_var_args(iter)?),
-            Self::CHAR_LIST_BEGIN => Some(Self::parse_list(iter)?),
-            Self::CHAR_MAP_BEGIN => Some(Self::parse_map(iter)?),
-            Self::CHAR_TUPLE_BEGIN => Some(Self::parse_tuple(iter)?),
-            _ => None,
-        };
-        if let Some(t) = multi_chars_type {
-            return Ok(t);
-        }
-        // Now all that's left are simple character types, which we already have the value of.
-        // Therefore we can advance the iterator by one.
-        advance_once(iter.by_ref());
-        let t = match c {
-            Self::CHAR_VOID => Type::Unit,
-            Self::CHAR_BOOL => Type::Bool,
-            Self::CHAR_INT8 => Type::Int8,
-            Self::CHAR_UINT8 => Type::UInt8,
-            Self::CHAR_INT16 => Type::Int16,
-            Self::CHAR_UINT16 => Type::UInt16,
-            Self::CHAR_INT32 => Type::Int32,
-            Self::CHAR_UINT32 => Type::UInt32,
-            Self::CHAR_INT64 => Type::Int64,
-            Self::CHAR_UINT64 => Type::UInt64,
-            Self::CHAR_FLOAT => Type::Float32,
-            Self::CHAR_DOUBLE => Type::Float64,
-            Self::CHAR_STRING => Type::String,
-            Self::CHAR_RAW => Type::Raw,
-            Self::CHAR_OBJECT => Type::Object,
-            Self::CHAR_DYNAMIC => Type::Dynamic,
-            // Anything else is unexpected.
-            c => return Err(FromStrError::UnexpectedChar(c, type_str.to_owned())),
-        };
-        Ok(t)
-    }
-
-    fn parse_option(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
-        let option_str = iter.as_str();
-        advance_once(iter.by_ref());
-        let value = match Self::parse_type(iter) {
-            Ok(t) => t,
-            Err(err) => {
-                return Err(match err {
-                    FromStrError::EndOfInput => {
-                        FromStrError::MissingOptionValueType(option_str.to_owned())
-                    }
-                    _ => FromStrError::OptionValueTypeParsing(Box::new(err)),
-                })
-            }
-        };
-        Ok(Type::Option(Box::new(value)))
-    }
-
-    fn parse_var_args(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
-        let var_args_str = iter.as_str();
-        advance_once(iter.by_ref());
-        let value_type = match Self::parse_type(iter) {
-            Ok(t) => t,
-            Err(err) => {
-                return Err(match err {
-                    FromStrError::EndOfInput => {
-                        FromStrError::MissingVarArgsValueType(var_args_str.to_owned())
-                    }
-                    _ => FromStrError::VarArgsValueTypeParsing(Box::new(err)),
-                })
-            }
-        };
-        Ok(Type::VarArgs(Box::new(value_type)))
-    }
-
-    fn parse_list(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
-        let list_str = iter.as_str();
-        advance_once(iter.by_ref());
-        let value = match Self::parse_type(iter) {
-            Ok(t) => t,
-            Err(err) => {
-                return Err(match err {
-                    FromStrError::UnexpectedChar(Self::CHAR_LIST_END, _)
-                    | FromStrError::EndOfInput => {
-                        FromStrError::MissingListValueType(list_str.to_owned())
-                    }
-                    _ => FromStrError::ListValueTypeParsing(Box::new(err)),
-                })
-            }
-        };
-        if iter.clone().next() != Some(Self::CHAR_LIST_END) {
-            return Err(FromStrError::MissingListEnd(list_str.to_owned()));
-        }
-        advance_once(iter);
-        Ok(Type::List(Box::new(value)))
-    }
-
-    fn parse_map(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
-        let map_str = iter.as_str();
-        advance_once(iter.by_ref());
-        let key = match Self::parse_type(iter) {
-            Ok(t) => t,
-            Err(err) => {
-                return Err(match err {
-                    FromStrError::UnexpectedChar(Self::CHAR_MAP_END, _)
-                    | FromStrError::EndOfInput => {
-                        FromStrError::MissingMapKeyType(map_str.to_owned())
-                    }
-                    _ => FromStrError::MapKeyTypeParsing(Box::new(err)),
-                })
-            }
-        };
-        let value = match Self::parse_type(iter) {
-            Ok(t) => t,
-            Err(err) => {
-                return Err(match err {
-                    FromStrError::UnexpectedChar(Self::CHAR_MAP_END, _) => {
-                        FromStrError::MissingMapValueType(map_str.to_owned())
-                    }
-                    _ => FromStrError::MapValueTypeParsing(Box::new(err)),
-                })
-            }
-        };
-        if iter.clone().next() != Some(Self::CHAR_MAP_END) {
-            return Err(FromStrError::MissingMapEnd(map_str.to_owned()));
-        }
-        advance_once(iter.by_ref());
-        Ok(Type::Map {
-            key: Box::new(key),
-            value: Box::new(value),
-        })
-    }
-
-    fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
-        let tuple_str = iter.as_str();
-        advance_once(iter.by_ref());
-        let mut elements = Vec::new();
-        let elements = loop {
-            match Self::parse_type(iter) {
-                Ok(element) => elements.push(element),
-                Err(err) => match err {
-                    FromStrError::UnexpectedChar(Self::CHAR_TUPLE_END, _) => break elements,
-                    FromStrError::EndOfInput => {
-                        return Err(FromStrError::MissingTupleEnd(tuple_str.to_owned()))
-                    }
-                    _ => return Err(FromStrError::TupleElementTypeParsing(Box::new(err))),
-                },
-            }
-        };
-
-        let tuple = {
-            match iter.clone().next() {
-                Some(Signature::CHAR_ANNOTATIONS_BEGIN) => {
-                    let annotations_str = iter.as_str();
-                    let annotations = match Self::parse_tuple_annotations(iter) {
-                        Ok(annotations) => annotations,
-                        Err(err) => {
-                            return Err(FromStrError::Annotations {
-                                annotations: annotations_str.to_owned(),
-                                structure: tuple_str.to_owned(),
-                                source: err,
-                            })
-                        }
-                    };
-                    if let Some(annotations) = &annotations {
-                        let field_count = annotations.fields.len();
-                        if field_count != elements.len() {
-                            return Err(FromStrError::Annotations {
-                                annotations: annotations_str.to_owned(),
-                                structure: tuple_str.to_owned(),
-                                source: AnnotationsError::BadLength {
-                                    expected: elements.len(),
-                                    actual: field_count,
-                                },
-                            });
-                        }
-                    }
-                    Type::Tuple {
-                        elements,
-                        annotations,
-                    }
-                }
-                _ => Type::Tuple {
-                    elements,
-                    annotations: None,
-                },
-            }
-        };
-
-        Ok(tuple)
-    }
-
-    fn parse_tuple_annotations(
-        iter: &mut std::str::Chars,
-    ) -> Result<Option<Annotations>, AnnotationsError> {
-        advance_once(iter.by_ref());
-        enum Accumulator {
-            Name(Option<String>),
-            Field {
-                name: Option<String>,
-                previous_fields: Vec<String>,
-                current: Option<String>,
-            },
-        }
-        impl Accumulator {
-            fn new() -> Self {
-                Self::Name(None)
-            }
-            fn push_char(&mut self, c: char) {
-                match self {
-                    Self::Name(s) | Self::Field { current: s, .. } => match s {
-                        Some(s) => s.push(c),
-                        None => *s = Some(String::from(c)),
-                    },
-                }
-            }
-            fn next(self) -> Self {
-                match self {
-                    Self::Name(name) => Self::Field {
-                        name,
-                        previous_fields: Vec::new(),
-                        current: None,
-                    },
-                    Self::Field {
-                        name,
-                        mut previous_fields,
-                        current,
-                    } => {
-                        if let Some(field) = current {
-                            previous_fields.push(field)
-                        }
-                        Self::Field {
-                            name,
-                            previous_fields,
-                            current: None,
-                        }
-                    }
-                }
-            }
-
-            fn end(self) -> Option<Annotations> {
-                match self {
-                    Self::Name(None) | Self::Field { name: None, .. } => None,
-                    Self::Name(Some(name)) => Some(Annotations {
-                        name,
-                        fields: vec![],
-                    }),
-                    Self::Field {
-                        name: Some(name),
-                        previous_fields: mut fields,
-                        current,
-                    } => Some({
-                        if let Some(field) = current {
-                            fields.push(field);
-                        }
-                        Annotations { name, fields }
-                    }),
-                }
-            }
-        }
-        let annotations = {
-            let mut accu = Accumulator::new();
-            loop {
-                match iter.next() {
-                    Some(Self::CHAR_ANNOTATIONS_SEP) => accu = accu.next(),
-                    Some(Self::CHAR_ANNOTATIONS_END) => break accu.end(),
-                    Some(c) if c.is_ascii() && (c.is_alphanumeric() || c == '_') => {
-                        accu.push_char(c)
-                    }
-                    Some(c) if c == ' ' => { /* spaces are ignored */ }
-                    Some(c) => return Err(AnnotationsError::UnexpectedChar(c)),
-                    None => return Err(AnnotationsError::MissingTupleAnnotationEnd),
-                }
-            }
-        };
-        Ok(annotations)
-    }
-}
-
-fn write_type(t: &Type, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    use std::fmt::Write;
-    match t {
-        Type::Unit => f.write_char(Signature::CHAR_VOID),
-        Type::Bool => f.write_char(Signature::CHAR_BOOL),
-        Type::Int8 => f.write_char(Signature::CHAR_INT8),
-        Type::UInt8 => f.write_char(Signature::CHAR_UINT8),
-        Type::Int16 => f.write_char(Signature::CHAR_INT16),
-        Type::UInt16 => f.write_char(Signature::CHAR_UINT16),
-        Type::Int32 => f.write_char(Signature::CHAR_INT32),
-        Type::UInt32 => f.write_char(Signature::CHAR_UINT32),
-        Type::Int64 => f.write_char(Signature::CHAR_INT64),
-        Type::UInt64 => f.write_char(Signature::CHAR_UINT64),
-        Type::Float32 => f.write_char(Signature::CHAR_FLOAT),
-        Type::Float64 => f.write_char(Signature::CHAR_DOUBLE),
-        Type::String => f.write_char(Signature::CHAR_STRING),
-        Type::Raw => f.write_char(Signature::CHAR_RAW),
-        Type::Object => f.write_char(Signature::CHAR_OBJECT),
-        Type::Dynamic => f.write_char(Signature::CHAR_DYNAMIC),
-        Type::Option(o) => {
-            f.write_char(Signature::CHAR_MARK_OPTION)?;
-            write_type(o.as_ref(), f)
-        }
-        Type::List(t) => {
-            f.write_char(Signature::CHAR_LIST_BEGIN)?;
-            write_type(t.as_ref(), f)?;
-            f.write_char(Signature::CHAR_LIST_END)
-        }
-        Type::Map { key, value } => {
-            f.write_char(Signature::CHAR_MAP_BEGIN)?;
-            write_type(key.as_ref(), f)?;
-            write_type(value.as_ref(), f)?;
-            f.write_char(Signature::CHAR_MAP_END)
-        }
-        Type::Tuple {
-            elements,
-            annotations,
-        } => {
-            f.write_char(Signature::CHAR_TUPLE_BEGIN)?;
-            for element in elements {
-                write_type(element, f)?;
-            }
-            f.write_char(Signature::CHAR_TUPLE_END)?;
-            if let Some(annotations) = annotations {
-                f.write_char(Signature::CHAR_ANNOTATIONS_BEGIN)?;
-                f.write_str(&annotations.name)?;
-                for field in &annotations.fields {
-                    write!(f, ",{field}", field = field)?;
-                }
-                f.write_char(Signature::CHAR_ANNOTATIONS_END)?;
-            }
-            Ok(())
-        }
-        Type::VarArgs(t) => {
-            f.write_char(Signature::CHAR_MARK_VAR_ARGS)?;
-            write_type(t, f)
-        }
     }
 }
 
@@ -402,8 +23,383 @@ impl std::str::FromStr for Signature {
 
     fn from_str(src: &str) -> Result<Self, Self::Err> {
         let mut iter = src.chars();
-        Self::parse_type(&mut iter).map(Self)
+        parse_type(&mut iter).map(Self)
     }
+}
+
+const CHAR_VOID: char = 'v';
+const CHAR_BOOL: char = 'b';
+const CHAR_INT8: char = 'c';
+const CHAR_UINT8: char = 'C';
+const CHAR_INT16: char = 'w';
+const CHAR_UINT16: char = 'W';
+const CHAR_INT32: char = 'i';
+const CHAR_UINT32: char = 'I';
+const CHAR_INT64: char = 'l';
+const CHAR_UINT64: char = 'L';
+const CHAR_FLOAT: char = 'f';
+const CHAR_DOUBLE: char = 'd';
+const CHAR_STRING: char = 's';
+const CHAR_RAW: char = 'r';
+const CHAR_OBJECT: char = 'o';
+const CHAR_DYNAMIC: char = 'm';
+const CHAR_MARK_OPTION: char = '+';
+const CHAR_LIST_BEGIN: char = '[';
+const CHAR_LIST_END: char = ']';
+const CHAR_MAP_BEGIN: char = '{';
+const CHAR_MAP_END: char = '}';
+const CHAR_TUPLE_BEGIN: char = '(';
+const CHAR_TUPLE_END: char = ')';
+const CHAR_MARK_VAR_ARGS: char = '#';
+const CHAR_ANNOTATIONS_BEGIN: char = '<';
+const CHAR_ANNOTATIONS_SEP: char = ',';
+const CHAR_ANNOTATIONS_END: char = '>';
+
+fn write_type(t: &Type, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    use std::fmt::Write;
+    match t {
+        Type::Unit => f.write_char(CHAR_VOID),
+        Type::Bool => f.write_char(CHAR_BOOL),
+        Type::Int8 => f.write_char(CHAR_INT8),
+        Type::UInt8 => f.write_char(CHAR_UINT8),
+        Type::Int16 => f.write_char(CHAR_INT16),
+        Type::UInt16 => f.write_char(CHAR_UINT16),
+        Type::Int32 => f.write_char(CHAR_INT32),
+        Type::UInt32 => f.write_char(CHAR_UINT32),
+        Type::Int64 => f.write_char(CHAR_INT64),
+        Type::UInt64 => f.write_char(CHAR_UINT64),
+        Type::Float32 => f.write_char(CHAR_FLOAT),
+        Type::Float64 => f.write_char(CHAR_DOUBLE),
+        Type::String => f.write_char(CHAR_STRING),
+        Type::Raw => f.write_char(CHAR_RAW),
+        Type::Object => f.write_char(CHAR_OBJECT),
+        Type::Dynamic => f.write_char(CHAR_DYNAMIC),
+        Type::Option(o) => {
+            f.write_char(CHAR_MARK_OPTION)?;
+            write_type(o.as_ref(), f)
+        }
+        Type::List(t) => {
+            f.write_char(CHAR_LIST_BEGIN)?;
+            write_type(t.as_ref(), f)?;
+            f.write_char(CHAR_LIST_END)
+        }
+        Type::Map { key, value } => {
+            f.write_char(CHAR_MAP_BEGIN)?;
+            write_type(key.as_ref(), f)?;
+            write_type(value.as_ref(), f)?;
+            f.write_char(CHAR_MAP_END)
+        }
+        Type::Tuple {
+            elements,
+            annotations,
+        } => {
+            f.write_char(CHAR_TUPLE_BEGIN)?;
+            for element in elements {
+                write_type(element, f)?;
+            }
+            f.write_char(CHAR_TUPLE_END)?;
+            if let Some(annotations) = annotations {
+                f.write_char(CHAR_ANNOTATIONS_BEGIN)?;
+                f.write_str(&annotations.name)?;
+                for field in &annotations.fields {
+                    write!(f, ",{field}", field = field)?;
+                }
+                f.write_char(CHAR_ANNOTATIONS_END)?;
+            }
+            Ok(())
+        }
+        Type::VarArgs(t) => {
+            f.write_char(CHAR_MARK_VAR_ARGS)?;
+            write_type(t, f)
+        }
+    }
+}
+
+fn advance_once<I>(mut iter: I)
+where
+    I: Iterator,
+{
+    if iter.next().is_none() {
+        unreachable!(
+            "the precondition over the presence of an element on the iterator is not verified"
+        )
+    }
+}
+
+fn parse_type(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
+    let type_str = iter.as_str();
+    // Multiple characters types are read from the beginning. Therefore we clone the iterator,
+    // read one char, and if we detect any marker of those types, pass the original iterator to
+    // the sub parsing function and return its result immediately.
+    let c = iter.clone().next().ok_or(FromStrError::EndOfInput)?;
+    let multi_chars_type = match c {
+        CHAR_MARK_OPTION => Some(parse_option(iter)?),
+        CHAR_MARK_VAR_ARGS => Some(parse_var_args(iter)?),
+        CHAR_LIST_BEGIN => Some(parse_list(iter)?),
+        CHAR_MAP_BEGIN => Some(parse_map(iter)?),
+        CHAR_TUPLE_BEGIN => Some(parse_tuple(iter)?),
+        _ => None,
+    };
+    if let Some(t) = multi_chars_type {
+        return Ok(t);
+    }
+    // Now all that's left are simple character types, which we already have the value of.
+    // Therefore we can advance the iterator by one.
+    advance_once(iter.by_ref());
+    let t = match c {
+        CHAR_VOID => Type::Unit,
+        CHAR_BOOL => Type::Bool,
+        CHAR_INT8 => Type::Int8,
+        CHAR_UINT8 => Type::UInt8,
+        CHAR_INT16 => Type::Int16,
+        CHAR_UINT16 => Type::UInt16,
+        CHAR_INT32 => Type::Int32,
+        CHAR_UINT32 => Type::UInt32,
+        CHAR_INT64 => Type::Int64,
+        CHAR_UINT64 => Type::UInt64,
+        CHAR_FLOAT => Type::Float32,
+        CHAR_DOUBLE => Type::Float64,
+        CHAR_STRING => Type::String,
+        CHAR_RAW => Type::Raw,
+        CHAR_OBJECT => Type::Object,
+        CHAR_DYNAMIC => Type::Dynamic,
+        // Anything else is unexpected.
+        c => return Err(FromStrError::UnexpectedChar(c, type_str.to_owned())),
+    };
+    Ok(t)
+}
+
+fn parse_option(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
+    let option_str = iter.as_str();
+    advance_once(iter.by_ref());
+    let value = match parse_type(iter) {
+        Ok(t) => t,
+        Err(err) => {
+            return Err(match err {
+                FromStrError::EndOfInput => {
+                    FromStrError::MissingOptionValueType(option_str.to_owned())
+                }
+                _ => FromStrError::OptionValueTypeParsing(Box::new(err)),
+            })
+        }
+    };
+    Ok(Type::Option(Box::new(value)))
+}
+
+fn parse_var_args(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
+    let var_args_str = iter.as_str();
+    advance_once(iter.by_ref());
+    let value_type = match parse_type(iter) {
+        Ok(t) => t,
+        Err(err) => {
+            return Err(match err {
+                FromStrError::EndOfInput => {
+                    FromStrError::MissingVarArgsValueType(var_args_str.to_owned())
+                }
+                _ => FromStrError::VarArgsValueTypeParsing(Box::new(err)),
+            })
+        }
+    };
+    Ok(Type::VarArgs(Box::new(value_type)))
+}
+
+fn parse_list(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
+    let list_str = iter.as_str();
+    advance_once(iter.by_ref());
+    let value = match parse_type(iter) {
+        Ok(t) => t,
+        Err(err) => {
+            return Err(match err {
+                FromStrError::UnexpectedChar(CHAR_LIST_END, _) | FromStrError::EndOfInput => {
+                    FromStrError::MissingListValueType(list_str.to_owned())
+                }
+                _ => FromStrError::ListValueTypeParsing(Box::new(err)),
+            })
+        }
+    };
+    if iter.clone().next() != Some(CHAR_LIST_END) {
+        return Err(FromStrError::MissingListEnd(list_str.to_owned()));
+    }
+    advance_once(iter);
+    Ok(Type::List(Box::new(value)))
+}
+
+fn parse_map(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
+    let map_str = iter.as_str();
+    advance_once(iter.by_ref());
+    let key = match parse_type(iter) {
+        Ok(t) => t,
+        Err(err) => {
+            return Err(match err {
+                FromStrError::UnexpectedChar(CHAR_MAP_END, _) | FromStrError::EndOfInput => {
+                    FromStrError::MissingMapKeyType(map_str.to_owned())
+                }
+                _ => FromStrError::MapKeyTypeParsing(Box::new(err)),
+            })
+        }
+    };
+    let value = match parse_type(iter) {
+        Ok(t) => t,
+        Err(err) => {
+            return Err(match err {
+                FromStrError::UnexpectedChar(CHAR_MAP_END, _) => {
+                    FromStrError::MissingMapValueType(map_str.to_owned())
+                }
+                _ => FromStrError::MapValueTypeParsing(Box::new(err)),
+            })
+        }
+    };
+    if iter.clone().next() != Some(CHAR_MAP_END) {
+        return Err(FromStrError::MissingMapEnd(map_str.to_owned()));
+    }
+    advance_once(iter.by_ref());
+    Ok(Type::Map {
+        key: Box::new(key),
+        value: Box::new(value),
+    })
+}
+
+fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
+    let tuple_str = iter.as_str();
+    advance_once(iter.by_ref());
+    let mut elements = Vec::new();
+    let elements = loop {
+        match parse_type(iter) {
+            Ok(element) => elements.push(element),
+            Err(err) => match err {
+                FromStrError::UnexpectedChar(CHAR_TUPLE_END, _) => break elements,
+                FromStrError::EndOfInput => {
+                    return Err(FromStrError::MissingTupleEnd(tuple_str.to_owned()))
+                }
+                _ => return Err(FromStrError::TupleElementTypeParsing(Box::new(err))),
+            },
+        }
+    };
+
+    let tuple = {
+        match iter.clone().next() {
+            Some(CHAR_ANNOTATIONS_BEGIN) => {
+                let annotations_str = iter.as_str();
+                let annotations = match parse_tuple_annotations(iter) {
+                    Ok(annotations) => annotations,
+                    Err(err) => {
+                        return Err(FromStrError::Annotations {
+                            annotations: annotations_str.to_owned(),
+                            structure: tuple_str.to_owned(),
+                            source: err,
+                        })
+                    }
+                };
+                if let Some(annotations) = &annotations {
+                    let field_count = annotations.fields.len();
+                    if field_count != 0 && field_count != elements.len() {
+                        return Err(FromStrError::Annotations {
+                            annotations: annotations_str.to_owned(),
+                            structure: tuple_str.to_owned(),
+                            source: AnnotationsError::BadLength {
+                                expected: elements.len(),
+                                actual: field_count,
+                            },
+                        });
+                    }
+                }
+                Type::Tuple {
+                    elements,
+                    annotations,
+                }
+            }
+            _ => Type::Tuple {
+                elements,
+                annotations: None,
+            },
+        }
+    };
+
+    Ok(tuple)
+}
+
+fn parse_tuple_annotations(
+    iter: &mut std::str::Chars,
+) -> Result<Option<Annotations>, AnnotationsError> {
+    advance_once(iter.by_ref());
+    enum Accumulator {
+        Name(Option<String>),
+        Field {
+            name: Option<String>,
+            previous_fields: Vec<String>,
+            current: Option<String>,
+        },
+    }
+    impl Accumulator {
+        fn new() -> Self {
+            Self::Name(None)
+        }
+        fn push_char(&mut self, c: char) {
+            match self {
+                Self::Name(s) | Self::Field { current: s, .. } => match s {
+                    Some(s) => s.push(c),
+                    None => *s = Some(String::from(c)),
+                },
+            }
+        }
+        fn next(self) -> Self {
+            match self {
+                Self::Name(name) => Self::Field {
+                    name,
+                    previous_fields: Vec::new(),
+                    current: None,
+                },
+                Self::Field {
+                    name,
+                    mut previous_fields,
+                    current,
+                } => {
+                    if let Some(field) = current {
+                        previous_fields.push(field)
+                    }
+                    Self::Field {
+                        name,
+                        previous_fields,
+                        current: None,
+                    }
+                }
+            }
+        }
+
+        fn end(self) -> Option<Annotations> {
+            match self {
+                Self::Name(None) | Self::Field { name: None, .. } => None,
+                Self::Name(Some(name)) => Some(Annotations {
+                    name,
+                    fields: vec![],
+                }),
+                Self::Field {
+                    name: Some(name),
+                    previous_fields: mut fields,
+                    current,
+                } => Some({
+                    if let Some(field) = current {
+                        fields.push(field);
+                    }
+                    Annotations { name, fields }
+                }),
+            }
+        }
+    }
+    let annotations = {
+        let mut accu = Accumulator::new();
+        loop {
+            match iter.next() {
+                Some(CHAR_ANNOTATIONS_SEP) => accu = accu.next(),
+                Some(CHAR_ANNOTATIONS_END) => break accu.end(),
+                Some(c) if c.is_ascii() && (c.is_alphanumeric() || c == '_') => accu.push_char(c),
+                Some(c) if c == ' ' => { /* spaces are ignored */ }
+                Some(c) => return Err(AnnotationsError::UnexpectedChar(c)),
+                None => return Err(AnnotationsError::MissingTupleAnnotationEnd),
+            }
+        }
+    };
+    Ok(annotations)
 }
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
@@ -425,12 +421,6 @@ pub enum FromStrError {
 
     #[error("parsing of varargs value type failed")]
     VarArgsValueTypeParsing(#[source] Box<FromStrError>),
-
-    #[error("value type of kwargs starting at input \"{0}\" is missing")]
-    MissingKwArgsValueType(String),
-
-    #[error("parsing of kwargs value type failed")]
-    KwArgsValueTypeParsing(#[source] Box<FromStrError>),
 
     #[error("value type of list starting at input \"{0}\" is missing")]
     MissingListValueType(String),
@@ -690,17 +680,6 @@ mod tests {
         assert_eq!(
             "#[".parse::<Signature>(),
             Err(FromStrError::VarArgsValueTypeParsing(Box::new(
-                FromStrError::MissingListValueType("[".to_owned())
-            )))
-        );
-        // KwArgs
-        assert_eq!(
-            "~".parse::<Signature>(),
-            Err(FromStrError::MissingKwArgsValueType("~".to_owned()))
-        );
-        assert_eq!(
-            "~[".parse::<Signature>(),
-            Err(FromStrError::KwArgsValueTypeParsing(Box::new(
                 FromStrError::MissingListValueType("[".to_owned())
             )))
         );
