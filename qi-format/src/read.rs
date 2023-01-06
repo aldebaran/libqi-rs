@@ -236,16 +236,16 @@ mod tests {
     #[test]
     fn test_io_read_string() {
         let mut read = IoRead::new(&[3, 0, 0, 0, 97, 98, 99, 2, 0, 0, 0, 1, 2][..]);
-        assert_matches!(read.read_string(), Ok(s) => s == String::from("abc"));
-        assert_matches!(read.read_string(), Ok(s) => s == String::from_bytes(&[1, 2]));
+        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, "abc"));
+        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, String::from_bytes(&[1, 2])));
         assert_matches!(read.read_string(), Err(Error::Io(_)));
     }
 
     #[test]
     fn test_io_read_raw() {
         let mut read = IoRead::new(&[3, 0, 0, 0, 97, 98, 99, 2, 0, 0, 0, 1, 2][..]);
-        assert_matches!(read.read_raw(), Ok(s) => s == Raw::from_bytes(&[97, 98, 99]));
-        assert_matches!(read.read_raw(), Ok(s) => s == Raw::from_bytes(&[1, 2]));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, [97, 98, 99]));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, [1, 2]));
         assert_matches!(read.read_raw(), Err(Error::Io(_)));
     }
 
@@ -269,18 +269,18 @@ mod tests {
     #[test]
     fn test_slice_read_string() {
         let mut read = SliceRead::new(&[1, 0, 0, 0, 100, 1, 0, 0, 0, 1, 0, 0, 0, 0]);
-        assert_matches!(read.read_string(), Ok(s) => s == String::from("d"));
-        assert_matches!(read.read_string(), Ok(s) => s == String::from(&[1][..]));
-        assert_matches!(read.read_string(), Ok(s) => s == String::new());
+        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, "d"));
+        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, String::from(&[1][..])));
+        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, String::new()));
         assert_matches!(read.read_string(), Err(Error::Io(_)));
     }
 
     #[test]
     fn test_slice_read_raw() {
         let mut read = SliceRead::new(&[1, 0, 0, 0, 100, 1, 0, 0, 0, 1, 0, 0, 0, 0]);
-        assert_matches!(read.read_raw(), Ok(s) => s == Raw::from_bytes(&[100]));
-        assert_matches!(read.read_raw(), Ok(s) => s == Raw::from_bytes(&[1]));
-        assert_matches!(read.read_raw(), Ok(s) => s == Raw::from_bytes(&[]));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, [100]));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, [1]));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, []));
         assert_matches!(read.read_raw(), Err(Error::Io(_)));
     }
 
