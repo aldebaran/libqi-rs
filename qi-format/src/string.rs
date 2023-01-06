@@ -30,7 +30,7 @@ impl<'s> String<'s> {
     /// Constructs an empty string.
     ///
     /// The resulting string is equal to the result of converting an empty string literal to
-    /// `String`.
+    /// a string.
     ///
     /// # Example:
     ///
@@ -269,9 +269,9 @@ impl<'s> From<std::string::String> for String<'s> {
 /// ```
 impl<'s> From<Raw<'s>> for String<'s> {
     fn from(r: Raw<'s>) -> Self {
-        match r.0 {
-            Cow::Borrowed(bytes) => Self::from_bytes(bytes),
-            Cow::Owned(buf) => Self::from_byte_buf(buf),
+        match r.as_borrowed_bytes() {
+            Some(b) => Self::from_bytes(b),
+            None => Self::from_byte_buf(r.into_byte_buf()),
         }
     }
 }
@@ -594,7 +594,7 @@ mod tests {
 
     #[test]
     fn test_string_deserializer() {
-        use serde::de::{Deserialize, IntoDeserializer};
+        use serde::de::IntoDeserializer;
         use serde_bytes::{ByteBuf, Bytes};
         assert_matches!(
             {
@@ -642,14 +642,19 @@ mod tests {
 
     #[test]
     fn test_string_deserializer_ref() {
-        // ref into deserializer
         let s = &String::from_borrowed_str("abc");
         assert_matches!(<&str>::deserialize(s.into_deserializer()), Ok("abc"));
         let s = &String::from_string("abc".to_owned());
         assert_matches!(<&str>::deserialize(s.into_deserializer()), Ok("abc"));
-        let s = &String::from_bytes(&[1, 2, 3]);
-        assert_matches!(<&[u8]>::deserialize(s.into_deserializer()), Ok([1, 2, 3]));
-        let s = &String::from_byte_buf(vec![1, 2, 3]);
-        assert_matches!(<&[u8]>::deserialize(s.into_deserializer()), Ok([1, 2, 3]));
+        let s = &String::from_bytes(&[0, 159, 146, 150]);
+        assert_matches!(
+            <&[u8]>::deserialize(s.into_deserializer()),
+            Ok([0, 159, 146, 150])
+        );
+        let s = &String::from_byte_buf(vec![0, 159, 146, 150]);
+        assert_matches!(
+            <&[u8]>::deserialize(s.into_deserializer()),
+            Ok([0, 159, 146, 150])
+        );
     }
 }

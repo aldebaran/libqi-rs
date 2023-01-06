@@ -1,6 +1,5 @@
 use crate::Error;
 use derive_more::{AsRef, Index, IndexMut, Into};
-use derive_new::new;
 use std::borrow::Cow;
 
 /// A `qi` raw value.
@@ -14,25 +13,74 @@ use std::borrow::Cow;
 /// data when required (see the [`is_borrowed`](Self::is_borrowed) and
 /// [`into_owned`](Self::into_owned) member functions).
 #[derive(
-    new, Default, Clone, Into, PartialEq, Eq, PartialOrd, Ord, Index, IndexMut, AsRef, Hash, Debug,
+    Default, Clone, Into, PartialEq, Eq, PartialOrd, Ord, Index, IndexMut, AsRef, Hash, Debug,
 )]
 #[into(owned, ref, ref_mut)]
 #[as_ref(forward)]
-pub struct Raw<'r>(pub(crate) Cow<'r, [u8]>);
+pub struct Raw<'r>(Cow<'r, [u8]>);
 
 impl<'r> Raw<'r> {
+    /// Constructs an empty raw value.
+    ///
+    /// The resulting raw value is equal to the result of converting an empty slice of bytes to a
+    /// raw value.
+    ///
+    /// # Example:
+    ///
+    /// ```
+    /// # use qi_format::Raw;
+    /// assert_eq!(Raw::new(), Raw::from(&[]));
+    /// ```
+    pub fn new() -> Self {
+        Self(Cow::default())
+    }
+
+    /// Constructs a raw value from a slice of bytes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use qi_format::Raw;
+    /// assert_eq!(Raw::from_bytes(&[1, 2, 3]).as_ref(),
+    ///            &[1, 2, 3]);
+    /// ```
     pub fn from_bytes(bytes: &'r [u8]) -> Self {
         Self(Cow::Borrowed(bytes))
     }
 
+    /// Constructs a raw value from a buffer of bytes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use qi_format::Raw;
+    /// assert_eq!(Raw::from_byte_buf(vec![1, 2, 3]).as_ref(),
+    ///            &[1, 2, 3]);
+    /// ```
     pub fn from_byte_buf(buf: Vec<u8>) -> Self {
         Self(Cow::Owned(buf))
     }
 
+    /// Returns the slice of bytes that compose the raw value.
+    ///
+    /// # Example
+    /// ```
+    /// # use qi_format::Raw;
+    /// assert_eq!(Raw::from(&[1, 2, 3]).as_bytes(),
+    ///            &[1, 2, 3]);
+    /// ```
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
+    /// Returns true if the raw value data is borrowed.
+    ///
+    /// # Example
+    /// ```
+    /// # use qi_format::Raw;
+    /// assert!(Raw::from_bytes(&[1, 2, 3]).is_borrowed());
+    /// assert!(!Raw::from_byte_buf(vec![1, 2, 3]).is_borrowed());
+    /// ```
     pub fn is_borrowed(&self) -> bool {
         match &self.0 {
             Cow::Borrowed(_) => true,
@@ -40,8 +88,40 @@ impl<'r> Raw<'r> {
         }
     }
 
+    /// Converts the raw value into one that owns its data.
+    ///
+    /// # Example
+    /// ```
+    /// # use qi_format::Raw;
+    /// let owned_buf = vec![1, 2, 3];
+    /// let borrowed_raw = Raw::from_bytes(&owned_buf);
+    /// let owned_raw = borrowed_raw.clone().into_owned();
+    ///
+    /// assert_eq!(borrowed_raw, [1, 2, 3]);
+    /// assert_eq!(owned_raw, [1, 2, 3]);
+    ///
+    /// // Dropping the source buffer that owns the original data.
+    /// drop(owned_buf);
+    ///
+    /// // assert_eq!(borrowed_raw, [1, 2, 3]); // error: borrowing a dropped value.
+    /// assert_eq!(owned_raw, [1, 2, 3]); // no problem, this one owns its data.
+    /// ```
     pub fn into_owned(self) -> Raw<'static> {
         Raw(Cow::Owned(self.0.into_owned()))
+    }
+
+    pub fn as_borrowed_bytes(&self) -> Option<&'r [u8]> {
+        match self.0 {
+            Cow::Borrowed(b) => Some(b),
+            Cow::Owned(_) => None,
+        }
+    }
+
+    pub fn into_byte_buf(self) -> Vec<u8> {
+        match self.0 {
+            Cow::Borrowed(b) => Vec::from(b),
+            Cow::Owned(b) => b,
+        }
     }
 }
 
@@ -54,6 +134,18 @@ impl<'r, const N: usize> From<&'r [u8; N]> for Raw<'r> {
 impl<'r> From<&'r [u8]> for Raw<'r> {
     fn from(bytes: &'r [u8]) -> Self {
         Self::from_bytes(bytes)
+    }
+}
+
+impl<'r> From<&'r Raw<'r>> for &'r [u8] {
+    fn from(r: &'r Raw<'r>) -> Self {
+        r.as_ref()
+    }
+}
+
+impl<'r> From<Raw<'r>> for Vec<u8> {
+    fn from(r: Raw<'r>) -> Self {
+        r.into_byte_buf()
     }
 }
 
@@ -124,20 +216,49 @@ impl<'r> IntoIterator for &'r Raw<'r> {
 }
 
 impl<'r> serde::Serialize for Raw<'r> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        todo!()
+        serializer.serialize_bytes(&self.0)
     }
 }
 
 impl<'de> serde::Deserialize<'de> for Raw<'de> {
-    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        todo!()
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = Raw<'de>;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a raw value")
+            }
+
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(Raw::from_byte_buf(v.to_owned()))
+            }
+
+            fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(Raw::from_bytes(v))
+            }
+
+            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(Raw::from_byte_buf(v))
+            }
+        }
+        deserializer.deserialize_byte_buf(Visitor)
     }
 }
 
@@ -228,8 +349,48 @@ impl<'de> serde::de::IntoDeserializer<'de, Error> for &'de Raw<'de> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use assert_matches::assert_matches;
+    use serde::de::{Deserialize, IntoDeserializer};
+
     #[test]
     fn test_raw_deserializer() {
-        todo!()
+        use serde_bytes::{ByteBuf, Bytes};
+        assert_matches!(
+            {
+                let s = Raw::from_bytes(&[1, 2, 3, 4]);
+                <&[u8]>::deserialize(s.into_deserializer())
+            },
+            Ok([1, 2, 3, 4])
+        );
+        assert_matches!(
+            {
+                let s = Raw::from_bytes(&[1, 2, 3, 4]);
+                <&Bytes>::deserialize(s.into_deserializer())
+            },
+            Ok(b) => assert_eq!(b, &[1, 2, 3, 4])
+        );
+        assert_matches!(
+            {
+                let s = Raw::from_byte_buf(vec![1, 2, 3, 4]);
+                <Vec<u8>>::deserialize(s.into_deserializer())
+            },
+            Ok(v) => assert_eq!(v, [1, 2, 3, 4])
+        );
+        assert_matches!(
+            {
+                let s = Raw::from_byte_buf(vec![1, 2, 3, 4]);
+                <ByteBuf>::deserialize(s.into_deserializer())
+            },
+            Ok(buf) => assert_eq!(buf, [1, 2, 3, 4])
+        );
+    }
+
+    #[test]
+    fn test_raw_deserializer_ref() {
+        let s = &Raw::from_bytes(&[1, 2, 3]);
+        assert_matches!(<&[u8]>::deserialize(s.into_deserializer()), Ok([1, 2, 3]));
+        let s = &Raw::from_byte_buf(vec![1, 2, 3]);
+        assert_matches!(<&[u8]>::deserialize(s.into_deserializer()), Ok([1, 2, 3]));
     }
 }
