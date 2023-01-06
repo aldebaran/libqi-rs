@@ -1,5 +1,5 @@
 use crate::Value;
-use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Index, IndexMut, Into, IntoIterator};
+use derive_more::{AsMut, AsRef, Deref, From, Index, IndexMut, Into, IntoIterator};
 use derive_new::new;
 
 /// # Serialization / Deserialization
@@ -37,9 +37,7 @@ impl<'de> serde::Deserialize<'de> for Unit {
 /// deserializing a builtin tuple instead.
 ///
 /// ```
-/// # use qi_format::Result;
-/// use qi_format::from_bytes;
-///
+/// # use qi_format::{from_bytes, Result};
 /// # fn main() -> Result<()> {
 /// let bytes = [1, 0, 2, 0, 3, 0];
 /// let values : (i16, i16, i16) = from_bytes(&bytes)?;
@@ -51,9 +49,7 @@ impl<'de> serde::Deserialize<'de> for Unit {
 /// You can however deserialize a tuple out of an annotated value.
 ///
 /// ```
-/// # use qi_format::{Result, Tuple};
-/// use qi_format::{from_bytes, AnnotatedValue, Number, Value};
-///
+/// # use qi_format::{from_bytes, AnnotatedValue, Number, Value, Result, Tuple};
 /// # fn main() -> Result<()> {
 /// let bytes = [3, 0, 0, 0, 40, 105, 105, 41, 10, 20];
 /// let annotated_value : AnnotatedValue = from_bytes(&bytes)?;
@@ -87,7 +83,6 @@ impl<'de> serde::Deserialize<'de> for Unit {
     AsRef,
     AsMut,
     Deref,
-    DerefMut,
     Hash,
     Debug,
 )]
@@ -185,22 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tuple_elements() {
-        todo!()
-    }
-
-    #[test]
-    fn test_tuple_elements_mut() {
-        todo!()
-    }
-
-    #[test]
     fn test_tuple_serde() {
-        todo!()
-    }
-
-    #[test]
-    fn test_tuple_ser_de() {
         assert_tokens(
             &Tuple(vec![
                 Value::from(32i16),
