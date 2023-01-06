@@ -37,10 +37,10 @@ impl<'de> serde::Deserialize<'de> for Unit {
 /// deserializing a builtin tuple instead.
 ///
 /// ```
-/// # use qi_format::{Error, value::*};
+/// # use qi_format::Result;
 /// use qi_format::from_bytes;
 ///
-/// # fn main() -> Result<(), Error> {
+/// # fn main() -> Result<()> {
 /// let bytes = [1, 0, 2, 0, 3, 0];
 /// let values : (i16, i16, i16) = from_bytes(&bytes)?;
 /// assert_eq!(values, (1, 2, 3));
@@ -51,17 +51,17 @@ impl<'de> serde::Deserialize<'de> for Unit {
 /// You can however deserialize a tuple out of an annotated value.
 ///
 /// ```
-/// # use qi_format::{Error, value::*};
-/// use qi_format::from_bytes;
+/// # use qi_format::{Result, Tuple};
+/// use qi_format::{from_bytes, AnnotatedValue, Number, Value};
 ///
-/// # fn main() -> Result<(), Error> {
+/// # fn main() -> Result<()> {
 /// let bytes = [3, 0, 0, 0, 40, 105, 105, 41, 10, 20];
 /// let annotated_value : AnnotatedValue = from_bytes(&bytes)?;
 /// let value = annotated_value.into_value();
 /// assert_eq!(value.as_tuple(),
 ///            Some(&Tuple::new(vec![
-///                Value::Int32(10),
-///                Value::Int32(20)
+///                Value::Number(Number::Int32(10)),
+///                Value::Number(Number::Int32(20))
 ///            ])));
 /// # Ok(())
 /// # }
