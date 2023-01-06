@@ -252,7 +252,21 @@ mod tests {
         write_f32(&mut buf, 1.0).unwrap();
         assert_eq!(buf, [0, 0, 128, 63]);
 
-        todo!("nan, +-infinity, +-0");
+        let mut buf = Vec::new();
+        write_f32(&mut buf, f32::INFINITY).unwrap();
+        assert_eq!(buf, [0x00, 0x00, 0x80, 0x7f]);
+
+        let mut buf = Vec::new();
+        write_f32(&mut buf, f32::NEG_INFINITY).unwrap();
+        assert_eq!(buf, [0x00, 0x00, 0x80, 0xff]);
+
+        let mut buf = Vec::new();
+        write_f32(&mut buf, 0.).unwrap();
+        assert_eq!(buf, [0x00, 0x00, 0x00, 0x00]);
+
+        let mut buf = Vec::new();
+        write_f32(&mut buf, -0.).unwrap();
+        assert_eq!(buf, [0x00, 0x00, 0x00, 0x80]);
     }
 
     #[test]
@@ -260,7 +274,22 @@ mod tests {
         let mut buf = Vec::new();
         write_f64(&mut buf, 1.0).unwrap();
         assert_eq!(buf, [0, 0, 0, 0, 0, 0, 240, 63]);
-        todo!("nan, +-infinity, +-0");
+
+        let mut buf = Vec::new();
+        write_f64(&mut buf, f64::INFINITY).unwrap();
+        assert_eq!(buf, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x7f]);
+
+        let mut buf = Vec::new();
+        write_f64(&mut buf, f64::NEG_INFINITY).unwrap();
+        assert_eq!(buf, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0xff]);
+
+        let mut buf = Vec::new();
+        write_f64(&mut buf, 0.).unwrap();
+        assert_eq!(buf, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+
+        let mut buf = Vec::new();
+        write_f64(&mut buf, -0.).unwrap();
+        assert_eq!(buf, [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]);
     }
 
     #[test]
