@@ -1,12 +1,16 @@
-use crate::{Type, TypeAnnotations as Annotations};
+use crate::typing::{self, Tuple, TupleAnnotations, Type};
 use derive_more::{From, Into};
 use derive_new::new;
 
 #[derive(new, Debug, Default, PartialEq, Eq, Clone, From, Into)]
 #[into(owned, ref, ref_mut)]
-pub struct Signature(pub(crate) Type);
+pub struct Signature(Type);
 
 impl Signature {
+    pub fn from_type(t: Type) -> Self {
+        Self(t)
+    }
+
     pub fn into_type(self) -> Type {
         self.0
     }
@@ -89,20 +93,19 @@ fn write_type(t: &Type, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write_type(value.as_ref(), f)?;
             f.write_char(CHAR_MAP_END)
         }
-        Type::Tuple {
-            elements,
-            annotations,
-        } => {
+        Type::Tuple(tuple) => {
             f.write_char(CHAR_TUPLE_BEGIN)?;
-            for element in elements {
+            for element in tuple.element_types() {
                 write_type(element, f)?;
             }
             f.write_char(CHAR_TUPLE_END)?;
-            if let Some(annotations) = annotations {
+            if let Some(annotations) = tuple.annotations() {
                 f.write_char(CHAR_ANNOTATIONS_BEGIN)?;
                 f.write_str(&annotations.name)?;
-                for field in &annotations.fields {
-                    write!(f, ",{field}", field = field)?;
+                if let Some(fields) = &annotations.fields {
+                    for field in fields {
+                        write!(f, ",{field}", field = field)?;
+                    }
                 }
                 f.write_char(CHAR_ANNOTATIONS_END)?;
             }
@@ -280,38 +283,26 @@ fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
         match iter.clone().next() {
             Some(CHAR_ANNOTATIONS_BEGIN) => {
                 let annotations_str = iter.as_str();
+                let from_str_err_from_annotations_err = |source| FromStrError::Annotations {
+                    annotations: annotations_str.to_owned(),
+                    tuple: tuple_str.to_owned(),
+                    source,
+                };
                 let annotations = match parse_tuple_annotations(iter) {
                     Ok(annotations) => annotations,
-                    Err(err) => {
-                        return Err(FromStrError::Annotations {
-                            annotations: annotations_str.to_owned(),
-                            structure: tuple_str.to_owned(),
-                            source: err,
-                        })
-                    }
+                    Err(err) => return Err(from_str_err_from_annotations_err(err)),
                 };
-                if let Some(annotations) = &annotations {
-                    let field_count = annotations.fields.len();
-                    if field_count != 0 && field_count != elements.len() {
-                        return Err(FromStrError::Annotations {
-                            annotations: annotations_str.to_owned(),
-                            structure: tuple_str.to_owned(),
-                            source: AnnotationsError::BadLength {
-                                expected: elements.len(),
-                                actual: field_count,
-                            },
-                        });
+                let tuple = match annotations {
+                    Some(annotations) => {
+                        Tuple::from_element_types_with_annotations(elements, annotations).map_err(
+                            |err| from_str_err_from_annotations_err(AnnotationsError::Typing(err)),
+                        )?
                     }
-                }
-                Type::Tuple {
-                    elements,
-                    annotations,
-                }
+                    None => Tuple::from_element_types(elements),
+                };
+                Type::Tuple(tuple)
             }
-            _ => Type::Tuple {
-                elements,
-                annotations: None,
-            },
+            _ => Type::Tuple(Tuple::from_element_types(elements)),
         }
     };
 
@@ -320,13 +311,13 @@ fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, FromStrError> {
 
 fn parse_tuple_annotations(
     iter: &mut std::str::Chars,
-) -> Result<Option<Annotations>, AnnotationsError> {
+) -> Result<Option<TupleAnnotations>, AnnotationsError> {
     advance_once(iter.by_ref());
     enum Accumulator {
         Name(Option<String>),
         Field {
             name: Option<String>,
-            previous_fields: Vec<String>,
+            previous_fields: Option<Vec<String>>,
             current: Option<String>,
         },
     }
@@ -346,7 +337,7 @@ fn parse_tuple_annotations(
             match self {
                 Self::Name(name) => Self::Field {
                     name,
-                    previous_fields: Vec::new(),
+                    previous_fields: None,
                     current: None,
                 },
                 Self::Field {
@@ -355,7 +346,7 @@ fn parse_tuple_annotations(
                     current,
                 } => {
                     if let Some(field) = current {
-                        previous_fields.push(field)
+                        previous_fields.get_or_insert_with(Vec::new).push(field)
                     }
                     Self::Field {
                         name,
@@ -366,22 +357,19 @@ fn parse_tuple_annotations(
             }
         }
 
-        fn end(self) -> Option<Annotations> {
+        fn end(self) -> Option<TupleAnnotations> {
             match self {
                 Self::Name(None) | Self::Field { name: None, .. } => None,
-                Self::Name(Some(name)) => Some(Annotations {
-                    name,
-                    fields: vec![],
-                }),
+                Self::Name(Some(name)) => Some(TupleAnnotations { name, fields: None }),
                 Self::Field {
                     name: Some(name),
                     previous_fields: mut fields,
                     current,
                 } => Some({
                     if let Some(field) = current {
-                        fields.push(field);
+                        fields.get_or_insert_with(Vec::new).push(field);
                     }
-                    Annotations { name, fields }
+                    TupleAnnotations { name, fields }
                 }),
             }
         }
@@ -453,11 +441,11 @@ pub enum FromStrError {
     MissingTupleEnd(String),
 
     #[error(
-        "parsing of structure \"{structure}\" annotations starting at input \"{annotations}\" failed: {source}"
+        "parsing of tuple \"{tuple}\" annotations starting at input \"{annotations}\" failed: {source}"
     )]
     Annotations {
         annotations: String,
-        structure: String,
+        tuple: String,
         source: AnnotationsError,
     },
 }
@@ -470,8 +458,8 @@ pub enum AnnotationsError {
     #[error("unexpected character '{0}'")]
     UnexpectedChar(char),
 
-    #[error("expected {expected} annotations but got {actual}")]
-    BadLength { expected: usize, actual: usize },
+    #[error("{0}")]
+    Typing(#[from] typing::TupleAnnotationsError),
 }
 
 impl serde::Serialize for Signature {
@@ -564,13 +552,7 @@ mod tests {
         assert_sig_from_to_str!(Type::Option(Box::new(Type::Unit)), "+v");
         assert_sig_from_to_str!(Type::VarArgs(Box::new(Type::Dynamic)), "#m");
         assert_sig_from_to_str!(Type::List(Box::new(Type::Int32)), "[i]");
-        assert_sig_from_to_str!(
-            Type::List(Box::new(Type::Tuple {
-                elements: vec![],
-                annotations: None
-            })),
-            "[()]"
-        );
+        assert_sig_from_to_str!(Type::List(Box::new(Type::Tuple(Tuple::unit()))), "[()]");
         assert_sig_from_to_str!(
             Type::Map {
                 key: Box::new(Type::Float32),
@@ -579,77 +561,84 @@ mod tests {
             "{fs}"
         );
         assert_sig_from_to_str!(
-            Type::Tuple {
-                elements: vec![Type::Float32, Type::String, Type::UInt32],
-                annotations: None
-            },
+            Type::Tuple(Tuple::from_element_types(vec![
+                Type::Float32,
+                Type::String,
+                Type::UInt32
+            ],)),
             "(fsI)"
         );
         assert_sig_from_to_str!(
-            Type::Tuple {
-                elements: vec![
-                    Type::List(Box::new(Type::Tuple {
-                        elements: vec![Type::Float64, Type::Float64],
-                        annotations: None
-                    })),
-                    Type::UInt64,
-                ],
-                annotations: Some(Annotations {
-                    name: "ExplorationMap".to_owned(),
-                    fields: vec![]
-                })
-            },
+            Type::Tuple(
+                Tuple::from_element_types_with_annotations(
+                    vec![
+                        Type::List(Box::new(Type::Tuple(Tuple::from_element_types(vec![
+                            Type::Float64,
+                            Type::Float64
+                        ])))),
+                        Type::UInt64,
+                    ],
+                    TupleAnnotations {
+                        name: "ExplorationMap".to_owned(),
+                        fields: None,
+                    }
+                )
+                .expect("annotation error")
+            ),
             "([(dd)]L)<ExplorationMap>"
         );
         assert_sig_from_to_str!(
-            Type::Tuple {
-                elements: vec![
-                    Type::List(Box::new(Type::Tuple {
-                        elements: vec![Type::Float64, Type::Float64],
-                        annotations: Some(Annotations {
-                            name: "Point".to_owned(),
-                            fields: vec!["x".to_owned(), "y".to_owned()]
-                        })
-                    })),
-                    Type::UInt64
-                ],
-                annotations: Some(Annotations {
-                    name: "ExplorationMap".to_owned(),
-                    fields: vec!["points".to_owned(), "timestamp".to_owned()]
-                })
-            },
+            Type::Tuple(
+                Tuple::from_element_types_with_annotations(
+                    vec![
+                        Type::List(Box::new(Type::Tuple(
+                            Tuple::from_element_types_with_annotations(
+                                vec![Type::Float64, Type::Float64],
+                                TupleAnnotations {
+                                    name: "Point".to_owned(),
+                                    fields: Some(vec!["x".to_owned(), "y".to_owned()])
+                                }
+                            )
+                            .expect("annotation error")
+                        ))),
+                        Type::UInt64
+                    ],
+                    TupleAnnotations {
+                        name: "ExplorationMap".to_owned(),
+                        fields: Some(vec!["points".to_owned(), "timestamp".to_owned()])
+                    }
+                )
+                .expect("annotation error")
+            ),
             "([(dd)<Point,x,y>]L)<ExplorationMap,points,timestamp>"
         );
         // Underscores in structure and field names are allowed.
         // Spaces between structure or field names are trimmed.
         assert_sig_from_to_str!(
             "(i)<   A_B ,  c_d   >" =>
-            Type::Tuple {
-                elements: vec![Type::Int32],
-                annotations: Some(Annotations {
+            Type::Tuple(Tuple::from_element_types_with_annotations(
+                vec![Type::Int32],
+                TupleAnnotations {
                     name: "A_B".to_owned(),
-                    fields: vec!["c_d".to_owned()],
-                }),
-            } =>
+                    fields: Some(vec!["c_d".to_owned()]),
+                },
+            ).expect("annotation error")) =>
             "(i)<A_B,c_d>"
         );
         // Annotations can be ignored if the struct name is missing.
-        assert_sig_from_to_str!("()<>" => Type::Tuple{ elements: vec![], annotations: None } => "()");
-        assert_sig_from_to_str!("(i)<>" => Type::Tuple{ elements: vec![Type::Int32], annotations: None } => "(i)");
-        assert_sig_from_to_str!("(i)<,,,,,,,>" => Type::Tuple{ elements: vec![Type::Int32], annotations: None } => "(i)");
-        assert_sig_from_to_str!("(ff)<,x,y>" => Type::Tuple{ elements: vec![Type::Float32, Type::Float32], annotations: None } => "(ff)");
+        assert_sig_from_to_str!("()<>" => Type::Tuple(Tuple::unit()) => "()");
+        assert_sig_from_to_str!("(i)<>" => Type::Tuple(Tuple::from_element_types(vec![Type::Int32])) => "(i)");
+        assert_sig_from_to_str!("(i)<,,,,,,,>" => Type::Tuple(Tuple::from_element_types(vec![Type::Int32])) => "(i)");
+        assert_sig_from_to_str!("(ff)<,x,y>" => Type::Tuple(Tuple::from_element_types(vec![Type::Float32, Type::Float32])) => "(ff)");
         // Some complex type for fun.
         assert_sig_from_to_str!(
-            Type::Tuple {
-                elements: vec![
-                    Type::List(Box::new(Type::Map {
-                        key: Box::new(Type::Option(Box::new(Type::Object))),
-                        value: Box::new(Type::Raw),
-                    })),
-                    Type::VarArgs(Box::new(Type::Option(Box::new(Type::Dynamic)))),
-                ],
-                annotations: None,
-            },
+            Type::Tuple(Tuple::from_element_types(vec![
+                Type::List(Box::new(Type::Map {
+                    key: Box::new(Type::Option(Box::new(Type::Object))),
+                    value: Box::new(Type::Raw),
+                })),
+                Type::VarArgs(Box::new(Type::Option(Box::new(Type::Dynamic)))),
+            ],)),
             "([{+or}]#+m)"
         );
     }
@@ -773,7 +762,7 @@ mod tests {
             "(i)<".parse::<Signature>(),
             Err(FromStrError::Annotations {
                 annotations: "<".to_owned(),
-                structure: "(i)<".to_owned(),
+                tuple: "(i)<".to_owned(),
                 source: AnnotationsError::MissingTupleAnnotationEnd
             })
         );
@@ -781,11 +770,11 @@ mod tests {
             "(i)<S,a,b>".parse::<Signature>(),
             Err(FromStrError::Annotations {
                 annotations: "<S,a,b>".to_owned(),
-                structure: "(i)<S,a,b>".to_owned(),
-                source: AnnotationsError::BadLength {
+                tuple: "(i)<S,a,b>".to_owned(),
+                source: AnnotationsError::Typing(typing::TupleAnnotationsError::BadLength {
                     expected: 1,
                     actual: 2
-                },
+                }),
             })
         );
         //   - Only ASCII is supported
@@ -793,7 +782,7 @@ mod tests {
             "(i)<越>".parse::<Signature>(),
             Err(FromStrError::Annotations {
                 annotations: "<越>".to_owned(),
-                structure: "(i)<越>".to_owned(),
+                tuple: "(i)<越>".to_owned(),
                 source: AnnotationsError::UnexpectedChar('越'),
             })
         );
@@ -823,80 +812,98 @@ mod tests {
         let t = sig.into_type();
         assert_eq!(
             t,
-            Type::Tuple {
-                elements: vec![
-                    Type::Map {
-                        key: Box::new(Type::UInt32),
-                        value: Box::new(Type::Tuple {
-                            elements: vec![
-                                Type::UInt32,
-                                Type::String,
-                                Type::String,
-                                Type::String,
-                                Type::String,
-                                Type::List(Box::new(Type::Tuple {
-                                    elements: vec![Type::String, Type::String],
-                                    annotations: Some(Annotations {
-                                        name: "MetaMethodParameter".to_owned(),
-                                        fields: vec!["name".to_owned(), "description".to_owned(),],
-                                    }),
-                                }),),
-                                Type::String,
-                            ],
-                            annotations: Some(Annotations {
-                                name: "MetaMethod".to_owned(),
-                                fields: vec![
-                                    "uid".to_owned(),
-                                    "returnSignature".to_owned(),
-                                    "name".to_owned(),
-                                    "parametersSignature".to_owned(),
-                                    "description".to_owned(),
-                                    "parameters".to_owned(),
-                                    "returnDescription".to_owned(),
-                                ],
-                            }),
-                        })
-                    },
-                    Type::Map {
-                        key: Box::new(Type::UInt32),
-                        value: Box::new(Type::Tuple {
-                            elements: vec![Type::UInt32, Type::String, Type::String],
-                            annotations: Some(Annotations {
-                                name: "MetaSignal".to_owned(),
-                                fields: vec![
-                                    "uid".to_owned(),
-                                    "name".to_owned(),
-                                    "signature".to_owned(),
-                                ],
-                            }),
-                        })
-                    },
-                    Type::Map {
-                        key: Box::new(Type::UInt32),
-                        value: Box::new(Type::Tuple {
-                            elements: vec![Type::UInt32, Type::String, Type::String],
-                            annotations: Some(Annotations {
-                                name: "MetaProperty".to_owned(),
-                                fields: vec![
-                                    "uid".to_owned(),
-                                    "name".to_owned(),
-                                    "signature".to_owned(),
-                                ]
-                            }),
-                        })
-                    },
-                    Type::String,
-                ],
-                annotations: Some(Annotations {
-                    name: "MetaObject".to_owned(),
-                    fields: vec![
-                        "methods".to_owned(),
-                        "signals".to_owned(),
-                        "properties".to_owned(),
-                        "description".to_owned(),
+            Type::Tuple(
+                Tuple::from_element_types_with_annotations(
+                    vec![
+                        Type::Map {
+                            key: Box::new(Type::UInt32),
+                            value: Box::new(Type::Tuple(
+                                Tuple::from_element_types_with_annotations(
+                                    vec![
+                                        Type::UInt32,
+                                        Type::String,
+                                        Type::String,
+                                        Type::String,
+                                        Type::String,
+                                        Type::List(Box::new(Type::Tuple(
+                                            Tuple::from_element_types_with_annotations(
+                                                vec![Type::String, Type::String],
+                                                TupleAnnotations {
+                                                    name: "MetaMethodParameter".to_owned(),
+                                                    fields: Some(vec![
+                                                        "name".to_owned(),
+                                                        "description".to_owned(),
+                                                    ]),
+                                                },
+                                            )
+                                            .expect("annotation error")
+                                        ))),
+                                        Type::String,
+                                    ],
+                                    TupleAnnotations {
+                                        name: "MetaMethod".to_owned(),
+                                        fields: Some(vec![
+                                            "uid".to_owned(),
+                                            "returnSignature".to_owned(),
+                                            "name".to_owned(),
+                                            "parametersSignature".to_owned(),
+                                            "description".to_owned(),
+                                            "parameters".to_owned(),
+                                            "returnDescription".to_owned(),
+                                        ]),
+                                    },
+                                )
+                                .expect("annotation error")
+                            ))
+                        },
+                        Type::Map {
+                            key: Box::new(Type::UInt32),
+                            value: Box::new(Type::Tuple(
+                                Tuple::from_element_types_with_annotations(
+                                    vec![Type::UInt32, Type::String, Type::String],
+                                    TupleAnnotations {
+                                        name: "MetaSignal".to_owned(),
+                                        fields: Some(vec![
+                                            "uid".to_owned(),
+                                            "name".to_owned(),
+                                            "signature".to_owned(),
+                                        ]),
+                                    },
+                                )
+                                .expect("annotation error")
+                            ))
+                        },
+                        Type::Map {
+                            key: Box::new(Type::UInt32),
+                            value: Box::new(Type::Tuple(
+                                Tuple::from_element_types_with_annotations(
+                                    vec![Type::UInt32, Type::String, Type::String],
+                                    TupleAnnotations {
+                                        name: "MetaProperty".to_owned(),
+                                        fields: Some(vec![
+                                            "uid".to_owned(),
+                                            "name".to_owned(),
+                                            "signature".to_owned(),
+                                        ])
+                                    },
+                                )
+                                .expect("annotation error")
+                            ))
+                        },
+                        Type::String,
                     ],
-                }),
-            }
+                    TupleAnnotations {
+                        name: "MetaObject".to_owned(),
+                        fields: Some(vec![
+                            "methods".to_owned(),
+                            "signals".to_owned(),
+                            "properties".to_owned(),
+                            "description".to_owned(),
+                        ]),
+                    },
+                )
+                .expect("annotation error")
+            )
         );
     }
 
@@ -904,13 +911,16 @@ mod tests {
     fn test_signature_ser_de() {
         use serde_test::{assert_tokens, Token};
         assert_tokens(
-            &Signature(Type::Tuple {
-                elements: vec![Type::Float64, Type::Float64],
-                annotations: Some(Annotations {
-                    name: "Point".to_owned(),
-                    fields: vec!["x".to_owned(), "y".to_owned()],
-                }),
-            }),
+            &Signature(Type::Tuple(
+                Tuple::from_element_types_with_annotations(
+                    vec![Type::Float64, Type::Float64],
+                    TupleAnnotations {
+                        name: "Point".to_owned(),
+                        fields: Some(vec!["x".to_owned(), "y".to_owned()]),
+                    },
+                )
+                .expect("annotation error"),
+            )),
             &[Token::Str("(dd)<Point,x,y>")],
         )
     }

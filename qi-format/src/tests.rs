@@ -2,85 +2,10 @@ use super::*;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-struct S0 {
-    u: (),
-    t: (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64),
-    #[serde(with = "serde_bytes")]
-    r: Vec<u8>,
-    o: std::option::Option<bool>,
-    s: S1,
-    l: Vec<std::string::String>,
-    m: BTreeMap<i32, std::string::String>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-struct S1(std::string::String, std::string::String);
-
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-pub struct Serializable(S0);
-
-impl Serializable {
-    pub fn sample() -> Self {
-        Self(S0 {
-            u: (),
-            t: (-8, 8, -16, 16, -32, 32, -64, 64, 32.32, 64.64),
-            r: vec![51, 52, 53, 54],
-            o: Some(false),
-            s: S1("bananas".to_string(), "oranges".to_string()),
-            l: vec!["cookies".to_string(), "muffins".to_string()],
-            m: {
-                let mut m = BTreeMap::new();
-                m.insert(1, "hello".to_string());
-                m.insert(2, "world".to_string());
-                m
-            },
-        })
-    }
-
-    pub fn sample_as_value() -> Value<'static> {
-        use {num_bool::*, value::*};
-        let unit = Value::unit();
-        let tuple = Value::from(Tuple::new(vec![
-            Value::from(Number::Int8(-8)),
-            Value::from(Number::UInt8(8)),
-            Value::from(Number::Int16(-16)),
-            Value::from(Number::UInt16(16)),
-            Value::from(Number::Int32(-32)),
-            Value::from(Number::UInt32(32)),
-            Value::from(Number::Int64(-64)),
-            Value::from(Number::UInt64(64)),
-            Value::from(Number::from(Float32::from(32.32))),
-            Value::from(Number::from(Float64::from(64.64))),
-        ]));
-        let raw = Value::from(Raw::from(vec![51, 52, 53, 54]));
-        let opt = Value::from(Some(Value::from(false)));
-        let s1 = Tuple::new(vec![Value::from("bananas"), Value::from("oranges")]);
-        let structure = Value::from(s1);
-        let list = Value::from(vec![Value::from("cookies"), Value::from("muffins")]);
-        let map = Value::Map(Map::from(vec![
-            (Value::from(1i32), Value::from("hello")),
-            (Value::from(2i32), Value::from("world")),
-        ]));
-        let s0 = Value::from(Tuple::new(vec![
-            unit, tuple, raw, opt, structure, list, map,
-        ]));
-        Value::from(Tuple::new(vec![s0]))
-    }
-}
-
 #[test]
-fn test_to_from_bytes_serializable() {
-    let sample = Serializable::sample();
-    let bytes = to_bytes(&sample).unwrap();
-    let sample2: Serializable = from_bytes(&bytes).unwrap();
-    assert_eq!(sample, sample2);
-}
-
-#[test]
-fn test_metaobject_value_from_bytes() {
+fn test_metaobject_to_from_bytes() {
     // A MetaObject taken from a TCP dump of libqi tests.
-    let bytes = vec![
+    let _bytes = vec![
         0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
         0x00, 0x4c, 0x0d, 0x00, 0x00, 0x00, 0x72, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x45,
         0x76, 0x65, 0x6e, 0x74, 0x05, 0x00, 0x00, 0x00, 0x28, 0x49, 0x49, 0x4c, 0x29, 0x00, 0x00,
@@ -190,24 +115,49 @@ fn test_metaobject_value_from_bytes() {
     ];
 }
 
-#[test]
-fn test_annotated_value_from_bytes() {
-    let bytes = [
-        0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72, 0x6f,
-        0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f, 0x63, 0x61,
-        0x6c, 0x69, 0x7a, 0x65, 0x64,
-    ];
-    let value: AnnotatedValue = from_bytes(&bytes).unwrap();
-    assert_eq!(
-        value.into_value(),
-        Value::from(String::from("The robot is not localized"))
-    );
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+struct S0 {
+    u: (),
+    t: (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64),
+    #[serde(with = "serde_bytes")]
+    r: Vec<u8>,
+    o: std::option::Option<bool>,
+    s: S1,
+    l: Vec<std::string::String>,
+    m: BTreeMap<i32, std::string::String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+struct S1(std::string::String, std::string::String);
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+struct Serializable(S0);
+
+impl Serializable {
+    fn sample() -> Self {
+        Self(S0 {
+            u: (),
+            t: (-8, 8, -16, 16, -32, 32, -64, 64, 32.32, 64.64),
+            r: vec![51, 52, 53, 54],
+            o: Some(false),
+            s: S1("bananas".to_string(), "oranges".to_string()),
+            l: vec!["cookies".to_string(), "muffins".to_string()],
+            m: {
+                let mut m = BTreeMap::new();
+                m.insert(1, "hello".to_string());
+                m.insert(2, "world".to_string());
+                m
+            },
+        })
+    }
 }
 
 #[test]
-fn test_to_from_bytes_annotated_value() {
-    let value_before = AnnotatedValue::new(Serializable::sample_as_value());
-    let bytes = to_bytes(&value_before).unwrap();
-    let value_after: AnnotatedValue = from_bytes(&bytes).unwrap();
-    assert_eq!(value_before, value_after);
+fn test_to_from_bytes_serializable() {
+    let expected_bytes = [];
+    let sample_in = Serializable::sample();
+    let actual_bytes = to_bytes(&sample_in).unwrap();
+    assert_eq!(actual_bytes, expected_bytes);
+    let sample_out: Serializable = from_bytes(&actual_bytes).unwrap();
+    assert_eq!(sample_in, sample_out);
 }

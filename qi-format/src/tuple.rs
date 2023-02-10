@@ -1,6 +1,5 @@
 use crate::Value;
-use derive_more::{AsMut, AsRef, Deref, From, Index, IndexMut, Into, IntoIterator};
-use derive_new::new;
+use derive_more::{AsRef, From, Index, Into, IntoIterator};
 
 /// # Serialization / Deserialization
 ///
@@ -26,7 +25,13 @@ impl<'de> serde::Deserialize<'de> for Unit {
     }
 }
 
-/// [`Tuple`] represents a `tuple` value in the `qi` format.
+impl std::fmt::Display for Unit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("()")
+    }
+}
+
+/// [`Tuple`] represents a `tuple` value in the `qi` type system.
 ///
 /// # Deserialization ambiguity
 ///
@@ -46,29 +51,29 @@ impl<'de> serde::Deserialize<'de> for Unit {
 /// # }
 /// ```
 ///
-/// You can however deserialize a tuple out of an annotated value.
+/// You can however deserialize a tuple out of a dynamic value.
 ///
 /// ```
-/// # use qi_format::{from_bytes, AnnotatedValue, Number, Value, Result, Tuple};
+/// # use qi_format::{from_bytes, Dynamic, Number, Value, Result, Tuple};
 /// # fn main() -> Result<()> {
-/// let bytes = [3, 0, 0, 0, 40, 105, 105, 41, 10, 20];
-/// let annotated_value : AnnotatedValue = from_bytes(&bytes)?;
-/// let value = annotated_value.into_value();
+/// let bytes = [4, 0, 0, 0, 40, 105, 105, 41, 10, 0, 0, 0, 20, 0, 0, 0];
+/// let dynamic : Dynamic = from_bytes(&bytes)?;
+/// let value = dynamic.into_value();
 /// assert_eq!(value.as_tuple(),
-///            Some(&Tuple::new(vec![
+///            Some(&Tuple::from_elements(vec![
 ///                Value::Number(Number::Int32(10)),
 ///                Value::Number(Number::Int32(20))
 ///            ])));
 /// # Ok(())
 /// # }
 /// ```
+///
 /// Tuples may also be deserialized from:
 ///   - sequences, as tuples of the sequences elements.
 ///   - maps, as tuples of pairs (tuples of length 2).
 ///   - unit values, as tuples of length 0.
 ///   - newtype structures, as tuples of length 1.
 #[derive(
-    new,
     Default,
     Clone,
     PartialEq,
@@ -78,20 +83,56 @@ impl<'de> serde::Deserialize<'de> for Unit {
     From,
     Into,
     Index,
-    IndexMut,
     IntoIterator,
     AsRef,
-    AsMut,
-    Deref,
     Hash,
     Debug,
 )]
-#[into_iterator(owned, ref, ref_mut)]
-pub struct Tuple<'v>(pub(crate) Vec<Value<'v>>);
+#[into_iterator(owned, ref)]
+pub struct Tuple<'v>(Vec<Value<'v>>);
 
 impl<'v> Tuple<'v> {
+    pub fn new() -> Self {
+        Self::unit()
+    }
+
+    pub fn from_elements(v: Vec<Value<'v>>) -> Self {
+        Self(v)
+    }
+
     pub fn unit() -> Self {
         Self(vec![])
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn is_unit(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn elements(&self) -> &Vec<Value<'v>> {
+        &self.0
+    }
+}
+
+impl<'v> std::fmt::Display for Tuple<'v> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(")?;
+        let mut add_sep = false;
+        for element in &self.0 {
+            if add_sep {
+                f.write_str(", ")?;
+            }
+            write!(f, "{element}")?;
+            add_sep = true;
+        }
+        f.write_str(")")
     }
 }
 
@@ -125,7 +166,7 @@ impl<'de> serde::Deserialize<'de> for Tuple<'de> {
             where
                 E: serde::de::Error,
             {
-                Ok(Tuple::new(vec![]))
+                Ok(Tuple::from_elements(vec![]))
             }
 
             fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -133,7 +174,7 @@ impl<'de> serde::Deserialize<'de> for Tuple<'de> {
                 D: serde::Deserializer<'de>,
             {
                 let value = serde::Deserialize::deserialize(deserializer)?;
-                Ok(Tuple::new(vec![value]))
+                Ok(Tuple::from_elements(vec![value]))
             }
 
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -147,7 +188,7 @@ impl<'de> serde::Deserialize<'de> for Tuple<'de> {
                 while let Some(element) = seq.next_element()? {
                     elements.push(element);
                 }
-                Ok(Tuple::new(elements))
+                Ok(Tuple::from_elements(elements))
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -159,10 +200,10 @@ impl<'de> serde::Deserialize<'de> for Tuple<'de> {
                     None => Vec::new(),
                 };
                 while let Some((key, value)) = map.next_entry()? {
-                    let element = Value::Tuple(Tuple::new(vec![key, value]));
+                    let element = Value::Tuple(Tuple::from_elements(vec![key, value]));
                     elements.push(element);
                 }
-                Ok(Tuple::new(elements))
+                Ok(Tuple::from_elements(elements))
             }
         }
         deserializer.deserialize_any(Visitor)
@@ -216,11 +257,11 @@ mod tests {
     fn test_tuple_de_maps() {
         assert_de_tokens(
             &Tuple(vec![
-                Value::from(Tuple::new(vec![
+                Value::from(Tuple::from_elements(vec![
                     Value::from("thirty two point five"),
                     Value::from(32.5f32),
                 ])),
-                Value::from(Tuple::new(vec![
+                Value::from(Tuple::from_elements(vec![
                     Value::from("thirteen point three"),
                     Value::from(13.3f32),
                 ])),

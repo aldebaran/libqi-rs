@@ -2,15 +2,15 @@ use crate::{Error, Type};
 use derive_more::{From, TryInto};
 use ordered_float::OrderedFloat;
 
-pub type Bool = bool;
-pub type Int8 = i8;
-pub type UInt8 = u8;
-pub type Int16 = i16;
-pub type UInt16 = u16;
-pub type Int32 = i32;
-pub type UInt32 = u32;
-pub type Int64 = i64;
-pub type UInt64 = u64;
+pub use bool as Bool;
+pub use i16 as Int16;
+pub use i32 as Int32;
+pub use i64 as Int64;
+pub use i8 as Int8;
+pub use u16 as UInt16;
+pub use u32 as UInt32;
+pub use u64 as UInt64;
+pub use u8 as UInt8;
 pub type Float32 = OrderedFloat<f32>;
 pub type Float64 = OrderedFloat<f64>;
 
@@ -38,7 +38,81 @@ pub enum Number {
 }
 
 impl Number {
-    pub fn get_type(&self) -> Type {
+    pub fn as_int8(&self) -> Option<Int8> {
+        match self {
+            Self::Int8(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_uint8(&self) -> Option<UInt8> {
+        match self {
+            Self::UInt8(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_int16(&self) -> Option<Int16> {
+        match self {
+            Self::Int16(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_uint16(&self) -> Option<UInt16> {
+        match self {
+            Self::UInt16(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_int32(&self) -> Option<Int32> {
+        match self {
+            Self::Int32(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_uint32(&self) -> Option<UInt32> {
+        match self {
+            Self::UInt32(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_int64(&self) -> Option<Int64> {
+        match self {
+            Self::Int64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_uint64(&self) -> Option<UInt64> {
+        match self {
+            Self::UInt64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_float32(&self) -> Option<Float32> {
+        match self {
+            Self::Float32(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn as_float64(&self) -> Option<Float64> {
+        match self {
+            Self::Float64(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    pub fn is_assignable_to_value_type(&self, t: &Type) -> bool {
+        &self.get_type() == t
+    }
+
+    fn get_type(&self) -> Type {
         match self {
             Self::Int8(_) => Type::Int8,
             Self::UInt8(_) => Type::UInt8,
@@ -63,6 +137,23 @@ impl From<f32> for Number {
 impl From<f64> for Number {
     fn from(f: f64) -> Self {
         Number::from(OrderedFloat(f))
+    }
+}
+
+impl std::fmt::Display for Number {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Number::Int8(v) => v.fmt(f),
+            Number::UInt8(v) => v.fmt(f),
+            Number::Int16(v) => v.fmt(f),
+            Number::UInt16(v) => v.fmt(f),
+            Number::Int32(v) => v.fmt(f),
+            Number::UInt32(v) => v.fmt(f),
+            Number::Int64(v) => v.fmt(f),
+            Number::UInt64(v) => v.fmt(f),
+            Number::Float32(v) => v.fmt(f),
+            Number::Float64(v) => v.fmt(f),
+        }
     }
 }
 

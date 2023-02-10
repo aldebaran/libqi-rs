@@ -24,7 +24,13 @@ pub use tuple::{Tuple, Unit};
 // The module is not named `type` because it is a keyword.
 mod typing;
 #[doc(inline)]
-pub use typing::{Annotations as TypeAnnotations, Type};
+pub use typing::{
+    Tuple as TypeTuple, TupleAnnotations as TypeAnnotations,
+    TupleAnnotationsError as TypeAnnotationsError, Type,
+};
+
+mod map;
+pub use map::Map;
 
 mod signature;
 #[doc(inline)]
@@ -32,7 +38,11 @@ pub use signature::Signature;
 
 pub mod value;
 #[doc(inline)]
-pub use value::{from_value, from_value_ref, to_value, AnnotatedValue, Value};
+pub use value::{List, Option, Value};
+
+pub mod dynamic;
+#[doc(inline)]
+pub use dynamic::Dynamic;
 
 // TODO: Object / MetaObject
 

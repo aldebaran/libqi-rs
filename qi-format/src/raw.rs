@@ -2,7 +2,7 @@ use crate::Error;
 use derive_more::{AsRef, Index, IndexMut, Into};
 use std::borrow::Cow;
 
-/// A `qi` raw value.
+/// [`Raw`] represents a `raw` value in the `qi` type system.
 ///
 /// It is a value composed of entities external to the `qi` type system, that needs further
 /// interpretation.
@@ -215,6 +215,15 @@ impl<'r> IntoIterator for &'r Raw<'r> {
     }
 }
 
+impl<'r> std::fmt::Display for Raw<'r> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for byte in self.0.iter() {
+            write!(f, "\\x{byte:x}")?;
+        }
+        Ok(())
+    }
+}
+
 impl<'r> serde::Serialize for Raw<'r> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -352,6 +361,11 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use serde::de::{Deserialize, IntoDeserializer};
+
+    #[test]
+    fn test_raw_serde() {
+        todo!()
+    }
 
     #[test]
     fn test_raw_deserializer() {

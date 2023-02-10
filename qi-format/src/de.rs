@@ -403,6 +403,10 @@ where
     {
         self.next_item(seed)
     }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.iter.len())
+    }
 }
 
 impl<'r, 'de, R> serde::de::MapAccess<'r> for SequenceAccess<'de, R>
@@ -423,6 +427,10 @@ where
         V: serde::de::DeserializeSeed<'r>,
     {
         seed.deserialize(self.deserializer.as_ref())
+    }
+
+    fn size_hint(&self) -> Option<usize> {
+        Some(self.iter.len())
     }
 }
 

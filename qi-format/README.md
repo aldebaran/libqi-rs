@@ -96,7 +96,7 @@ deserialization.
 | `metaobject` | `tuple(map(uint_32, metamethod), map(uint_32, metainfo), map(uint_32, metainfo), string)` |
 | `metamethod` | `tuple(metainfo, string, string, map(string, string), string)` |
 | `metainfo` | `tuple(uint_32, string, string)` |
-| `annotated(T)` | `tuple(signature, T)` |
+| `dynamic(T)` | `tuple(signature, T)` |
 
 The following `serde` types are not handled (i.e. their serialization or
 deserialization with the `qi` serializer / deserializer will always result in errors):

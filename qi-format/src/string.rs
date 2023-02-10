@@ -11,7 +11,7 @@ mod private {
 use crate::{Error, Raw};
 use std::borrow::Cow;
 
-/// A `qi` string value.
+/// [`String`] represents a `string` value in the `qi` type system.
 ///
 /// It is a sequence of characters, with no constraint on the character set.
 ///
@@ -354,6 +354,30 @@ impl<'s> IntoIterator for &'s String<'s> {
             String::NonUtf8(b) => b,
         };
         bytes.iter()
+    }
+}
+
+/// Formats a string. If the string is not UTF-8, it is formatted as a bytestring.
+///
+/// # Example
+///
+/// ```
+/// # use qi_format::String;
+/// assert_eq!(format!("{}", String::from_borrowed_str("abc")), "abc");
+/// assert_eq!(format!("{}", String::from_bytes(&[0, 159, 146, 150])), "\\x00\\x9f\\x92\\x96");
+/// ```
+impl<'s> std::fmt::Display for String<'s> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use private::String;
+        match &self.0 {
+            String::Utf8(s) => s.fmt(f),
+            String::NonUtf8(bytes) => {
+                for byte in bytes.iter() {
+                    write!(f, "\\x{byte:0>2x}")?;
+                }
+                Ok(())
+            }
+        }
     }
 }
 
