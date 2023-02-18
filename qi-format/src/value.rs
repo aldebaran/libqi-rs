@@ -228,7 +228,6 @@ impl<'v> Serialize for Value<'v> {
 }
 
 struct ValueVisitor;
-
 impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     type Value = Value<'de>;
 
@@ -411,13 +410,6 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         E: serde::de::Error,
     {
         Ok(Value::unit())
-    }
-
-    fn visit_enum<A>(self, _data: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::EnumAccess<'de>,
-    {
-        todo!("enums are not yet supported as values")
     }
 
     fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
