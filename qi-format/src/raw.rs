@@ -364,7 +364,19 @@ mod tests {
 
     #[test]
     fn test_raw_serde() {
-        todo!()
+        use serde_test::{assert_tokens, Token};
+        assert_tokens(
+            &Raw::from_bytes(&[1, 2, 3, 4, 5]),
+            &[Token::BorrowedBytes(&[1, 2, 3, 4, 5])],
+        );
+        assert_tokens(
+            &Raw::from_bytes(&[1, 2, 3, 4, 5]),
+            &[Token::ByteBuf(&[1, 2, 3, 4, 5])],
+        );
+        assert_tokens(
+            &Raw::from_bytes(&[1, 2, 3, 4, 5]),
+            &[Token::Bytes(&[1, 2, 3, 4, 5])],
+        );
     }
 
     #[test]
