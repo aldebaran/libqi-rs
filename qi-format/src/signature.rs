@@ -2,7 +2,7 @@ use crate::typing::{self, Tuple, TupleAnnotations, Type};
 use derive_more::{From, Into};
 use derive_new::new;
 
-#[derive(new, Debug, Default, PartialEq, Eq, Clone, From, Into)]
+#[derive(new, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, From, Into)]
 #[into(owned, ref, ref_mut)]
 pub struct Signature(Type);
 

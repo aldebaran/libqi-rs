@@ -11,7 +11,7 @@ use std::iter::FromIterator;
 /// read from the `qi` format contains multiple equivalent keys, these keys will be duplicated in
 /// the resulting `Map` value.
 #[derive(
-    Default, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Index, IntoIterator, Hash, Debug,
+    Default, Clone, PartialEq, Eq, From, Into, Index, IntoIterator, Hash, Debug,
 )]
 #[into_iterator(owned, ref, ref_mut)]
 pub struct Map<'v>(Vec<(Value<'v>, Value<'v>)>);

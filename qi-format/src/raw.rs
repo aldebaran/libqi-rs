@@ -233,7 +233,10 @@ impl<'r> serde::Serialize for Raw<'r> {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Raw<'de> {
+impl<'de, 'r> serde::Deserialize<'de> for Raw<'r>
+where
+    'de: 'r,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

@@ -78,8 +78,6 @@ impl std::fmt::Display for Unit {
     Clone,
     PartialEq,
     Eq,
-    PartialOrd,
-    Ord,
     From,
     Into,
     Index,

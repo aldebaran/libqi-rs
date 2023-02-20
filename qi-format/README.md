@@ -91,11 +91,12 @@ deserialization.
 | `qi` | associated `qi` type |
 | - | - |
 | `string` | `raw` [^string-as-bytes] |
-| `signature` | `raw` [^string-as-bytes] |
+| `signature` | `string` with ASCII only characters |
 | `object` | `tuple(metaobject, uint_32, uint_32, tuple(uint_32, uint_32, uint_32, uint_32, uint_32))` |
 | `metaobject` | `tuple(map(uint_32, metamethod), map(uint_32, metainfo), map(uint_32, metainfo), string)` |
-| `metamethod` | `tuple(metainfo, string, string, map(string, string), string)` |
-| `metainfo` | `tuple(uint_32, string, string)` |
+| `metamethod` | `tuple(uint_32, signature, string, signature, string, map(string, string), string)` |
+| `metaproperty` | `tuple(uint_32, string, signature)` |
+| `metasignal` | `tuple(uint_32, string, signature)` |
 | `dynamic(T)` | `tuple(signature, T)` |
 
 The following `serde` types are not handled (i.e. their serialization or

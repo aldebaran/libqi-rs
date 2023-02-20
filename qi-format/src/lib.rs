@@ -44,7 +44,9 @@ pub mod dynamic;
 #[doc(inline)]
 pub use dynamic::Dynamic;
 
-// TODO: Object / MetaObject
+pub mod object;
+#[doc(inline)]
+pub use object::{Object, MetaObject, MetaMethod, MetaSignal, MetaProperty};
 
 mod read;
 #[doc(inline)]

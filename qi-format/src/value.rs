@@ -1,4 +1,4 @@
-use crate::{num_bool::*, tuple::*, typing::Type, Dynamic, Map, Raw, String, Unit};
+use crate::{num_bool::*, tuple::*, typing::Type, Dynamic, Map, Raw, String, Unit, Object};
 use derive_more::{From, TryInto};
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// `Value`s may however be deserialized from a self-describing format.
 // TODO: insert example here
-#[derive(Clone, From, TryInto, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, From, TryInto, PartialEq, Eq, Hash, Debug)]
 #[try_into(owned, ref, ref_mut)]
 pub enum Value<'v> {
     Unit(Unit),
@@ -38,6 +38,7 @@ pub enum Value<'v> {
     List(List<'v>),
     Map(Map<'v>),
     Tuple(Tuple<'v>),
+    Object(Box<Object<'v>>),
     Dynamic(Box<Dynamic<'v>>),
 }
 
@@ -92,6 +93,7 @@ impl<'v> Value<'v> {
                 }
                 _ => false,
             },
+            Value::Object(_) => t == &Type::Object,
             Value::Dynamic(dynamic) => dynamic.is_assignable_to_value_type(t),
         }
     }
@@ -202,6 +204,7 @@ impl<'v> std::fmt::Display for Value<'v> {
             }
             Value::Map(m) => m.fmt(f),
             Value::Tuple(t) => t.fmt(f),
+            Value::Object(o) => o.fmt(f),
             Value::Dynamic(d) => d.fmt(f),
         }
     }
@@ -222,6 +225,7 @@ impl<'v> Serialize for Value<'v> {
             Value::List(l) => l.serialize(serializer),
             Value::Map(m) => m.serialize(serializer),
             Value::Tuple(tuple) => tuple.serialize(serializer),
+            Value::Object(object) => object.serialize(serializer),
             Value::Dynamic(d) => d.serialize(serializer),
         }
     }
@@ -421,7 +425,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for Value<'de> {
+impl<'de, 'v> Deserialize<'de> for Value<'v> where 'de: 'v {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

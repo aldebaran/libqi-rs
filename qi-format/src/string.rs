@@ -394,7 +394,10 @@ impl<'s> serde::Serialize for String<'s> {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for String<'de> {
+impl<'de, 's> serde::Deserialize<'de> for String<'s>
+where
+    'de: 's,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

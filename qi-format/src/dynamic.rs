@@ -10,7 +10,7 @@ use crate::{
 /// It is a value associated with its type information.
 ///
 /// It is represented in the format as a value prepended with its type signature.
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+#[derive(Default, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct Dynamic<'d> {
     // Invariant: `value.is_assignable_to_value_type(&value_type)`
     value_type: Type,
@@ -33,8 +33,8 @@ impl<'v> Dynamic<'v> {
         self.value
     }
 
-    pub fn is_assignable_to_value_type(&self, _t: &Type) -> bool {
-        todo!()
+    pub fn is_assignable_to_value_type(&self, t: &Type) -> bool {
+        self.value.is_assignable_to_value_type(t)
     }
 }
 
@@ -44,7 +44,7 @@ impl<'d> std::fmt::Display for Dynamic<'d> {
     }
 }
 
-#[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Hash, Clone)]
 pub enum DynamicError<'v> {
     #[error("mismatched value type: value {0} is not assignable to {1}")]
     MismatchedValueType(Value<'v>, Type),
