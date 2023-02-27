@@ -1,5 +1,8 @@
 [package]
 name = "qi-format"
+description = "Serialize/deserialize and manipulate values from the `qi` type system"
+license-file = "LICENSE.txt"
+repository = "https://github.com/nyibbang/libqi-rs"
 version = "0.1.0-dev"
 edition = "2021"
 rust-version = "1.59"
