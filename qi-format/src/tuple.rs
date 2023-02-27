@@ -73,28 +73,16 @@ impl std::fmt::Display for Unit {
 ///   - maps, as tuples of pairs (tuples of length 2).
 ///   - unit values, as tuples of length 0.
 ///   - newtype structures, as tuples of length 1.
-#[derive(
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    From,
-    Into,
-    Index,
-    IntoIterator,
-    AsRef,
-    Hash,
-    Debug,
-)]
+#[derive(Default, Clone, PartialEq, Eq, From, Into, Index, IntoIterator, AsRef, Debug)]
 #[into_iterator(owned, ref)]
-pub struct Tuple<'v>(Vec<Value<'v>>);
+pub struct Tuple(Vec<Value>);
 
-impl<'v> Tuple<'v> {
+impl Tuple {
     pub fn new() -> Self {
         Self::unit()
     }
 
-    pub fn from_elements(v: Vec<Value<'v>>) -> Self {
+    pub fn from_elements(v: Vec<Value>) -> Self {
         Self(v)
     }
 
@@ -114,12 +102,12 @@ impl<'v> Tuple<'v> {
         self.0.is_empty()
     }
 
-    pub fn elements(&self) -> &Vec<Value<'v>> {
+    pub fn elements(&self) -> &Vec<Value> {
         &self.0
     }
 }
 
-impl<'v> std::fmt::Display for Tuple<'v> {
+impl std::fmt::Display for Tuple {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("(")?;
         let mut add_sep = false;
@@ -134,7 +122,7 @@ impl<'v> std::fmt::Display for Tuple<'v> {
     }
 }
 
-impl<'v> serde::Serialize for Tuple<'v> {
+impl serde::Serialize for Tuple {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -148,14 +136,14 @@ impl<'v> serde::Serialize for Tuple<'v> {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Tuple<'de> {
+impl<'de> serde::Deserialize<'de> for Tuple {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         struct Visitor;
         impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = Tuple<'de>;
+            type Value = Tuple;
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a tuple value")
             }
@@ -205,6 +193,15 @@ impl<'de> serde::Deserialize<'de> for Tuple<'de> {
             }
         }
         deserializer.deserialize_any(Visitor)
+    }
+}
+
+#[macro_export]
+macro_rules! tuple {
+    ($($t:expr),+ $(,)*) => {
+        $crate::tuple::Tuple::from_elements(
+            vec![$($t),+]
+        )
     }
 }
 

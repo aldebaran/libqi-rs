@@ -1,4 +1,5 @@
-use crate::{read, Error, Raw, Result, String};
+use crate::{read, Error, Raw, RawBuf, Result, Str, String};
+use serde::de::IntoDeserializer;
 
 /// # Error
 ///
@@ -54,9 +55,95 @@ impl<'b> Deserializer<read::SliceRead<'b>> {
     }
 }
 
+trait StrDeserializer<'de> {
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>;
+
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>;
+}
+
+impl<'de> StrDeserializer<'de> for &'de Str {
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_borrowed_str(self)
+    }
+
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_string(self.to_owned())
+    }
+}
+
+impl<'de> StrDeserializer<'de> for String {
+    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_str(&self)
+    }
+
+    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_string(self)
+    }
+}
+
+trait BytesDeserializer<'de> {
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>;
+
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>;
+}
+
+impl<'de> BytesDeserializer<'de> for &'de Raw {
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_borrowed_bytes(self)
+    }
+
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_byte_buf(self.to_vec())
+    }
+}
+
+impl<'de> BytesDeserializer<'de> for RawBuf {
+    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_bytes(&self)
+    }
+
+    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        visitor.visit_byte_buf(self.to_vec())
+    }
+}
+
 impl<'de, R> serde::Deserializer<'de> for &mut Deserializer<R>
 where
-    R: read::Read<String = String<'de>, Raw = Raw<'de>>,
+    R: read::Read,
+    R::Raw: BytesDeserializer<'de>,
+    R::Str: StrDeserializer<'de>,
 {
     type Error = Error;
 
@@ -160,7 +247,7 @@ where
     where
         V: serde::de::Visitor<'de>,
     {
-        let str = self.reader.read_string()?;
+        let str = self.reader.read_str()?;
         str.deserialize_str(visitor)
     }
 
@@ -168,7 +255,7 @@ where
     where
         V: serde::de::Visitor<'de>,
     {
-        let str = self.reader.read_string()?;
+        let str = self.reader.read_str()?;
         str.deserialize_string(visitor)
     }
 
@@ -303,7 +390,8 @@ where
 
 impl<'de, R> serde::de::EnumAccess<'de> for &mut Deserializer<R>
 where
-    R: read::Read<String = String<'de>, Raw = Raw<'de>>,
+    R: read::Read,
+    Self: serde::Deserializer<'de, Error = Error>,
 {
     type Error = Error;
     type Variant = Self;
@@ -313,7 +401,6 @@ where
         V: serde::de::DeserializeSeed<'de>,
     {
         let variant_index = self.reader.read_u32()?;
-        use serde::de::IntoDeserializer;
         let variant_index_deserializer = variant_index.into_deserializer();
         let value: Result<_> = seed.deserialize(variant_index_deserializer);
         Ok((value?, self))
@@ -322,7 +409,7 @@ where
 
 impl<'de, R> serde::de::VariantAccess<'de> for &mut Deserializer<R>
 where
-    R: read::Read<String = String<'de>, Raw = Raw<'de>>,
+    Self: serde::Deserializer<'de, Error = Error>,
 {
     type Error = Error;
 
@@ -355,21 +442,22 @@ where
     }
 }
 
-struct SequenceAccess<'de, R> {
+struct SequenceAccess<'a, R> {
     iter: std::ops::Range<usize>,
-    deserializer: &'de mut Deserializer<R>,
+    deserializer: &'a mut Deserializer<R>,
 }
 
-impl<'r, 'de, R> SequenceAccess<'de, R>
+impl<'a, 'de, R> SequenceAccess<'a, R>
 where
-    R: read::Read<String = String<'r>, Raw = Raw<'r>>,
+    R: read::Read,
+    for<'d> &'d mut Deserializer<R>: serde::Deserializer<'de, Error = Error>,
 {
-    fn new_list_or_map(deserializer: &'de mut Deserializer<R>) -> Result<Self> {
+    fn new_list_or_map(deserializer: &'a mut Deserializer<R>) -> Result<Self> {
         let size = deserializer.reader.read_size()?;
         Ok(Self::new_sequence(size, deserializer))
     }
 
-    fn new_sequence(size: usize, deserializer: &'de mut Deserializer<R>) -> Self {
+    fn new_sequence(size: usize, deserializer: &'a mut Deserializer<R>) -> Self {
         Self {
             iter: 0..size,
             deserializer,
@@ -378,7 +466,7 @@ where
 
     fn next_item<T>(&mut self, seed: T) -> Result<Option<T::Value>>
     where
-        T: serde::de::DeserializeSeed<'r>,
+        T: serde::de::DeserializeSeed<'de>,
     {
         let item = match self.iter.next() {
             Some(_idx) => {
@@ -391,15 +479,16 @@ where
     }
 }
 
-impl<'r, 'de, R> serde::de::SeqAccess<'r> for SequenceAccess<'de, R>
+impl<'a, 'de, R> serde::de::SeqAccess<'de> for SequenceAccess<'a, R>
 where
-    R: read::Read<String = String<'r>, Raw = Raw<'r>>,
+    R: read::Read,
+    for<'d> &'d mut Deserializer<R>: serde::Deserializer<'de, Error = Error>,
 {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
     where
-        T: serde::de::DeserializeSeed<'r>,
+        T: serde::de::DeserializeSeed<'de>,
     {
         self.next_item(seed)
     }
@@ -409,22 +498,23 @@ where
     }
 }
 
-impl<'r, 'de, R> serde::de::MapAccess<'r> for SequenceAccess<'de, R>
+impl<'a, 'de, R> serde::de::MapAccess<'de> for SequenceAccess<'a, R>
 where
-    R: read::Read<String = String<'r>, Raw = Raw<'r>>,
+    R: read::Read,
+    for<'d> &'d mut Deserializer<R>: serde::Deserializer<'de, Error = Error>,
 {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
     where
-        K: serde::de::DeserializeSeed<'r>,
+        K: serde::de::DeserializeSeed<'de>,
     {
         self.next_item(seed)
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
     where
-        V: serde::de::DeserializeSeed<'r>,
+        V: serde::de::DeserializeSeed<'de>,
     {
         seed.deserialize(self.deserializer.as_ref())
     }

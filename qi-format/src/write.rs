@@ -1,6 +1,6 @@
 use crate::{
     num_bool::{FALSE_BOOL, TRUE_BOOL},
-    Error, Raw, Result, String,
+    Error, Raw, Result, Str,
 };
 
 pub fn write_byte<W>(mut writer: W, b: u8) -> Result<()>
@@ -120,20 +120,19 @@ where
     write_u32(writer, size)
 }
 
-pub fn write_string<W>(writer: W, str: String) -> Result<()>
+pub fn write_str<W>(writer: W, str: &Str) -> Result<()>
 where
     W: std::io::Write,
 {
-    write_raw(writer, Raw::from(str))
+    write_raw(writer, Raw::new(str.as_bytes()))
 }
 
-pub fn write_raw<W>(mut writer: W, raw: Raw) -> Result<()>
+pub fn write_raw<W>(mut writer: W, raw: &Raw) -> Result<()>
 where
     W: std::io::Write,
 {
-    let bytes = raw.as_bytes();
-    write_size(writer.by_ref(), bytes.len())?;
-    writer.write_all(bytes)?;
+    write_size(writer.by_ref(), raw.len())?;
+    writer.write_all(&raw)?;
     Ok(())
 }
 
@@ -302,14 +301,14 @@ mod tests {
     #[test]
     fn test_write_string() {
         let mut buf = Vec::new();
-        write_string(&mut buf, String::from("abc")).unwrap();
+        write_str(&mut buf, &"abc").unwrap();
         assert_eq!(buf, [3, 0, 0, 0, 97, 98, 99]);
     }
 
     #[test]
     fn test_write_raw() {
         let mut buf = Vec::new();
-        write_raw(&mut buf, Raw::from(&[1, 11, 111][..])).unwrap();
+        write_raw(&mut buf, &Raw::new(&[1, 11, 111][..])).unwrap();
         assert_eq!(buf, [3, 0, 0, 0, 1, 11, 111]);
     }
 }

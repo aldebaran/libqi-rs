@@ -1,6 +1,6 @@
 use crate::{
     num_bool::{FALSE_BOOL, TRUE_BOOL},
-    Error, Raw, Result, String,
+    Error, Raw, RawBuf, Result, Str, String,
 };
 use derive_new::new;
 
@@ -9,24 +9,25 @@ mod private {
 }
 
 pub trait Read: private::Sealed {
-    type String;
     type Raw;
+    type Str;
 
     fn read_byte(&mut self) -> Result<u8>;
-    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]>;
-    fn read_string(&mut self) -> Result<Self::String>;
+    fn read_byte_array<const N: usize>(&mut self) -> Result<[u8; N]>;
+
     fn read_raw(&mut self) -> Result<Self::Raw>;
+    fn read_str(&mut self) -> Result<Self::Str>;
 
     fn read_word(&mut self) -> Result<[u8; 2]> {
-        self.read_bytes()
+        self.read_byte_array()
     }
 
     fn read_dword(&mut self) -> Result<[u8; 4]> {
-        self.read_bytes()
+        self.read_byte_array()
     }
 
     fn read_qword(&mut self) -> Result<[u8; 8]> {
-        self.read_bytes()
+        self.read_byte_array()
     }
 
     fn read_bool(&mut self) -> Result<bool> {
@@ -49,47 +50,47 @@ pub trait Read: private::Sealed {
     }
 
     fn read_u16(&mut self) -> Result<u16> {
-        let bytes = self.read_bytes()?;
+        let bytes = self.read_byte_array()?;
         Ok(u16::from_le_bytes(bytes))
     }
 
     fn read_i16(&mut self) -> Result<i16> {
-        let bytes = self.read_bytes()?;
+        let bytes = self.read_byte_array()?;
         Ok(i16::from_le_bytes(bytes))
     }
 
     fn read_u32(&mut self) -> Result<u32> {
-        let bytes = self.read_bytes()?;
+        let bytes = self.read_byte_array()?;
         Ok(u32::from_le_bytes(bytes))
     }
 
     fn read_i32(&mut self) -> Result<i32> {
-        let bytes = self.read_bytes()?;
+        let bytes = self.read_byte_array()?;
         Ok(i32::from_le_bytes(bytes))
     }
 
     fn read_u64(&mut self) -> Result<u64> {
-        let bytes = self.read_bytes()?;
+        let bytes = self.read_byte_array()?;
         Ok(u64::from_le_bytes(bytes))
     }
 
     fn read_i64(&mut self) -> Result<i64> {
-        let bytes = self.read_bytes()?;
+        let bytes = self.read_byte_array()?;
         Ok(i64::from_le_bytes(bytes))
     }
 
     fn read_f32(&mut self) -> Result<f32> {
-        let bytes = self.read_bytes()?;
+        let bytes = self.read_byte_array()?;
         Ok(f32::from_le_bytes(bytes))
     }
 
     fn read_f64(&mut self) -> Result<f64> {
-        let bytes = self.read_bytes()?;
+        let bytes = self.read_byte_array()?;
         Ok(f64::from_le_bytes(bytes))
     }
 
     fn read_size(&mut self) -> Result<usize> {
-        let size_bytes = self.read_bytes()?;
+        let size_bytes = self.read_byte_array()?;
         let size = u32::from_le_bytes(size_bytes)
             .try_into()
             .map_err(Error::SizeConversionError)?;
@@ -107,23 +108,23 @@ impl<R> Read for &mut R
 where
     R: Read,
 {
-    type String = <R as Read>::String;
-    type Raw = <R as Read>::Raw;
+    type Raw = R::Raw;
+    type Str = R::Str;
 
     fn read_byte(&mut self) -> Result<u8> {
         (*self).read_byte()
     }
 
-    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
-        (*self).read_bytes()
-    }
-
-    fn read_string(&mut self) -> Result<Self::String> {
-        (*self).read_string()
+    fn read_byte_array<const N: usize>(&mut self) -> Result<[u8; N]> {
+        (*self).read_byte_array()
     }
 
     fn read_raw(&mut self) -> Result<Self::Raw> {
         (*self).read_raw()
+    }
+
+    fn read_str(&mut self) -> Result<Self::Str> {
+        (*self).read_str()
     }
 }
 
@@ -138,8 +139,8 @@ impl<R> Read for IoRead<R>
 where
     R: std::io::Read,
 {
-    type String = String<'static>;
-    type Raw = Raw<'static>;
+    type Raw = RawBuf;
+    type Str = String;
 
     fn read_byte(&mut self) -> Result<u8> {
         let mut byte = 0;
@@ -147,23 +148,24 @@ where
         Ok(byte)
     }
 
-    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
+    fn read_byte_array<const N: usize>(&mut self) -> Result<[u8; N]> {
         let mut buf = [0; N];
         self.reader.read_exact(&mut buf)?;
         Ok(buf)
-    }
-
-    // equivalence: string -> raw
-    fn read_string(&mut self) -> Result<Self::String> {
-        let raw = self.read_raw()?;
-        Ok(String::from(raw))
     }
 
     fn read_raw(&mut self) -> Result<Self::Raw> {
         let size = self.read_size()?;
         let mut buf = vec![0; size];
         self.reader.read_exact(&mut buf)?;
-        Ok(Raw::from(buf))
+        Ok(RawBuf::from(buf))
+    }
+
+    // equivalence: string -> raw
+    fn read_str(&mut self) -> Result<Self::Str> {
+        let raw = self.read_raw()?;
+        let str = String::from_utf8(raw.into_vec()).map_err(|e| e.utf8_error())?;
+        Ok(str)
     }
 }
 
@@ -175,8 +177,8 @@ pub struct SliceRead<'b> {
 impl<'b> private::Sealed for SliceRead<'b> {}
 
 impl<'b> Read for SliceRead<'b> {
-    type String = String<'b>;
-    type Raw = Raw<'b>;
+    type Str = &'b Str;
+    type Raw = &'b Raw;
 
     fn read_byte(&mut self) -> Result<u8> {
         let (&byte, tail) = self.data.split_first().ok_or_else(|| {
@@ -189,12 +191,11 @@ impl<'b> Read for SliceRead<'b> {
         Ok(byte)
     }
 
-    fn read_bytes<const N: usize>(&mut self) -> Result<[u8; N]> {
-        IoRead::new(&mut self.data).read_bytes()
-    }
-
-    fn read_string(&mut self) -> Result<Self::String> {
-        self.read_raw().map(String::from)
+    fn read_byte_array<const N: usize>(&mut self) -> Result<[u8; N]> {
+        let mut buf = [0; N];
+        use std::io::Read;
+        self.data.read_exact(buf.as_mut_slice())?;
+        Ok(buf)
     }
 
     fn read_raw(&mut self) -> Result<Self::Raw> {
@@ -207,7 +208,14 @@ impl<'b> Read for SliceRead<'b> {
         }
         let (head, tail) = self.data.split_at(size);
         self.data = tail;
-        Ok(Raw::from_bytes(head))
+        Ok(Raw::new(head))
+    }
+
+    // equivalence: string -> raw
+    fn read_str(&mut self) -> Result<Self::Str> {
+        let raw = self.read_raw()?;
+        let str = std::str::from_utf8(raw)?;
+        Ok(str)
     }
 }
 
@@ -225,20 +233,25 @@ mod tests {
     }
 
     #[test]
-    fn test_io_read_bytes() {
+    fn test_io_read_byte_array() {
         let mut read = IoRead::new(&[1, 2, 3, 4, 5][..]);
-        assert_matches!(read.read_bytes::<1>(), Ok([1]));
-        assert_matches!(read.read_bytes::<2>(), Ok([2, 3]));
-        assert_matches!(read.read_bytes::<3>(), Err(Error::Io(_)));
-        assert_matches!(read.read_bytes::<2>(), Ok([4, 5]));
+        assert_matches!(read.read_byte_array::<1>(), Ok([1]));
+        assert_matches!(read.read_byte_array::<2>(), Ok([2, 3]));
+        assert_matches!(read.read_byte_array::<3>(), Err(Error::Io(_)));
+        assert_matches!(read.read_byte_array::<2>(), Ok([4, 5]));
     }
 
     #[test]
     fn test_io_read_string() {
-        let mut read = IoRead::new(&[3, 0, 0, 0, 97, 98, 99, 2, 0, 0, 0, 1, 2][..]);
-        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, "abc"));
-        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, String::from_bytes(&[1, 2])));
-        assert_matches!(read.read_string(), Err(Error::Io(_)));
+        let mut read = IoRead::new(
+            &[
+                3, 0, 0, 0, 97, 98, 99, 4, 0, 0, 0, 0, 159, 146, 150, 0, 0, 0, 0,
+            ][..],
+        );
+        assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, "abc"));
+        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_)));
+        assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, String::new()));
+        assert_matches!(read.read_str(), Err(Error::Io(_)));
     }
 
     #[test]
@@ -258,29 +271,29 @@ mod tests {
     }
 
     #[test]
-    fn test_slice_read_bytes() {
+    fn test_slice_read_byte_array() {
         let mut read = SliceRead::new(&[1, 2, 3, 4, 5]);
-        assert_matches!(read.read_bytes::<1>(), Ok([1]));
-        assert_matches!(read.read_bytes::<2>(), Ok([2, 3]));
-        assert_matches!(read.read_bytes::<3>(), Err(Error::Io(_)));
-        assert_matches!(read.read_bytes::<2>(), Ok([4, 5]));
+        assert_matches!(read.read_byte_array::<1>(), Ok([1]));
+        assert_matches!(read.read_byte_array::<2>(), Ok([2, 3]));
+        assert_matches!(read.read_byte_array::<3>(), Err(Error::Io(_)));
+        assert_matches!(read.read_byte_array::<2>(), Ok([4, 5]));
     }
 
     #[test]
     fn test_slice_read_string() {
-        let mut read = SliceRead::new(&[1, 0, 0, 0, 100, 1, 0, 0, 0, 1, 0, 0, 0, 0]);
-        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, "d"));
-        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, String::from(&[1][..])));
-        assert_matches!(read.read_string(), Ok(s) => assert_eq!(s, String::new()));
-        assert_matches!(read.read_string(), Err(Error::Io(_)));
+        let mut read = SliceRead::new(&[1, 0, 0, 0, 100, 4, 0, 0, 0, 0, 159, 146, 150, 0, 0, 0, 0]);
+        assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, "d"));
+        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_)));
+        assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, String::new()));
+        assert_matches!(read.read_str(), Err(Error::Io(_)));
     }
 
     #[test]
     fn test_slice_read_raw() {
         let mut read = SliceRead::new(&[1, 0, 0, 0, 100, 1, 0, 0, 0, 1, 0, 0, 0, 0]);
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, [100]));
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, [1]));
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, []));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::new(&[100])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::new(&[1])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::new(&[])));
         assert_matches!(read.read_raw(), Err(Error::Io(_)));
     }
 

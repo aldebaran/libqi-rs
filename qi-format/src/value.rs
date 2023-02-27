@@ -1,4 +1,6 @@
-use crate::{num_bool::*, tuple::*, typing::Type, Dynamic, Map, Raw, String, Unit, Object};
+use crate::{
+    num_bool::*, tuple::*, typing::Type, Dynamic, List, Map, Object, Option, RawBuf, String, Unit,
+};
 use derive_more::{From, TryInto};
 use serde::{Deserialize, Serialize};
 
@@ -24,25 +26,25 @@ use serde::{Deserialize, Serialize};
 ///
 /// `Value`s may however be deserialized from a self-describing format.
 // TODO: insert example here
-#[derive(Clone, From, TryInto, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, From, TryInto, PartialEq, Eq, Debug)]
 #[try_into(owned, ref, ref_mut)]
-pub enum Value<'v> {
+pub enum Value {
     Unit(Unit),
     Bool(Bool),
     #[from(ignore)]
     Number(Number),
-    String(String<'v>),
-    Raw(Raw<'v>),
+    String(String),
+    Raw(RawBuf),
     #[try_into(ignore)] // Conflicts with standard conversion T -> Opt<T>
-    Option(Box<Option<'v>>),
-    List(List<'v>),
-    Map(Map<'v>),
-    Tuple(Tuple<'v>),
-    Object(Box<Object<'v>>),
-    Dynamic(Box<Dynamic<'v>>),
+    Option(Box<Option<Value>>),
+    List(List<Value>),
+    Map(Map<Value, Value>),
+    Tuple(Tuple),
+    Object(Box<Object>),
+    Dynamic(Box<Dynamic>),
 }
 
-impl<'v> Value<'v> {
+impl Value {
     pub fn unit() -> Self {
         Self::Tuple(Tuple::unit())
     }
@@ -143,23 +145,23 @@ impl<'v> Value<'v> {
     }
 }
 
-impl<'v> Default for Value<'v> {
+impl Default for Value {
     fn default() -> Self {
         Self::unit()
     }
 }
 
-impl<T> From<T> for Value<'_>
+impl<T> From<T> for Value
 where
-    Number: From<T>,
+    T: Into<Number>,
 {
     fn from(v: T) -> Self {
-        Value::Number(Number::from(v))
+        Value::Number(v.into())
     }
 }
 
-impl<'v> From<&'v str> for Value<'v> {
-    fn from(s: &'v str) -> Self {
+impl<'s> From<&'s str> for Value {
+    fn from(s: &'s str) -> Self {
         Value::String(String::from(s))
     }
 }
@@ -173,20 +175,37 @@ impl<'v> From<&'v str> for Value<'v> {
 /// assert_eq!(Value::from(opt.clone()),
 ///            Value::Option(Box::new(opt)));
 /// ```
-impl<'v> From<Option<'v>> for Value<'v> {
-    fn from(o: Option<'v>) -> Self {
+impl From<Option<Value>> for Value {
+    fn from(o: Option<Value>) -> Self {
         Self::Option(Box::new(o))
     }
 }
 
-impl<'v> std::fmt::Display for Value<'v> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl From<Object> for Value {
+    fn from(o: Object) -> Self {
+        Self::Object(Box::new(o))
+    }
+}
+
+impl From<Dynamic> for Value {
+    fn from(d: Dynamic) -> Self {
+        Self::Dynamic(Box::new(d))
+    }
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Value::Unit(u) => u.fmt(f),
             Value::Bool(b) => b.fmt(f),
             Value::Number(n) => n.fmt(f),
             Value::String(s) => s.fmt(f),
-            Value::Raw(r) => r.fmt(f),
+            Value::Raw(r) => {
+                for byte in r.iter() {
+                    write!(f, "\\x{byte:x}")?;
+                }
+                Ok(())
+            }
             Value::Option(o) => match o.as_ref() {
                 Some(v) => write!(f, "some({v})"),
                 None => f.write_str("none"),
@@ -210,7 +229,7 @@ impl<'v> std::fmt::Display for Value<'v> {
     }
 }
 
-impl<'v> Serialize for Value<'v> {
+impl Serialize for Value {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -233,7 +252,7 @@ impl<'v> Serialize for Value<'v> {
 
 struct ValueVisitor;
 impl<'de> serde::de::Visitor<'de> for ValueVisitor {
-    type Value = Value<'de>;
+    type Value = Value;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter.write_str("a value")
@@ -349,21 +368,21 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     where
         E: serde::de::Error,
     {
-        Ok(Value::from(Raw::from(v.to_owned())))
+        Ok(Value::from(RawBuf::from(v.to_owned())))
     }
 
     fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(Value::from(Raw::from(v)))
+        Ok(Value::from(RawBuf::from(v)))
     }
 
     fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(Value::from(Raw::from(v)))
+        Ok(Value::from(RawBuf::from(v)))
     }
 
     fn visit_none<E>(self) -> Result<Self::Value, E>
@@ -406,7 +425,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         while let Some((key, value)) = map.next_entry()? {
             pair_vec.push((key, value));
         }
-        Ok(Value::from(Map::from_pair_elements(pair_vec)))
+        Ok(Value::from(Map::from_iter(pair_vec)))
     }
 
     fn visit_unit<E>(self) -> Result<Self::Value, E>
@@ -425,7 +444,10 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     }
 }
 
-impl<'de, 'v> Deserialize<'de> for Value<'v> where 'de: 'v {
+impl<'de, 'v> Deserialize<'de> for Value
+where
+    'de: 'v,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -433,10 +455,6 @@ impl<'de, 'v> Deserialize<'de> for Value<'v> where 'de: 'v {
         deserializer.deserialize_any(ValueVisitor)
     }
 }
-
-pub type Option<'v> = std::option::Option<Value<'v>>;
-
-pub type List<'v> = Vec<Value<'v>>;
 
 #[cfg(test)]
 mod tests {

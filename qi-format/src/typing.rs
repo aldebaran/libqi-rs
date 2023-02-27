@@ -1,3 +1,5 @@
+use crate::String;
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Type {
     Unit,
@@ -186,4 +188,67 @@ impl std::fmt::Display for TupleAnnotations {
 pub enum TupleAnnotationsError {
     #[error("expected {expected} annotations but got {actual}")]
     BadLength { expected: usize, actual: usize },
+}
+
+pub fn option(t: Type) -> Type {
+    Type::Option(Box::new(t))
+}
+
+pub fn list(t: Type) -> Type {
+    Type::List(Box::new(t))
+}
+
+#[macro_export]
+macro_rules! map_type {
+    ($key:expr => $value:expr) => {
+        $crate::typing::Type::Map {
+            key: Box::new($key),
+            value: Box::new($value),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! tuple_type {
+    ($($t:expr),+ $(,)*) => {
+        $crate::typing::Type::Tuple(
+            $crate::typing::Tuple::from_element_types(
+                vec![$($t),+]
+            )
+        )
+    };
+    () => {
+        $crate::typing::Type::Tuple(
+            $crate::typing::Tuple::new()
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! annotated_tuple_type {
+    ($name:expr => { $($f:expr => $t:expr),+ $(,)* }) => {
+        $crate::annotated_tuple_type!(inner
+            $name,
+            vec![$($t),+],
+            Some(vec![$($crate::String::from($f)),+])
+        )
+    };
+    ($name:expr => { $($t:expr),+ $(,)* }) => {
+        $crate::annotated_tuple_type!(inner
+            $name,
+            vec![$($t),+],
+            None
+        )
+    };
+    (inner $name:expr, $types:expr, $fields:expr) => {
+        $crate::typing::Type::Tuple(
+            $crate::typing::Tuple::from_element_types_with_annotations(
+                $types,
+                $crate::typing::TupleAnnotations {
+                    name: $crate::String::from($name),
+                    fields: $fields,
+                }
+            ).unwrap()
+        )
+    }
 }

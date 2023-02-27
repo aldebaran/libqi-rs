@@ -2,7 +2,7 @@ use crate::{
     num_bool::*,
     tuple::*,
     typing::{self, Type},
-    List, Map, Option, Raw, Signature, String, Value,
+    List, Map, Object, Option, RawBuf, Signature, String, Value,
 };
 
 /// [`Dynamic`] represents a `dynamic` value in the `qi` type system.
@@ -10,15 +10,15 @@ use crate::{
 /// It is a value associated with its type information.
 ///
 /// It is represented in the format as a value prepended with its type signature.
-#[derive(Default, Clone, PartialEq, Eq, Debug, Hash)]
-pub struct Dynamic<'d> {
+#[derive(Default, Clone, PartialEq, Eq, Debug)]
+pub struct Dynamic {
     // Invariant: `value.is_assignable_to_value_type(&value_type)`
     value_type: Type,
-    value: Value<'d>,
+    value: Value,
 }
 
-impl<'v> Dynamic<'v> {
-    pub fn from_type_and_value(value_type: Type, value: Value<'v>) -> Result<Self, DynamicError> {
+impl Dynamic {
+    pub fn from_type_and_value(value_type: Type, value: Value) -> Result<Self, DynamicError> {
         if !value.is_assignable_to_value_type(&value_type) {
             return Err(DynamicError::MismatchedValueType(value, value_type));
         }
@@ -29,7 +29,7 @@ impl<'v> Dynamic<'v> {
         &self.value
     }
 
-    pub fn into_value(self) -> Value<'v> {
+    pub fn into_value(self) -> Value {
         self.value
     }
 
@@ -38,19 +38,19 @@ impl<'v> Dynamic<'v> {
     }
 }
 
-impl<'d> std::fmt::Display for Dynamic<'d> {
+impl std::fmt::Display for Dynamic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.value.fmt(f)
     }
 }
 
-#[derive(thiserror::Error, Debug, PartialEq, Eq, Hash, Clone)]
-pub enum DynamicError<'v> {
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
+pub enum DynamicError {
     #[error("mismatched value type: value {0} is not assignable to {1}")]
-    MismatchedValueType(Value<'v>, Type),
+    MismatchedValueType(Value, Type),
 }
 
-impl<'d> serde::Serialize for Dynamic<'d> {
+impl serde::Serialize for Dynamic {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -59,14 +59,14 @@ impl<'d> serde::Serialize for Dynamic<'d> {
         use serde::ser::SerializeStruct;
         serialize_struct.serialize_field(
             DynamicField::SIGNATURE,
-            &Signature::from_type(self.value_type.clone()),
+            &Signature::new(self.value_type.clone()),
         )?;
         serialize_struct.serialize_field(DynamicField::VALUE, &self.value)?;
         serialize_struct.end()
     }
 }
 
-impl<'de> serde::Deserialize<'de> for Dynamic<'de> {
+impl<'de> serde::Deserialize<'de> for Dynamic {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -74,7 +74,7 @@ impl<'de> serde::Deserialize<'de> for Dynamic<'de> {
         struct Visitor;
 
         impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = Dynamic<'de>;
+            type Value = Dynamic;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a dynamic value")
@@ -147,7 +147,9 @@ impl<'de> serde::Deserialize<'de> for Dynamic<'de> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[serde(field_identifier)]
 enum DynamicField {
     Signature,
     Value,
@@ -159,59 +161,10 @@ impl DynamicField {
     const NAMES: [&'static str; 2] = [Self::SIGNATURE, Self::VALUE];
 }
 
-impl<'de> serde::Deserialize<'de> for DynamicField {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct Visitor;
-        impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = DynamicField;
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a dynamic value field")
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match v {
-                    DynamicField::SIGNATURE => Ok(DynamicField::Signature),
-                    DynamicField::VALUE => Ok(DynamicField::Value),
-                    _ => Err(E::invalid_value(serde::de::Unexpected::Str(v), &self)),
-                }
-            }
-
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match v {
-                    0 => Ok(DynamicField::Signature),
-                    1 => Ok(DynamicField::Value),
-                    _ => Err(E::invalid_value(serde::de::Unexpected::Signed(v), &self)),
-                }
-            }
-
-            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                match v {
-                    0 => Ok(DynamicField::Signature),
-                    1 => Ok(DynamicField::Value),
-                    _ => Err(E::invalid_value(serde::de::Unexpected::Unsigned(v), &self)),
-                }
-            }
-        }
-        deserializer.deserialize_identifier(Visitor)
-    }
-}
-
 struct ValueSeed<'t>(&'t Type);
 
 impl<'t, 'de> serde::de::DeserializeSeed<'de> for ValueSeed<'t> {
-    type Value = Value<'de>;
+    type Value = Value;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -273,11 +226,12 @@ impl<'t, 'de> serde::de::DeserializeSeed<'de> for ValueSeed<'t> {
                 Value::from(v)
             }
             Type::Raw => {
-                let v = Raw::deserialize(deserializer)?;
+                let v = RawBuf::deserialize(deserializer)?;
                 Value::from(v)
             }
             Type::Object => {
-                todo!()
+                let v = Object::deserialize(deserializer)?;
+                Value::from(v)
             }
             Type::Dynamic => {
                 let v = Dynamic::deserialize(deserializer)?;
@@ -286,7 +240,7 @@ impl<'t, 'de> serde::de::DeserializeSeed<'de> for ValueSeed<'t> {
             Type::Option(t) => {
                 struct Visitor<'t>(&'t Type);
                 impl<'t, 'de> serde::de::Visitor<'de> for Visitor<'t> {
-                    type Value = Option<'de>;
+                    type Value = Option<Value>;
                     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                         formatter.write_str("an optional value")
                     }
@@ -313,7 +267,7 @@ impl<'t, 'de> serde::de::DeserializeSeed<'de> for ValueSeed<'t> {
             Type::List(t) | Type::VarArgs(t) => {
                 struct Visitor<'t>(&'t Type);
                 impl<'t, 'de> serde::de::Visitor<'de> for Visitor<'t> {
-                    type Value = List<'de>;
+                    type Value = List<Value>;
                     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                         formatter.write_str("a list or varargs value")
                     }
@@ -335,7 +289,7 @@ impl<'t, 'de> serde::de::DeserializeSeed<'de> for ValueSeed<'t> {
             Type::Map { key, value } => {
                 struct Visitor<'t>(&'t Type, &'t Type);
                 impl<'t, 'de> serde::de::Visitor<'de> for Visitor<'t> {
-                    type Value = Map<'de>;
+                    type Value = Map<Value, Value>;
                     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                         formatter.write_str("a map value")
                     }
@@ -350,7 +304,7 @@ impl<'t, 'de> serde::de::DeserializeSeed<'de> for ValueSeed<'t> {
                         {
                             pair_vec.push(kv_pair);
                         }
-                        let map = Map::from_pair_elements(pair_vec);
+                        let map = Map::from_iter(pair_vec);
                         Ok(map)
                     }
                 }
@@ -360,7 +314,7 @@ impl<'t, 'de> serde::de::DeserializeSeed<'de> for ValueSeed<'t> {
             Type::Tuple(tuple) => {
                 struct Visitor<'t>(&'t typing::Tuple);
                 impl<'t, 'de> serde::de::Visitor<'de> for Visitor<'t> {
-                    type Value = Tuple<'de>;
+                    type Value = Tuple;
                     fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                         write!(f, "a tuple value of size {len}", len = self.0.len())
                     }
@@ -406,12 +360,15 @@ mod tests {
             0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
             0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
-        let value: Dynamic = from_bytes(&bytes_in).unwrap();
+        let dynamic: Dynamic = from_bytes(&bytes_in).unwrap();
         assert_eq!(
-            value.value(),
-            &Value::from(String::from("The robot is not localized"))
+            dynamic,
+            Dynamic {
+                value_type: Type::String,
+                value: Value::from("The robot is not localized"),
+            }
         );
-        let bytes_out = to_bytes(&value).unwrap();
+        let bytes_out = to_bytes(&dynamic).unwrap();
         assert_eq!(bytes_in.as_slice(), &bytes_out);
     }
 
@@ -440,8 +397,8 @@ mod tests {
         );
         let value = Value::Tuple(Tuple::from_elements(vec![
             Value::Number(Number::Int32(42)),
-            Value::Raw(Raw::from_bytes(&[1, 2, 3])),
-            Value::Option(Box::new(Some(Value::Map(Map::from_pair_elements(vec![
+            Value::Raw(RawBuf::from(vec![1, 2, 3])),
+            Value::Option(Box::new(Some(Value::Map(Map::from_iter(vec![
                 (
                     Value::String(String::from("true_true")),
                     Value::List(vec![Value::Bool(true), Value::Bool(true)]),
