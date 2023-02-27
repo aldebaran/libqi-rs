@@ -132,7 +132,7 @@ where
     W: std::io::Write,
 {
     write_size(writer.by_ref(), raw.len())?;
-    writer.write_all(&raw)?;
+    writer.write_all(raw)?;
     Ok(())
 }
 

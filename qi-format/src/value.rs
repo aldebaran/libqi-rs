@@ -373,21 +373,21 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         E: serde::de::Error,
     {
         let str = v.encode_utf8(&mut [0; 4]).to_owned();
-        Ok(Value::from(String::from(str)))
+        Ok(Value::from(str))
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(Value::from(String::from(v.to_owned())))
+        Ok(Value::from(v.to_owned()))
     }
 
     fn visit_string<E>(self, v: std::string::String) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(Value::from(String::from(v)))
+        Ok(Value::from(v))
     }
 
     fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
