@@ -100,8 +100,6 @@ impl Value {
         }
     }
 
-    // TODO: as_XXX functions
-    //
     pub fn as_unit(&self) -> std::option::Option<Unit> {
         match self {
             Self::Tuple(t) if t.is_unit() => Some(Unit),
@@ -130,9 +128,44 @@ impl Value {
         }
     }
 
+    pub fn as_raw(&self) -> std::option::Option<&RawBuf> {
+        match self {
+            Self::Raw(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn as_option(&self) -> std::option::Option<&Option<Value>> {
+        match self {
+            Self::Option(o) => Some(o.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> std::option::Option<&List<Value>> {
+        match self {
+            Self::List(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    pub fn as_map(&self) -> std::option::Option<&Map<Value, Value>> {
+        match self {
+            Self::Map(m) => Some(m),
+            _ => None,
+        }
+    }
+
     pub fn as_tuple(&self) -> std::option::Option<&Tuple> {
         match self {
             Self::Tuple(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub fn as_object(&self) -> std::option::Option<&Object> {
+        match self {
+            Self::Object(o) => Some(o.as_ref()),
             _ => None,
         }
     }
