@@ -1,7 +1,4 @@
-use crate::{
-    num_bool::{FALSE_BOOL, TRUE_BOOL},
-    Error, Raw, RawBuf, Result, Str, String,
-};
+use crate::{Error, Raw, Result, Str, String, FALSE_BOOL, TRUE_BOOL};
 use derive_new::new;
 
 mod private {

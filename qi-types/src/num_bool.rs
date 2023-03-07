@@ -1,4 +1,4 @@
-use crate::{Error, Type};
+use crate::Type;
 use derive_more::{From, TryInto};
 use ordered_float::OrderedFloat;
 
@@ -13,9 +13,6 @@ pub use u64 as UInt64;
 pub use u8 as UInt8;
 pub type Float32 = OrderedFloat<f32>;
 pub type Float64 = OrderedFloat<f64>;
-
-pub(crate) const FALSE_BOOL: u8 = 0;
-pub(crate) const TRUE_BOOL: u8 = 1;
 
 // Serialize is derived, but Deserialize is not, because of its behavior for untagged enums:
 //   "Serde will try to match the data against each variant in order and the first one that
@@ -244,7 +241,7 @@ impl<'de> serde::Deserialize<'de> for Number {
 }
 
 impl<'de> serde::de::Deserializer<'de> for Number {
-    type Error = Error;
+    type Error = serde::de::value::Error;
 
     fn is_human_readable(&self) -> bool {
         false
@@ -276,7 +273,7 @@ impl<'de> serde::de::Deserializer<'de> for Number {
     }
 }
 
-impl<'de> serde::de::IntoDeserializer<'de, Error> for Number {
+impl<'de> serde::de::IntoDeserializer<'de, serde::de::value::Error> for Number {
     type Deserializer = Self;
 
     fn into_deserializer(self) -> Self::Deserializer {

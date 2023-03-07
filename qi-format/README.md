@@ -1,6 +1,6 @@
-The `qi-format` crate exposes types and functions for manipulating values from
-the `qi` type system and to serialize and deserialize values of these types from
-data in the `qi` format.
+The `qi-format` is a pure Rust implementation of the `qi` format. It offers
+serializers and deserializers for encoding and decoding values of the `qi` type
+system.
 
 The `qi` format is a binary representation of values. It is mainly used for
 communicating values in the `qi` messaging protocol.
@@ -27,7 +27,7 @@ TODO
 
 TODO
 
-# `qi` type system and format
+# `qi` format
 
 You may refer to the `qi` type system and format specification (reference
 `spec:/aldebaran/framework/2022/h`) document for details.
@@ -117,9 +117,3 @@ UTF-8. Therefore `qi` strings are mapped to byte arrays.
 [^no-ident]: identifiers are not serialized in the `qi` format.
 
 [^list-known-size]: The size of the sequence must be known when serialized, otherwise an error occurs.
-
-## Other types
-
-The crate defines a Rust type (or at least a type alias) for each `qi` type, and more.
-Each of those types implements [`serde::Serialize`] and [`serde::Deserialize`], which
-means they can be represented into and interpreted from the format.

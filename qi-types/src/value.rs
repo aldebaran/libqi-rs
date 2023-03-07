@@ -1,8 +1,7 @@
 use crate::{
-    num_bool::*, tuple::*, typing::Type, Dynamic, List, Map, Object, Option, RawBuf, String, Unit,
+    num_bool::*, tuple::*, typing::Type, Dynamic, List, Map, Object, Option, Raw, String, Unit,
 };
 use derive_more::{From, TryInto};
-use serde::{Deserialize, Serialize};
 
 /// The [`Value`] structure represents the `value` type in the `qi` format and
 /// is is an enumeration of every types of values defined in the format.
@@ -34,7 +33,7 @@ pub enum Value {
     #[from(ignore)]
     Number(Number),
     String(String),
-    Raw(RawBuf),
+    Raw(Raw),
     #[try_into(ignore)] // Conflicts with standard conversion T -> Opt<T>
     Option(Box<Option<Value>>),
     List(List<Value>),
@@ -128,7 +127,7 @@ impl Value {
         }
     }
 
-    pub fn as_raw(&self) -> std::option::Option<&RawBuf> {
+    pub fn as_raw(&self) -> std::option::Option<&Raw> {
         match self {
             Self::Raw(r) => Some(r),
             _ => None,
@@ -203,7 +202,7 @@ impl<'s> From<&'s str> for Value {
 ///
 /// # Example
 /// ```
-/// # use qi_format::{Value, String};
+/// # use qi_types::{Value, String};
 /// let opt = Some(Value::from(String::from("abc")));
 /// assert_eq!(Value::from(opt.clone()),
 ///            Value::Option(Box::new(opt)));
@@ -262,7 +261,7 @@ impl std::fmt::Display for Value {
     }
 }
 
-impl Serialize for Value {
+impl serde::Serialize for Value {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -390,32 +389,18 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
         Ok(Value::from(v))
     }
 
-    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(Value::String(v.into()))
-    }
-
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(Value::from(RawBuf::from(v.to_owned())))
+        Ok(Value::from(Raw::copy_from_slice(v)))
     }
 
     fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(Value::from(RawBuf::from(v)))
-    }
-
-    fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(Value::from(RawBuf::from(v)))
+        Ok(Value::from(Raw::from(v)))
     }
 
     fn visit_none<E>(self) -> Result<Self::Value, E>
@@ -429,6 +414,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     where
         D: serde::Deserializer<'de>,
     {
+        use serde::Deserialize;
         let value = Value::deserialize(deserializer)?;
         Ok(Value::from(Some(value)))
     }
@@ -472,12 +458,13 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     where
         D: serde::Deserializer<'de>,
     {
+        use serde::Deserialize;
         let value = Value::deserialize(deserializer)?;
         Ok(Value::from(Tuple::from_elements(vec![value])))
     }
 }
 
-impl<'de, 'v> Deserialize<'de> for Value
+impl<'de, 'v> serde::Deserialize<'de> for Value
 where
     'de: 'v,
 {

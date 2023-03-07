@@ -1,6 +1,6 @@
 [package]
 name = "qi-format"
-description = "Serialize/deserialize and manipulate values from the `qi` type system"
+description = "The `qi` binary format for values of the `qi` type system"
 license-file = "LICENSE.txt"
 repository = "https://github.com/nyibbang/libqi-rs"
 version = "0.1.0"
@@ -8,15 +8,4 @@ edition = "2021"
 rust-version = "1.59"
 
 [dependencies]
-derive-new = "0.5.9"
-derive_more = "0.99.17"
-ordered-float = { version = "3.4.0", features = ["serde"] }
-serde = { version = "1.0.147", features = ["derive"] }
-serde_bytes = "0.11.9"
-thiserror = "1.0.37"
-
-[dev-dependencies]
-assert_matches = "1.5.0"
-pretty_assertions = "1.3.0"
-serde_test = "1.0.147"
-serde-value = "0.7.0"
+qi-types = { path = "../qi-types" }

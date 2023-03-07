@@ -2,7 +2,7 @@ use crate::{
     num_bool::*,
     tuple::*,
     typing::{self, Type},
-    List, Map, Object, Option, RawBuf, Signature, String, Value,
+    List, Map, Object, Option, Raw, Signature, String, Value,
 };
 
 /// [`Dynamic`] represents a `dynamic` value in the `qi` type system.
@@ -148,8 +148,7 @@ impl<'de> serde::Deserialize<'de> for Dynamic {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-#[serde(field_identifier)]
+#[serde(rename_all = "lowercase", field_identifier)]
 enum DynamicField {
     Signature,
     Value,
@@ -226,7 +225,7 @@ impl<'t, 'de> serde::de::DeserializeSeed<'de> for ValueSeed<'t> {
                 Value::from(v)
             }
             Type::Raw => {
-                let v = RawBuf::deserialize(deserializer)?;
+                let v = Raw::deserialize(deserializer)?;
                 Value::from(v)
             }
             Type::Object => {
@@ -353,26 +352,6 @@ mod tests {
     use serde_test::{assert_tokens, Token};
 
     #[test]
-    fn test_dynamic_to_from_bytes() {
-        use crate::{from_bytes, to_bytes};
-        let bytes_in = [
-            0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72,
-            0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
-            0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
-        ];
-        let dynamic: Dynamic = from_bytes(&bytes_in).unwrap();
-        assert_eq!(
-            dynamic,
-            Dynamic {
-                value_type: Type::String,
-                value: Value::from("The robot is not localized"),
-            }
-        );
-        let bytes_out = to_bytes(&dynamic).unwrap();
-        assert_eq!(bytes_in.as_slice(), &bytes_out);
-    }
-
-    #[test]
     fn test_dynamic_serde() {
         let value_type = Type::Tuple(
             typing::Tuple::from_element_types_with_annotations(
@@ -397,7 +376,7 @@ mod tests {
         );
         let value = Value::Tuple(Tuple::from_elements(vec![
             Value::Number(Number::Int32(42)),
-            Value::Raw(RawBuf::from(vec![1, 2, 3])),
+            Value::Raw(Raw::from(vec![1, 2, 3])),
             Value::Option(Box::new(Some(Value::Map(Map::from_iter(vec![
                 (
                     Value::String(String::from("true_true")),

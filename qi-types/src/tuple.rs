@@ -7,24 +7,6 @@ use derive_more::{AsRef, From, Index, Into, IntoIterator};
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Unit;
 
-impl serde::Serialize for Unit {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_unit()
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Unit {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        <()>::deserialize(deserializer).map(|()| Self)
-    }
-}
-
 impl std::fmt::Display for Unit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("()")
@@ -32,47 +14,6 @@ impl std::fmt::Display for Unit {
 }
 
 /// [`Tuple`] represents a `tuple` value in the `qi` type system.
-///
-/// # Deserialization ambiguity
-///
-/// Deserializing tuples requires knowing their length. Furthermore, `value`s’ deserialization is
-/// ambiguous. This means `tuple`s’ is as well and requires context.
-///
-/// If you need to deserialize a tuple from the format and you know its length and value types, try
-/// deserializing a builtin tuple instead.
-///
-/// ```
-/// # use qi_format::{from_bytes, Result};
-/// # fn main() -> Result<()> {
-/// let bytes = [1, 0, 2, 0, 3, 0];
-/// let values : (i16, i16, i16) = from_bytes(&bytes)?;
-/// assert_eq!(values, (1, 2, 3));
-/// # Ok(())
-/// # }
-/// ```
-///
-/// You can however deserialize a tuple out of a dynamic value.
-///
-/// ```
-/// # use qi_format::{from_bytes, Dynamic, Number, Value, Result, Tuple};
-/// # fn main() -> Result<()> {
-/// let bytes = [4, 0, 0, 0, 40, 105, 105, 41, 10, 0, 0, 0, 20, 0, 0, 0];
-/// let dynamic : Dynamic = from_bytes(&bytes)?;
-/// let value = dynamic.into_value();
-/// assert_eq!(value.as_tuple(),
-///            Some(&Tuple::from_elements(vec![
-///                Value::Number(Number::Int32(10)),
-///                Value::Number(Number::Int32(20))
-///            ])));
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Tuples may also be deserialized from:
-///   - sequences, as tuples of the sequences elements.
-///   - maps, as tuples of pairs (tuples of length 2).
-///   - unit values, as tuples of length 0.
-///   - newtype structures, as tuples of length 1.
 #[derive(Default, Clone, PartialEq, Eq, From, Into, Index, IntoIterator, AsRef, Debug)]
 #[into_iterator(owned, ref)]
 pub struct Tuple(Vec<Value>);
@@ -122,6 +63,24 @@ impl std::fmt::Display for Tuple {
     }
 }
 
+impl serde::Serialize for Unit {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_unit()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Unit {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <()>::deserialize(deserializer).map(|()| Self)
+    }
+}
+
 impl serde::Serialize for Tuple {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -136,6 +95,9 @@ impl serde::Serialize for Tuple {
     }
 }
 
+// Tuples size is not known at compile time, which means we cannot provide it as information to
+// serde when deserializing a new tuple. We must rely on what the deserializer knows of the
+// value and information it can provide us.
 impl<'de> serde::Deserialize<'de> for Tuple {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
