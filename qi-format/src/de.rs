@@ -1,4 +1,5 @@
-use crate::{read, Error, Raw, RawBuf, Result, Str, String};
+use crate::{read, Error, Result};
+use qi_types::Raw;
 use serde::de::IntoDeserializer;
 
 /// # Error
@@ -65,7 +66,7 @@ trait StrDeserializer<'de> {
         V: serde::de::Visitor<'de>;
 }
 
-impl<'de> StrDeserializer<'de> for &'de Str {
+impl<'de> StrDeserializer<'de> for &'de str {
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,
@@ -107,7 +108,7 @@ trait BytesDeserializer<'de> {
         V: serde::de::Visitor<'de>;
 }
 
-impl<'de> BytesDeserializer<'de> for &'de Raw {
+impl<'de> BytesDeserializer<'de> for &'de [u8] {
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,
@@ -123,7 +124,7 @@ impl<'de> BytesDeserializer<'de> for &'de Raw {
     }
 }
 
-impl<'de> BytesDeserializer<'de> for RawBuf {
+impl<'de> BytesDeserializer<'de> for Raw {
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,

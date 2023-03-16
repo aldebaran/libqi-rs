@@ -1,4 +1,4 @@
-use crate::{write::*, Error, Raw, Result};
+use crate::{write::*, Error, Result};
 use serde::Serialize;
 
 pub fn to_writer<W, T>(writer: W, value: &T) -> Result<()>
@@ -95,7 +95,7 @@ where
 
     // bytes -> raw
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok> {
-        write_raw(&mut self.writer, Raw::new(v))
+        write_raw(&mut self.writer, v)
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok> {

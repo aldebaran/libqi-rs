@@ -1,5 +1,9 @@
-use super::*;
 use pretty_assertions::assert_eq;
+use qi_format::*;
+use qi_types::{
+    list, list_ty, map, map_ty, struct_ty, tuple_ty, Dynamic, MetaMethod, MetaObject, MetaProperty,
+    MetaSignal, Object, Signature, Type, Value,
+};
 use std::collections::BTreeMap;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
@@ -66,10 +70,7 @@ fn test_dynamic_to_from_bytes() {
     let dynamic: Dynamic = from_bytes(&bytes_in).unwrap();
     assert_eq!(
         dynamic,
-        Dynamic {
-            value_type: Type::String,
-            value: Value::from("The robot is not localized"),
-        }
+        Dynamic::new(Value::from("The robot is not localized"), Type::String).unwrap()
     );
     let bytes_out = to_bytes(&dynamic).unwrap();
     assert_eq!(bytes_in.as_slice(), &bytes_out);
@@ -188,6 +189,8 @@ fn test_object_to_from_bytes() {
 
     let object: Object = from_bytes(&bytes_in).unwrap();
 
+    use qi_types::ty::StaticGetType;
+
     assert_eq!(
         object,
         Object {
@@ -195,74 +198,71 @@ fn test_object_to_from_bytes() {
                 methods: map![
                     0 => MetaMethod {
                         uid: 0,
-                        return_signature: Signature::new(Type::UInt64),
+                        return_signature: Signature::new(Some(Type::UInt64)),
                         name: String::from("registerEvent"),
-                        parameters_signature: Signature::new(tuple_type![
+                        parameters_signature: Signature::new(Some(tuple_ty![
                             Type::UInt32,
                             Type::UInt32,
                             Type::UInt64,
-                        ]),
+                        ])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     1 => MetaMethod {
                         uid: 1,
-                        return_signature: Signature::new(Type::Unit),
+                        return_signature: Signature::new(Some(Type::Unit)),
                         name: String::from("unregisterEvent"),
-                        parameters_signature: Signature::new(tuple_type![
+                        parameters_signature: Signature::new(Some(tuple_ty![
                             Type::UInt32,
                             Type::UInt32,
                             Type::UInt64,
-                        ]),
+                        ])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     2 => MetaMethod {
                         uid: 2,
-                        return_signature: Signature::new(MetaObject::get_type()),
+                        return_signature: Signature::new(Some(MetaObject::get_type())),
                         name: String::from("metaObject"),
-                        parameters_signature: Signature::new(tuple_type![Type::UInt32]),
+                        parameters_signature: Signature::new(Some(tuple_ty![Type::UInt32])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     3 => MetaMethod {
                         uid: 3,
-                        return_signature: Signature::new(Type::Unit),
+                        return_signature: Signature::new(Some(Type::Unit)),
                         name: String::from("terminate"),
-                        parameters_signature: Signature::new(tuple_type![Type::UInt32]),
+                        parameters_signature: Signature::new(Some(tuple_ty![Type::UInt32])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     5 => MetaMethod {
                         uid: 5,
-                        return_signature: Signature::new(Type::Dynamic),
+                        return_signature: Signature::dynamic(),
                         name: String::from("property"),
-                        parameters_signature: Signature::new(tuple_type![Type::Dynamic]),
+                        parameters_signature: Signature::new(Some(tuple_ty![None])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     6 => MetaMethod {
                         uid: 6,
-                        return_signature: Signature::new(Type::Unit),
+                        return_signature: Signature::new(Some(Type::Unit)),
                         name: String::from("setProperty"),
-                        parameters_signature: Signature::new(tuple_type![
-                            Type::Dynamic,
-                            Type::Dynamic
-                        ]),
+                        parameters_signature: Signature::new(Some(tuple_ty![None, None])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     7 => MetaMethod {
                         uid: 7,
-                        return_signature: Signature::new(typing::list(Type::String)),
+                        return_signature: Signature::new(Some(list_ty!(Type::String))),
                         name: String::from("properties"),
-                        parameters_signature: Signature::new(tuple_type![]),
+                        parameters_signature: Signature::new(Some(tuple_ty![])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
@@ -270,113 +270,112 @@ fn test_object_to_from_bytes() {
                     8 =>
                     MetaMethod {
                         uid: 8,
-                        return_signature: Signature::new(Type::UInt64),
+                        return_signature: Signature::new(Some(Type::UInt64)),
                         name: String::from("registerEventWithSignature"),
-                        parameters_signature: Signature::new(tuple_type![
+                        parameters_signature: Signature::new(Some(tuple_ty![
                             Type::UInt32,
                             Type::UInt32,
                             Type::UInt64,
                             Type::String
-                        ]),
+                        ])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     80 => MetaMethod {
                         uid: 80,
-                        return_signature: Signature::new(Type::Bool),
+                        return_signature: Signature::new(Some(Type::Bool)),
                         name: String::from("isStatsEnabled"),
-                        parameters_signature: Signature::new(tuple_type![]),
+                        parameters_signature: Signature::new(Some(tuple_ty![])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     81 => MetaMethod {
                         uid: 81,
-                        return_signature: Signature::new(Type::Unit),
+                        return_signature: Signature::new(Some(Type::Unit)),
                         name: String::from("enableStats"),
-                        parameters_signature: Signature::new(tuple_type![Type::Bool]),
+                        parameters_signature: Signature::new(Some(tuple_ty![Type::Bool])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     82 => MetaMethod {
                         uid: 82,
-                        return_signature: Signature::new({
-                            let minmaxsum = annotated_tuple_type! {
-                                "MinMaxSum" => {
-                                    "minValue" => Type::Float32,
-                                    "maxValue" => Type::Float32,
-                                    "cumulatedValue" => Type::Float32,
+                        return_signature: Signature::new(Some({
+                            let minmaxsum = struct_ty! {
+                                MinMaxSum {
+                                    minValue: Type::Float32,
+                                    maxValue: Type::Float32,
+                                    cumulatedValue: Type::Float32,
                                 }
                             };
-                            map_type! {
-                                Type::UInt32 => annotated_tuple_type! {
-                                    "MethodStatistics" => {
-                                        "count" => Type::UInt32,
-                                        "wall" => minmaxsum.clone(),
-                                        "user" => minmaxsum.clone(),
-                                        "system" => minmaxsum,
+                            map_ty!(Type::UInt32, struct_ty! {
+                                    MethodStatistics {
+                                        count: Type::UInt32,
+                                        wall: minmaxsum.clone(),
+                                        user: minmaxsum.clone(),
+                                        system: minmaxsum,
                                     }
                                 }
-                            }
-                        }),
+                            )
+                        })),
                         name: String::from("stats"),
-                        parameters_signature: Signature::new(tuple_type![]),
+                        parameters_signature: Signature::new(Some(tuple_ty![])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     83 => MetaMethod {
                         uid: 83,
-                        return_signature: Signature::new(Type::Unit),
+                        return_signature: Signature::new(Some(Type::Unit)),
                         name: String::from("clearStats"),
-                        parameters_signature: Signature::new(tuple_type![]),
+                        parameters_signature: Signature::new(Some(tuple_ty![])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     84 => MetaMethod {
                         uid: 84,
-                        return_signature: Signature::new(Type::Bool),
+                        return_signature: Signature::new(Some(Type::Bool)),
                         name: String::from("isTraceEnabled"),
-                        parameters_signature: Signature::new(tuple_type![]),
+                        parameters_signature: Signature::new(Some(tuple_ty![])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     85 => MetaMethod {
                         uid: 85,
-                        return_signature: Signature::new(Type::Unit),
+                        return_signature: Signature::new(Some(Type::Unit)),
                         name: String::from("enableTrace"),
-                        parameters_signature: Signature::new(tuple_type![Type::Bool]),
+                        parameters_signature: Signature::new(Some(tuple_ty![Type::Bool])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     100 => MetaMethod {
                         uid: 100,
-                        return_signature: Signature::new(Type::Unit),
+                        return_signature: Signature::new(Some(Type::Unit)),
                         name: String::from("pingMe"),
-                        parameters_signature: Signature::new(tuple_type![Type::Object]),
+                        parameters_signature: Signature::new(Some(tuple_ty![Type::Object])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     101 => MetaMethod {
                         uid: 101,
-                        return_signature: Signature::new(Type::String),
+                        return_signature: Signature::new(Some(Type::String)),
                         name: String::from("ping"),
-                        parameters_signature: Signature::new(tuple_type![]),
+                        parameters_signature: Signature::new(Some(tuple_ty![])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
                     },
                     102 => MetaMethod {
                         uid: 102,
-                        return_signature: Signature::new(Type::Unit),
+                        return_signature: Signature::new(Some(Type::Unit)),
                         name: String::from("nameMe"),
-                        parameters_signature: Signature::new(tuple_type![Type::String]),
+                        parameters_signature: Signature::new(Some(tuple_ty![Type::String])),
                         description: String::new(),
                         parameters: list![],
                         return_description: String::new(),
@@ -386,36 +385,36 @@ fn test_object_to_from_bytes() {
                     86 => MetaSignal {
                         uid: 86,
                         name: String::from("traceObject"),
-                        signature: Signature::new(tuple_type![annotated_tuple_type! {
-                            "EventTrace" => {
-                                "id" => Type::UInt32,
-                                "kind" => Type::Int32,
-                                "slotId" => Type::UInt32,
-                                "arguments" => Type::Dynamic,
-                                "timestamp" => annotated_tuple_type! {
-                                    "timeval" => {
-                                        "tv_sec" => Type::Int64,
-                                        "tv_usec" => Type::Int64,
+                        signature: Signature::new(Some(tuple_ty![struct_ty! {
+                            EventTrace {
+                                id: Type::UInt32,
+                                kind: Type::Int32,
+                                slotId: Type::UInt32,
+                                arguments: None,
+                                timestamp: struct_ty! {
+                                    timeval {
+                                        tv_sec: Type::Int64,
+                                        tv_usec: Type::Int64,
                                     }
                                 },
-                                "userUsTime" => Type::Int64,
-                                "systemUsTime" => Type::Int64,
-                                "callerContext" => Type::UInt32,
-                                "calleeContext" => Type::UInt32,
+                                userUsTime: Type::Int64,
+                                systemUsTime: Type::Int64,
+                                callerContext: Type::UInt32,
+                                calleeContext: Type::UInt32,
                             }
-                        }]),
+                        }])),
                     },
                     103 => MetaSignal {
                         uid: 103,
                         name: String::from("name"),
-                        signature: Signature::new(tuple_type![Type::String]),
+                        signature: Signature::new(Some(tuple_ty![Type::String])),
                     },
                 },
                 properties: map! {
                     103 => MetaProperty {
                         uid: 103,
                         name: String::from("name"),
-                        signature: Signature::new(Type::String),
+                        signature: Signature::new(Some(Type::String)),
                     },
                 },
                 description: String::new(),

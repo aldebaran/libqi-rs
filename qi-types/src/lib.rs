@@ -4,7 +4,7 @@ mod num_bool;
 mod object;
 mod signature;
 mod tuple;
-mod ty;
+pub mod ty;
 mod value;
 
 #[doc(inline)]

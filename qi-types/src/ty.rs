@@ -477,12 +477,12 @@ macro_rules! struct_ty {
 }
 
 /// Trait for types that can be statically reflected on.
-pub(crate) trait StaticGetType {
+pub trait StaticGetType {
     fn get_type() -> Type;
 }
 
 /// Trait for types that can be dynamically reflected on.
-pub(crate) trait DynamicGetType {
+pub trait DynamicGetType {
     fn get_type(&self) -> Type;
 
     fn is_assignable_to(&self, t: &Type) -> bool {

@@ -235,10 +235,10 @@ where
 #[macro_export]
 macro_rules! map {
     ($($k:expr => $v:expr),+ $(,)*) => {
-        $crate::map::Map::from_iter([$(($k, $v)),+])
+        $crate::Map::from_iter([$(($k, $v)),+])
     };
     () => {
-        $crate::map::Map::new()
+        $crate::Map::new()
     }
 }
 

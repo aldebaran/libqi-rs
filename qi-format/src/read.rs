@@ -1,5 +1,5 @@
-use crate::{Error, Raw, Result, Str, String, FALSE_BOOL, TRUE_BOOL};
-use derive_new::new;
+use crate::{Error, Result};
+use qi_types::Raw;
 
 mod private {
     pub trait Sealed {}
@@ -30,8 +30,8 @@ pub trait Read: private::Sealed {
     fn read_bool(&mut self) -> Result<bool> {
         let byte = self.read_byte()?;
         match byte {
-            FALSE_BOOL => Ok(false),
-            TRUE_BOOL => Ok(true),
+            crate::FALSE_BOOL => Ok(false),
+            crate::TRUE_BOOL => Ok(true),
             _ => Err(Error::NotABoolValue(byte)),
         }
     }
@@ -125,9 +125,15 @@ where
     }
 }
 
-#[derive(new, Debug)]
+#[derive(Debug)]
 pub struct IoRead<R> {
     reader: R,
+}
+
+impl<R> IoRead<R> {
+    pub fn new(reader: R) -> Self {
+        Self { reader }
+    }
 }
 
 impl<R> private::Sealed for IoRead<R> where R: std::io::Read {}
@@ -136,7 +142,7 @@ impl<R> Read for IoRead<R>
 where
     R: std::io::Read,
 {
-    type Raw = RawBuf;
+    type Raw = Raw;
     type Str = String;
 
     fn read_byte(&mut self) -> Result<u8> {
@@ -155,27 +161,33 @@ where
         let size = self.read_size()?;
         let mut buf = vec![0; size];
         self.reader.read_exact(&mut buf)?;
-        Ok(RawBuf::from(buf))
+        Ok(Raw::from(buf))
     }
 
     // equivalence: string -> raw
     fn read_str(&mut self) -> Result<Self::Str> {
         let raw = self.read_raw()?;
-        let str = String::from_utf8(raw.into_vec()).map_err(|e| e.utf8_error())?;
+        let str = String::from_utf8(raw.into()).map_err(|e| e.utf8_error())?;
         Ok(str)
     }
 }
 
-#[derive(new, Debug)]
+#[derive(Debug)]
 pub struct SliceRead<'b> {
     data: &'b [u8],
+}
+
+impl<'b> SliceRead<'b> {
+    pub fn new(data: &'b [u8]) -> Self {
+        Self { data }
+    }
 }
 
 impl<'b> private::Sealed for SliceRead<'b> {}
 
 impl<'b> Read for SliceRead<'b> {
-    type Str = &'b Str;
-    type Raw = &'b Raw;
+    type Str = &'b str;
+    type Raw = &'b [u8];
 
     fn read_byte(&mut self) -> Result<u8> {
         let (&byte, tail) = self.data.split_first().ok_or_else(|| {
@@ -205,7 +217,7 @@ impl<'b> Read for SliceRead<'b> {
         }
         let (head, tail) = self.data.split_at(size);
         self.data = tail;
-        Ok(Raw::new(head))
+        Ok(head)
     }
 
     // equivalence: string -> raw
@@ -254,8 +266,8 @@ mod tests {
     #[test]
     fn test_io_read_raw() {
         let mut read = IoRead::new(&[3, 0, 0, 0, 97, 98, 99, 2, 0, 0, 0, 1, 2][..]);
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, [97, 98, 99]));
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, [1, 2]));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[97, 98, 99])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[1, 2])));
         assert_matches!(read.read_raw(), Err(Error::Io(_)));
     }
 
@@ -288,9 +300,9 @@ mod tests {
     #[test]
     fn test_slice_read_raw() {
         let mut read = SliceRead::new(&[1, 0, 0, 0, 100, 1, 0, 0, 0, 1, 0, 0, 0, 0]);
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::new(&[100])));
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::new(&[1])));
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::new(&[])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[100])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[1])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[])));
         assert_matches!(read.read_raw(), Err(Error::Io(_)));
     }
 

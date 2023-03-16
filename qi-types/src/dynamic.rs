@@ -20,6 +20,12 @@ impl Dynamic {
     pub fn new(value: Value, t: Type) -> Result<Self, TypeMismatchError> {
         Ok(Self(ValueWithType::new(value, t)?))
     }
+
+    pub fn from_value(value: Value) -> Self {
+        use ty::DynamicGetType;
+        let t = value.get_type();
+        Self(ValueWithType::new(value, t).unwrap())
+    }
 }
 
 impl std::fmt::Display for Dynamic {

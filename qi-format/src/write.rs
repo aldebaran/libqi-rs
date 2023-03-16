@@ -1,7 +1,4 @@
-use crate::{
-    num_bool::{FALSE_BOOL, TRUE_BOOL},
-    Error, Raw, Result, Str,
-};
+use crate::{Error, Result, FALSE_BOOL, TRUE_BOOL};
 
 pub fn write_byte<W>(mut writer: W, b: u8) -> Result<()>
 where
@@ -120,14 +117,14 @@ where
     write_u32(writer, size)
 }
 
-pub fn write_str<W>(writer: W, str: &Str) -> Result<()>
+pub fn write_str<W>(writer: W, str: &str) -> Result<()>
 where
     W: std::io::Write,
 {
-    write_raw(writer, Raw::new(str.as_bytes()))
+    write_raw(writer, str.as_bytes())
 }
 
-pub fn write_raw<W>(mut writer: W, raw: &Raw) -> Result<()>
+pub fn write_raw<W>(mut writer: W, raw: &[u8]) -> Result<()>
 where
     W: std::io::Write,
 {
@@ -308,7 +305,7 @@ mod tests {
     #[test]
     fn test_write_raw() {
         let mut buf = Vec::new();
-        write_raw(&mut buf, &Raw::new(&[1, 11, 111][..])).unwrap();
+        write_raw(&mut buf, &[1, 11, 111][..]).unwrap();
         assert_eq!(buf, [3, 0, 0, 0, 1, 11, 111]);
     }
 }
