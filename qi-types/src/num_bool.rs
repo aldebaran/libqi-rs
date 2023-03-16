@@ -1,18 +1,36 @@
-use crate::Type;
+use crate::{ty, Type};
 use derive_more::{From, TryInto};
 use ordered_float::OrderedFloat;
 
-pub use bool as Bool;
-pub use i16 as Int16;
-pub use i32 as Int32;
-pub use i64 as Int64;
-pub use i8 as Int8;
-pub use u16 as UInt16;
-pub use u32 as UInt32;
-pub use u64 as UInt64;
-pub use u8 as UInt8;
 pub type Float32 = OrderedFloat<f32>;
 pub type Float64 = OrderedFloat<f64>;
+
+macro_rules! impl_ty_traits {
+    ($nt:ident => $vt:ident, $($tail:tt)*) => {
+        impl $crate::ty::StaticGetType for $nt {
+            fn get_type() -> Type {
+                Type::$vt
+            }
+        }
+
+        impl_ty_traits!{ $($tail)* }
+    };
+    () => {}
+}
+
+impl_ty_traits! {
+    bool => Bool,
+    i16 => Int16,
+    i32 => Int32,
+    i64 => Int64,
+    i8 => Int8,
+    u16 => UInt16,
+    u32 => UInt32,
+    u64 => UInt64,
+    u8 => UInt8,
+    Float32 => Float32,
+    Float64 => Float64,
+}
 
 // Serialize is derived, but Deserialize is not, because of its behavior for untagged enums:
 //   "Serde will try to match the data against each variant in order and the first one that
@@ -22,69 +40,69 @@ pub type Float64 = OrderedFloat<f64>;
 )]
 #[serde(untagged)]
 pub enum Number {
-    Int8(Int8),
-    UInt8(UInt8),
-    Int16(Int16),
-    UInt16(UInt16),
-    Int32(Int32),
-    UInt32(UInt32),
-    Int64(Int64),
-    UInt64(UInt64),
+    Int8(i8),
+    UInt8(u8),
+    Int16(i16),
+    UInt16(u16),
+    Int32(i32),
+    UInt32(u32),
+    Int64(i64),
+    UInt64(u64),
     Float32(Float32),
     Float64(Float64),
 }
 
 impl Number {
-    pub fn as_int8(&self) -> Option<Int8> {
+    pub fn as_int8(&self) -> Option<i8> {
         match self {
             Self::Int8(v) => Some(*v),
             _ => None,
         }
     }
 
-    pub fn as_uint8(&self) -> Option<UInt8> {
+    pub fn as_uint8(&self) -> Option<u8> {
         match self {
             Self::UInt8(v) => Some(*v),
             _ => None,
         }
     }
 
-    pub fn as_int16(&self) -> Option<Int16> {
+    pub fn as_int16(&self) -> Option<i16> {
         match self {
             Self::Int16(v) => Some(*v),
             _ => None,
         }
     }
 
-    pub fn as_uint16(&self) -> Option<UInt16> {
+    pub fn as_uint16(&self) -> Option<u16> {
         match self {
             Self::UInt16(v) => Some(*v),
             _ => None,
         }
     }
 
-    pub fn as_int32(&self) -> Option<Int32> {
+    pub fn as_int32(&self) -> Option<i32> {
         match self {
             Self::Int32(v) => Some(*v),
             _ => None,
         }
     }
 
-    pub fn as_uint32(&self) -> Option<UInt32> {
+    pub fn as_uint32(&self) -> Option<u32> {
         match self {
             Self::UInt32(v) => Some(*v),
             _ => None,
         }
     }
 
-    pub fn as_int64(&self) -> Option<Int64> {
+    pub fn as_int64(&self) -> Option<i64> {
         match self {
             Self::Int64(v) => Some(*v),
             _ => None,
         }
     }
 
-    pub fn as_uint64(&self) -> Option<UInt64> {
+    pub fn as_uint64(&self) -> Option<u64> {
         match self {
             Self::UInt64(v) => Some(*v),
             _ => None,
@@ -150,6 +168,23 @@ impl std::fmt::Display for Number {
             Number::UInt64(v) => v.fmt(f),
             Number::Float32(v) => v.fmt(f),
             Number::Float64(v) => v.fmt(f),
+        }
+    }
+}
+
+impl ty::DynamicGetType for Number {
+    fn get_type(&self) -> Type {
+        match self {
+            Number::Int8(v) => v.get_type(),
+            Number::UInt8(v) => v.get_type(),
+            Number::Int16(v) => v.get_type(),
+            Number::UInt16(v) => v.get_type(),
+            Number::Int32(v) => v.get_type(),
+            Number::UInt32(v) => v.get_type(),
+            Number::Int64(v) => v.get_type(),
+            Number::UInt64(v) => v.get_type(),
+            Number::Float32(v) => v.get_type(),
+            Number::Float64(v) => v.get_type(),
         }
     }
 }

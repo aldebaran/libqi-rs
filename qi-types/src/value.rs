@@ -1,35 +1,17 @@
 use crate::{
-    num_bool::*, tuple::*, typing::Type, Dynamic, List, Map, Object, Option, Raw, String, Unit,
+    num_bool::*,
+    tuple::*,
+    ty::{self, Type},
+    Dynamic, FormatterExt, List, Map, Object, Raw,
 };
 use derive_more::{From, TryInto};
 
-/// The [`Value`] structure represents the `value` type in the `qi` format and
-/// is is an enumeration of every types of values defined in the format.
-///
-/// # Serialization
-///
-/// Any serializable value can be represented as a `Value`. They can be both serialized and
-/// deserialized to and from `Value`s.
-// TODO: insert example here
-///
-/// `Value`s are serialized transparently. This means that, for instance, a `Value::String(s)` is
-/// serialized as would the string `s` be.
-// TODO: insert example here
-///
-/// `Value`s cannot be deserialized from the `qi` format directly, because the `qi` format is not
-/// self-describing, and `value` deserialization requires type information.
-///
-/// This is what the [`Dynamic`] type is for. If you want to deserialize a value from the
-/// format, deserialize an [`Dynamic`] instead and then convert it into a `Value`.
-// TODO: insert example here
-///
-/// `Value`s may however be deserialized from a self-describing format.
-// TODO: insert example here
+/// The [`Value`] structure represents any value of `qi` type system and
+/// is is an enumeration of every types of values.
 #[derive(Clone, From, TryInto, PartialEq, Eq, Debug)]
-#[try_into(owned, ref, ref_mut)]
 pub enum Value {
-    Unit(Unit),
-    Bool(Bool),
+    Unit,
+    Bool(bool),
     #[from(ignore)]
     Number(Number),
     String(String),
@@ -44,69 +26,14 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn unit() -> Self {
-        Self::Tuple(Tuple::unit())
-    }
-
-    pub(crate) fn is_assignable_to_value_type(&self, t: &Type) -> bool {
-        // Any value is assignable to dynamic.
-        if t == &Type::Dynamic {
-            return true;
-        }
-
+    pub fn as_unit(&self) -> std::option::Option<()> {
         match self {
-            Value::Unit(_) => t == &Type::Unit,
-            Value::Bool(_) => t == &Type::Bool,
-            Value::Number(n) => n.is_assignable_to_value_type(t),
-            Value::String(_) => t == &Type::String,
-            Value::Raw(_) => t == &Type::Raw,
-            Value::Option(option) => match t {
-                Type::Option(t) => match option.as_ref() {
-                    Some(value) => value.is_assignable_to_value_type(t),
-                    None => true, // no value, could be assigned to anything.
-                },
-                _ => false,
-            },
-            Value::List(list) => match t {
-                Type::List(t) => list
-                    .iter()
-                    .all(|element| element.is_assignable_to_value_type(t)),
-                _ => false,
-            },
-            Value::Map(map) => match t {
-                Type::Map {
-                    key: key_type,
-                    value: value_type,
-                } => map.iter().all(|(key, value)| {
-                    key.is_assignable_to_value_type(key_type)
-                        && value.is_assignable_to_value_type(value_type)
-                }),
-                _ => false,
-            },
-            Value::Tuple(tuple) => match t {
-                Type::Tuple(tuple_type) => {
-                    if tuple.len() != tuple_type.len() {
-                        return false;
-                    }
-                    tuple.elements().iter().zip(tuple_type.element_types()).all(
-                        |(element, element_type)| element.is_assignable_to_value_type(element_type),
-                    )
-                }
-                _ => false,
-            },
-            Value::Object(_) => t == &Type::Object,
-            Value::Dynamic(dynamic) => dynamic.is_assignable_to_value_type(t),
-        }
-    }
-
-    pub fn as_unit(&self) -> std::option::Option<Unit> {
-        match self {
-            Self::Tuple(t) if t.is_unit() => Some(Unit),
+            Self::Unit => Some(()),
             _ => None,
         }
     }
 
-    pub fn as_bool(&self) -> std::option::Option<Bool> {
+    pub fn as_bool(&self) -> std::option::Option<bool> {
         match self {
             Self::Bool(b) => Some(*b),
             _ => None,
@@ -179,7 +106,7 @@ impl Value {
 
 impl Default for Value {
     fn default() -> Self {
-        Self::unit()
+        Value::Unit
     }
 }
 
@@ -202,7 +129,7 @@ impl<'s> From<&'s str> for Value {
 ///
 /// # Example
 /// ```
-/// # use qi_types::{Value, String};
+/// # use qi_types::Value;
 /// let opt = Some(Value::from(String::from("abc")));
 /// assert_eq!(Value::from(opt.clone()),
 ///            Value::Option(Box::new(opt)));
@@ -225,38 +152,38 @@ impl From<Dynamic> for Value {
     }
 }
 
+impl ty::DynamicGetType for Value {
+    fn get_type(&self) -> Type {
+        match self {
+            Value::Unit => ().get_type(),
+            Value::Bool(b) => b.get_type(),
+            Value::Number(n) => n.get_type(),
+            Value::String(s) => s.get_type(),
+            Value::Raw(r) => r.get_type(),
+            Value::Option(o) => o.get_type(),
+            Value::List(l) => l.get_type(),
+            Value::Map(m) => m.get_type(),
+            Value::Tuple(t) => t.get_type(),
+            Value::Object(o) => o.get_type(),
+            Value::Dynamic(d) => d.get_type(),
+        }
+    }
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Value::Unit(u) => u.fmt(f),
-            Value::Bool(b) => b.fmt(f),
-            Value::Number(n) => n.fmt(f),
-            Value::String(s) => s.fmt(f),
-            Value::Raw(r) => {
-                for byte in r.iter() {
-                    write!(f, "\\x{byte:x}")?;
-                }
-                Ok(())
-            }
-            Value::Option(o) => match o.as_ref() {
-                Some(v) => write!(f, "some({v})"),
-                None => f.write_str("none"),
-            },
-            Value::List(l) => {
-                let mut add_sep = false;
-                for element in l {
-                    if add_sep {
-                        f.write_str(", ")?;
-                    }
-                    element.fmt(f)?;
-                    add_sep = true;
-                }
-                Ok(())
-            }
-            Value::Map(m) => m.fmt(f),
-            Value::Tuple(t) => t.fmt(f),
-            Value::Object(o) => o.fmt(f),
-            Value::Dynamic(d) => d.fmt(f),
+            Self::Unit => f.write_str("()"),
+            Self::Bool(b) => b.fmt(f),
+            Self::Number(n) => n.fmt(f),
+            Self::String(s) => s.fmt(f),
+            Self::Raw(r) => f.write_raw(r),
+            Self::Option(o) => f.write_option(o),
+            Self::List(l) => f.write_list(l),
+            Self::Map(m) => m.fmt(f),
+            Self::Tuple(t) => t.fmt(f),
+            Self::Object(o) => o.fmt(f),
+            Self::Dynamic(d) => d.fmt(f),
         }
     }
 }
@@ -267,7 +194,7 @@ impl serde::Serialize for Value {
         S: serde::Serializer,
     {
         match self {
-            Value::Unit(u) => u.serialize(serializer),
+            Value::Unit => ().serialize(serializer),
             Value::Bool(b) => b.serialize(serializer),
             Value::Number(n) => n.serialize(serializer),
             Value::String(s) => s.serialize(serializer),
@@ -283,6 +210,7 @@ impl serde::Serialize for Value {
 }
 
 struct ValueVisitor;
+
 impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     type Value = Value;
 
@@ -451,7 +379,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     where
         E: serde::de::Error,
     {
-        Ok(Value::unit())
+        Ok(Value::Unit)
     }
 
     fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -460,7 +388,7 @@ impl<'de> serde::de::Visitor<'de> for ValueVisitor {
     {
         use serde::Deserialize;
         let value = Value::deserialize(deserializer)?;
-        Ok(Value::from(Tuple::from_elements(vec![value])))
+        Ok(Value::from(Tuple::from_vec(vec![value])))
     }
 }
 

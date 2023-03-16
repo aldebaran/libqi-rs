@@ -1,15 +1,9 @@
-use crate::Value;
+use crate::{ty, Type, Value};
 use derive_more::{AsRef, From, Index, Into, IntoIterator};
 
-/// # Serialization / Deserialization
-///
-/// This is represented as a `unit` in the Serde data model.
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct Unit;
-
-impl std::fmt::Display for Unit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("()")
+impl ty::StaticGetType for () {
+    fn get_type() -> Type {
+        Type::Unit
     }
 }
 
@@ -23,7 +17,7 @@ impl Tuple {
         Self::unit()
     }
 
-    pub fn from_elements(v: Vec<Value>) -> Self {
+    pub fn from_vec(v: Vec<Value>) -> Self {
         Self(v)
     }
 
@@ -63,21 +57,14 @@ impl std::fmt::Display for Tuple {
     }
 }
 
-impl serde::Serialize for Unit {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_unit()
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Unit {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        <()>::deserialize(deserializer).map(|()| Self)
+impl ty::DynamicGetType for Tuple {
+    fn get_type(&self) -> Type {
+        Type::Tuple(ty::TupleType::Tuple(
+            self.0
+                .iter()
+                .map(|element| Some(element.get_type()))
+                .collect(),
+        ))
     }
 }
 
@@ -114,7 +101,7 @@ impl<'de> serde::Deserialize<'de> for Tuple {
             where
                 E: serde::de::Error,
             {
-                Ok(Tuple::from_elements(vec![]))
+                Ok(Tuple::from_vec(vec![]))
             }
 
             fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -122,7 +109,7 @@ impl<'de> serde::Deserialize<'de> for Tuple {
                 D: serde::Deserializer<'de>,
             {
                 let value = serde::Deserialize::deserialize(deserializer)?;
-                Ok(Tuple::from_elements(vec![value]))
+                Ok(Tuple::from_vec(vec![value]))
             }
 
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -136,7 +123,7 @@ impl<'de> serde::Deserialize<'de> for Tuple {
                 while let Some(element) = seq.next_element()? {
                     elements.push(element);
                 }
-                Ok(Tuple::from_elements(elements))
+                Ok(Tuple::from_vec(elements))
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -148,10 +135,10 @@ impl<'de> serde::Deserialize<'de> for Tuple {
                     None => Vec::new(),
                 };
                 while let Some((key, value)) = map.next_entry()? {
-                    let element = Value::Tuple(Tuple::from_elements(vec![key, value]));
+                    let element = Value::Tuple(Tuple::from_vec(vec![key, value]));
                     elements.push(element);
                 }
-                Ok(Tuple::from_elements(elements))
+                Ok(Tuple::from_vec(elements))
             }
         }
         deserializer.deserialize_any(Visitor)
@@ -171,11 +158,6 @@ macro_rules! tuple {
 mod tests {
     use super::*;
     use serde_test::{assert_de_tokens, assert_tokens, Token};
-
-    #[test]
-    fn test_unit_serde() {
-        assert_tokens(&Unit, &[Token::Unit]);
-    }
 
     #[test]
     fn test_tuple_serde() {
@@ -214,11 +196,11 @@ mod tests {
     fn test_tuple_de_maps() {
         assert_de_tokens(
             &Tuple(vec![
-                Value::from(Tuple::from_elements(vec![
+                Value::from(Tuple::from_vec(vec![
                     Value::from("thirty two point five"),
                     Value::from(32.5f32),
                 ])),
-                Value::from(Tuple::from_elements(vec![
+                Value::from(Tuple::from_vec(vec![
                     Value::from("thirteen point three"),
                     Value::from(13.3f32),
                 ])),

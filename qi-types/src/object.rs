@@ -1,18 +1,24 @@
-use crate::{annotated_tuple_type, map_type, typing, List, Map, Signature, String, Type, UInt32};
+use crate::{struct_ty, ty, List, Map, Signature, Type};
 
 #[derive(Clone, Default, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Object {
-    meta_object: MetaObject,
-    service_id: UInt32,
-    object_id: UInt32,
+    pub meta_object: MetaObject,
+    pub service_id: u32,
+    pub object_id: u32,
     #[serde(with = "serde_sha1")]
-    object_uid: [UInt32; 5], // SHA-1 digest
+    pub object_uid: [u32; 5], // SHA-1 digest
 }
 
 impl std::fmt::Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let [h0, h1, h2, h3, h4] = &self.object_uid;
         write!(f, "object(uid={h0:x}-{h1:x}-{h2:x}-{h3:x}-{h4:x})",)
+    }
+}
+
+impl ty::StaticGetType for Object {
+    fn get_type() -> Type {
+        Type::Object
     }
 }
 
@@ -54,26 +60,26 @@ mod serde_sha1 {
 
 #[derive(Clone, Default, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MetaObject {
-    methods: Map<UInt32, MetaMethod>,
-    signals: Map<UInt32, MetaSignal>,
-    properties: Map<UInt32, MetaProperty>,
-    description: String,
+    pub methods: Map<u32, MetaMethod>,
+    pub signals: Map<u32, MetaSignal>,
+    pub properties: Map<u32, MetaProperty>,
+    pub description: String,
 }
 
-impl MetaObject {
-    pub fn get_type() -> Type {
-        annotated_tuple_type! {
-            "MetaObject" => {
-                "methods" => map_type! {
-                    Type::UInt32 => MetaMethod::get_type()
-                },
-                "signals" => map_type! {
-                    Type::UInt32 => MetaSignal::get_type()
-                },
-                "properties" => map_type! {
-                    Type::UInt32 => MetaProperty::get_type()
-                },
-                "description" => Type::String,
+impl ty::StaticGetType for MetaObject {
+    fn get_type() -> Type {
+        struct_ty! {
+            MetaObject {
+                methods: ty::map_of(
+                    Type::UInt32, MetaMethod::get_type()
+                ),
+                signals: ty::map_of(
+                    Type::UInt32, MetaSignal::get_type()
+                ),
+                properties: ty::map_of(
+                    Type::UInt32, MetaProperty::get_type()
+                ),
+                description: Type::String,
             }
         }
     }
@@ -92,26 +98,26 @@ impl MetaObject {
     serde::Deserialize,
 )]
 pub struct MetaMethod {
-    uid: UInt32,
-    return_signature: Signature,
-    name: String,
-    parameters_signature: Signature,
-    description: String,
-    parameters: List<MetaMethodParameter>,
-    return_description: String,
+    pub uid: u32,
+    pub return_signature: Signature,
+    pub name: String,
+    pub parameters_signature: Signature,
+    pub description: String,
+    pub parameters: List<MetaMethodParameter>,
+    pub return_description: String,
 }
 
-impl MetaMethod {
-    pub fn get_type() -> Type {
-        annotated_tuple_type! {
-            "MetaMethod" => {
-                "uid" => Type::UInt32,
-                "returnSignature" => Type::String,
-                "name" => Type::String,
-                "parametersSignature" => Type::String,
-                "description" => Type::String,
-                "parameters" => typing::list(MetaMethodParameter::get_type()),
-                "returnDescription" => Type::String,
+impl ty::StaticGetType for MetaMethod {
+    fn get_type() -> Type {
+        struct_ty! {
+            MetaMethod {
+                uid: Type::UInt32,
+                returnSignature: Type::String,
+                name: Type::String,
+                parametersSignature: Type::String,
+                description: Type::String,
+                parameters: ty::list_of(MetaMethodParameter::get_type()),
+                returnDescription: Type::String,
             }
         }
     }
@@ -130,16 +136,16 @@ impl MetaMethod {
     serde::Deserialize,
 )]
 pub struct MetaMethodParameter {
-    name: String,
-    description: String,
+    pub name: String,
+    pub description: String,
 }
 
-impl MetaMethodParameter {
-    pub fn get_type() -> Type {
-        annotated_tuple_type! {
-            "MetaMethodParameter" => {
-                "name" => Type::String,
-                "description" => Type::String,
+impl ty::StaticGetType for MetaMethodParameter {
+    fn get_type() -> Type {
+        struct_ty! {
+            MetaMethodParameter {
+                name: Type::String,
+                description: Type::String,
             }
         }
     }
@@ -158,18 +164,18 @@ impl MetaMethodParameter {
     serde::Deserialize,
 )]
 pub struct MetaSignal {
-    uid: u32,
-    name: String,
-    signature: Signature,
+    pub uid: u32,
+    pub name: String,
+    pub signature: Signature,
 }
 
-impl MetaSignal {
-    pub fn get_type() -> Type {
-        annotated_tuple_type! {
-            "MetaSignal" => {
-                "uid" => Type::UInt32,
-                "name" => Type::String,
-                "signature" => Type::String,
+impl ty::StaticGetType for MetaSignal {
+    fn get_type() -> Type {
+        struct_ty! {
+            MetaSignal {
+                uid: Type::UInt32,
+                name: Type::String,
+                signature: Type::String,
             }
         }
     }
@@ -188,18 +194,18 @@ impl MetaSignal {
     serde::Deserialize,
 )]
 pub struct MetaProperty {
-    uid: u32,
-    name: String,
-    signature: Signature,
+    pub uid: u32,
+    pub name: String,
+    pub signature: Signature,
 }
 
-impl MetaProperty {
-    pub fn get_type() -> Type {
-        annotated_tuple_type! {
-            "MetaProperty" => {
-                "uid" => Type::UInt32,
-                "name" => Type::String,
-                "signature" => Type::String,
+impl ty::StaticGetType for MetaProperty {
+    fn get_type() -> Type {
+        struct_ty! {
+            MetaProperty {
+                uid: Type::UInt32,
+                name: Type::String,
+                signature: Type::String,
             }
         }
     }

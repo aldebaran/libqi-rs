@@ -1,13 +1,10 @@
+use crate::{ty, Dynamic, Type, Value};
 use derive_more::{From, Index, Into, IntoIterator};
 
-/// The [`Map`] value represents an association of keys to values in the `qi` format. Both keys and
-/// values are `Value`s.
+/// The [`Map`] value represents an association of keys to values in the `qi` type system.
 ///
-/// # Unicity and order of keys
-///
-/// This type does *not* guarantee unicity of keys in the map. This means that if a map value is
-/// read from the `qi` format contains multiple equivalent keys, these keys will be duplicated in
-/// the resulting `Map` value.
+/// This type guarantees the unicity of keys. When an insertion is done, if the key already exists
+/// in the map, its value is overwritten with the inserted one.
 #[derive(Default, Clone, PartialEq, Eq, From, Into, Index, IntoIterator, Debug)]
 pub struct Map<K, V>(Vec<(K, V)>);
 
@@ -57,6 +54,30 @@ impl<K, V> Map<K, V> {
                 self.0.push((key, value));
                 None
             }
+        }
+    }
+
+    fn get_type(&self) -> Type
+    where
+        K: ty::DynamicGetType,
+        V: ty::DynamicGetType,
+    {
+        let common_types = self
+            .iter()
+            .map(|(key, value)| (Some(key.get_type()), Some(value.get_type())))
+            .reduce(|(common_key, common_value), (key, value)| {
+                (
+                    ty::common_type(common_key, key),
+                    ty::common_type(common_value, value),
+                )
+            });
+        let (key, value) = match common_types {
+            Some((key, value)) => (key, value),
+            None => (None, None),
+        };
+        Type::Map {
+            key: key.map(Box::new),
+            value: value.map(Box::new),
         }
     }
 }
@@ -113,6 +134,40 @@ where
         for (key, value) in iter {
             self.insert(key, value);
         }
+    }
+}
+
+impl<K, V> ty::StaticGetType for Map<K, V>
+where
+    K: ty::StaticGetType,
+    V: ty::StaticGetType,
+{
+    fn get_type() -> crate::Type {
+        ty::map_of(Some(K::get_type()), Some(V::get_type()))
+    }
+}
+
+impl ty::DynamicGetType for Map<Dynamic, Dynamic> {
+    fn get_type(&self) -> Type {
+        self.get_type()
+    }
+}
+
+impl ty::DynamicGetType for Map<Dynamic, Value> {
+    fn get_type(&self) -> Type {
+        self.get_type()
+    }
+}
+
+impl ty::DynamicGetType for Map<Value, Dynamic> {
+    fn get_type(&self) -> Type {
+        self.get_type()
+    }
+}
+
+impl ty::DynamicGetType for Map<Value, Value> {
+    fn get_type(&self) -> Type {
+        self.get_type()
     }
 }
 

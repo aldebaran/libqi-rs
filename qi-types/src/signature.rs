@@ -1,23 +1,27 @@
-use crate::typing::{self, Tuple, TupleAnnotations, Type};
+use crate::ty::{self, StructAnnotations, TupleType, Type};
 use derive_more::{From, Into};
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, From, Into)]
 #[into(owned, ref, ref_mut)]
-pub struct Signature(Type);
+pub struct Signature(Option<Type>);
 
 impl Signature {
-    pub fn new(t: Type) -> Self {
+    pub fn new(t: Option<Type>) -> Self {
         Self(t)
     }
 
-    pub fn into_type(self) -> Type {
+    pub fn dynamic() -> Self {
+        Self(None)
+    }
+
+    pub fn into_type(self) -> Option<Type> {
         self.0
     }
 }
 
 impl std::fmt::Display for Signature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write_type(&self.0, f)
+        write_type(self.0.as_ref(), f)
     }
 }
 
@@ -59,62 +63,64 @@ const CHAR_ANNOTATIONS_BEGIN: char = '<';
 const CHAR_ANNOTATIONS_SEP: char = ',';
 const CHAR_ANNOTATIONS_END: char = '>';
 
-fn write_type(t: &Type, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+fn write_type(t: Option<&Type>, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     use std::fmt::Write;
     match t {
-        Type::Unit => f.write_char(CHAR_VOID),
-        Type::Bool => f.write_char(CHAR_BOOL),
-        Type::Int8 => f.write_char(CHAR_INT8),
-        Type::UInt8 => f.write_char(CHAR_UINT8),
-        Type::Int16 => f.write_char(CHAR_INT16),
-        Type::UInt16 => f.write_char(CHAR_UINT16),
-        Type::Int32 => f.write_char(CHAR_INT32),
-        Type::UInt32 => f.write_char(CHAR_UINT32),
-        Type::Int64 => f.write_char(CHAR_INT64),
-        Type::UInt64 => f.write_char(CHAR_UINT64),
-        Type::Float32 => f.write_char(CHAR_FLOAT),
-        Type::Float64 => f.write_char(CHAR_DOUBLE),
-        Type::String => f.write_char(CHAR_STRING),
-        Type::Raw => f.write_char(CHAR_RAW),
-        Type::Object => f.write_char(CHAR_OBJECT),
-        Type::Dynamic => f.write_char(CHAR_DYNAMIC),
-        Type::Option(o) => {
-            f.write_char(CHAR_MARK_OPTION)?;
-            write_type(o.as_ref(), f)
-        }
-        Type::List(t) => {
-            f.write_char(CHAR_LIST_BEGIN)?;
-            write_type(t.as_ref(), f)?;
-            f.write_char(CHAR_LIST_END)
-        }
-        Type::Map { key, value } => {
-            f.write_char(CHAR_MAP_BEGIN)?;
-            write_type(key.as_ref(), f)?;
-            write_type(value.as_ref(), f)?;
-            f.write_char(CHAR_MAP_END)
-        }
-        Type::Tuple(tuple) => {
-            f.write_char(CHAR_TUPLE_BEGIN)?;
-            for element in tuple.element_types() {
-                write_type(element, f)?;
+        None => f.write_char(CHAR_DYNAMIC),
+        Some(t) => match t {
+            Type::Unit => f.write_char(CHAR_VOID),
+            Type::Bool => f.write_char(CHAR_BOOL),
+            Type::Int8 => f.write_char(CHAR_INT8),
+            Type::UInt8 => f.write_char(CHAR_UINT8),
+            Type::Int16 => f.write_char(CHAR_INT16),
+            Type::UInt16 => f.write_char(CHAR_UINT16),
+            Type::Int32 => f.write_char(CHAR_INT32),
+            Type::UInt32 => f.write_char(CHAR_UINT32),
+            Type::Int64 => f.write_char(CHAR_INT64),
+            Type::UInt64 => f.write_char(CHAR_UINT64),
+            Type::Float32 => f.write_char(CHAR_FLOAT),
+            Type::Float64 => f.write_char(CHAR_DOUBLE),
+            Type::String => f.write_char(CHAR_STRING),
+            Type::Raw => f.write_char(CHAR_RAW),
+            Type::Object => f.write_char(CHAR_OBJECT),
+            Type::Option(o) => {
+                f.write_char(CHAR_MARK_OPTION)?;
+                write_type(o.as_deref(), f)
             }
-            f.write_char(CHAR_TUPLE_END)?;
-            if let Some(annotations) = tuple.annotations() {
-                f.write_char(CHAR_ANNOTATIONS_BEGIN)?;
-                f.write_str(&annotations.name)?;
-                if let Some(fields) = &annotations.fields {
-                    for field in fields {
-                        write!(f, ",{field}", field = field)?;
-                    }
+            Type::List(t) => {
+                f.write_char(CHAR_LIST_BEGIN)?;
+                write_type(t.as_deref(), f)?;
+                f.write_char(CHAR_LIST_END)
+            }
+            Type::Map { key, value } => {
+                f.write_char(CHAR_MAP_BEGIN)?;
+                write_type(key.as_deref(), f)?;
+                write_type(value.as_deref(), f)?;
+                f.write_char(CHAR_MAP_END)
+            }
+            Type::Tuple(tuple) => {
+                f.write_char(CHAR_TUPLE_BEGIN)?;
+                for element in tuple.element_types() {
+                    write_type(element.as_ref(), f)?;
                 }
-                f.write_char(CHAR_ANNOTATIONS_END)?;
+                f.write_char(CHAR_TUPLE_END)?;
+                if let Some(annotations) = tuple.annotations() {
+                    f.write_char(CHAR_ANNOTATIONS_BEGIN)?;
+                    f.write_str(&annotations.name)?;
+                    if let Some(fields) = &annotations.field_names {
+                        for field in fields {
+                            write!(f, ",{field}", field = field)?;
+                        }
+                    }
+                    f.write_char(CHAR_ANNOTATIONS_END)?;
+                }
+                Ok(())
             }
-            Ok(())
-        }
-        Type::VarArgs(t) => {
-            f.write_char(CHAR_MARK_VAR_ARGS)?;
-            write_type(t, f)
-        }
+            Type::VarArgs(t) => {
+                f.write_char(CHAR_MARK_VAR_ARGS)?;
+                write_type(t.as_deref(), f)
+            }
+        },
     }
 }
 
@@ -129,43 +135,40 @@ where
     }
 }
 
-fn parse_type(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
+fn parse_type(iter: &mut std::str::Chars) -> Result<Option<Type>, SignatureParseError> {
     let type_str = iter.as_str();
     // Multiple characters types are read from the beginning. Therefore we clone the iterator,
     // read one char, and if we detect any marker of those types, pass the original iterator to
-    // the sub parsing function and return its result immediately.
+    // the subparsing function and return its result immediately.
     let c = iter.clone().next().ok_or(SignatureParseError::EndOfInput)?;
-    let multi_chars_type = match c {
-        CHAR_MARK_OPTION => Some(parse_option(iter)?),
-        CHAR_MARK_VAR_ARGS => Some(parse_var_args(iter)?),
-        CHAR_LIST_BEGIN => Some(parse_list(iter)?),
-        CHAR_MAP_BEGIN => Some(parse_map(iter)?),
-        CHAR_TUPLE_BEGIN => Some(parse_tuple(iter)?),
-        _ => None,
+    match c {
+        CHAR_MARK_OPTION => return Ok(Some(parse_option(iter)?)),
+        CHAR_MARK_VAR_ARGS => return Ok(Some(parse_var_args(iter)?)),
+        CHAR_LIST_BEGIN => return Ok(Some(parse_list(iter)?)),
+        CHAR_MAP_BEGIN => return Ok(Some(parse_map(iter)?)),
+        CHAR_TUPLE_BEGIN => return Ok(Some(parse_tuple(iter)?)),
+        _ => (),
     };
-    if let Some(t) = multi_chars_type {
-        return Ok(t);
-    }
     // Now all that's left are simple character types, which we already have the value of.
     // Therefore we can advance the iterator by one.
     advance_once(iter.by_ref());
     let t = match c {
-        CHAR_VOID => Type::Unit,
-        CHAR_BOOL => Type::Bool,
-        CHAR_INT8 => Type::Int8,
-        CHAR_UINT8 => Type::UInt8,
-        CHAR_INT16 => Type::Int16,
-        CHAR_UINT16 => Type::UInt16,
-        CHAR_INT32 => Type::Int32,
-        CHAR_UINT32 => Type::UInt32,
-        CHAR_INT64 => Type::Int64,
-        CHAR_UINT64 => Type::UInt64,
-        CHAR_FLOAT => Type::Float32,
-        CHAR_DOUBLE => Type::Float64,
-        CHAR_STRING => Type::String,
-        CHAR_RAW => Type::Raw,
-        CHAR_OBJECT => Type::Object,
-        CHAR_DYNAMIC => Type::Dynamic,
+        CHAR_VOID => Some(Type::Unit),
+        CHAR_BOOL => Some(Type::Bool),
+        CHAR_INT8 => Some(Type::Int8),
+        CHAR_UINT8 => Some(Type::UInt8),
+        CHAR_INT16 => Some(Type::Int16),
+        CHAR_UINT16 => Some(Type::UInt16),
+        CHAR_INT32 => Some(Type::Int32),
+        CHAR_UINT32 => Some(Type::UInt32),
+        CHAR_INT64 => Some(Type::Int64),
+        CHAR_UINT64 => Some(Type::UInt64),
+        CHAR_FLOAT => Some(Type::Float32),
+        CHAR_DOUBLE => Some(Type::Float64),
+        CHAR_STRING => Some(Type::String),
+        CHAR_RAW => Some(Type::Raw),
+        CHAR_OBJECT => Some(Type::Object),
+        CHAR_DYNAMIC => None,
         // Anything else is unexpected.
         c => return Err(SignatureParseError::UnexpectedChar(c, type_str.to_owned())),
     };
@@ -175,7 +178,7 @@ fn parse_type(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
 fn parse_option(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
     let option_str = iter.as_str();
     advance_once(iter.by_ref());
-    let value = match parse_type(iter) {
+    let value_type = match parse_type(iter) {
         Ok(t) => t,
         Err(err) => {
             return Err(match err {
@@ -186,7 +189,7 @@ fn parse_option(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError>
             })
         }
     };
-    Ok(Type::Option(Box::new(value)))
+    Ok(Type::Option(value_type.map(Box::new)))
 }
 
 fn parse_var_args(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
@@ -203,13 +206,13 @@ fn parse_var_args(iter: &mut std::str::Chars) -> Result<Type, SignatureParseErro
             })
         }
     };
-    Ok(Type::VarArgs(Box::new(value_type)))
+    Ok(Type::VarArgs(value_type.map(Box::new)))
 }
 
 fn parse_list(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
     let list_str = iter.as_str();
     advance_once(iter.by_ref());
-    let value = match parse_type(iter) {
+    let value_type = match parse_type(iter) {
         Ok(t) => t,
         Err(err) => {
             return Err(match err {
@@ -225,13 +228,13 @@ fn parse_list(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
         return Err(SignatureParseError::MissingListEnd(list_str.to_owned()));
     }
     advance_once(iter);
-    Ok(Type::List(Box::new(value)))
+    Ok(Type::List(value_type.map(Box::new)))
 }
 
 fn parse_map(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
     let map_str = iter.as_str();
     advance_once(iter.by_ref());
-    let key = match parse_type(iter) {
+    let key_type = match parse_type(iter) {
         Ok(t) => t,
         Err(err) => {
             return Err(match err {
@@ -243,7 +246,7 @@ fn parse_map(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
             })
         }
     };
-    let value = match parse_type(iter) {
+    let value_type = match parse_type(iter) {
         Ok(t) => t,
         Err(err) => {
             return Err(match err {
@@ -259,8 +262,8 @@ fn parse_map(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
     }
     advance_once(iter.by_ref());
     Ok(Type::Map {
-        key: Box::new(key),
-        value: Box::new(value),
+        key: key_type.map(Box::new),
+        value: value_type.map(Box::new),
     })
 }
 
@@ -285,26 +288,31 @@ fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> 
         match iter.clone().next() {
             Some(CHAR_ANNOTATIONS_BEGIN) => {
                 let annotations_str = iter.as_str();
-                let from_str_err_from_annotations_err = |source| SignatureParseError::Annotations {
-                    annotations: annotations_str.to_owned(),
-                    tuple: tuple_str.to_owned(),
-                    source,
-                };
                 let annotations = match parse_tuple_annotations(iter) {
                     Ok(annotations) => annotations,
-                    Err(err) => return Err(from_str_err_from_annotations_err(err)),
+                    Err(err) => {
+                        return Err(SignatureParseError::Annotations {
+                            annotations: annotations_str.to_owned(),
+                            tuple: tuple_str.to_owned(),
+                            source: err,
+                        })
+                    }
                 };
                 let tuple = match annotations {
                     Some(annotations) => {
-                        Tuple::from_element_types_with_annotations(elements, annotations).map_err(
-                            |err| from_str_err_from_annotations_err(AnnotationsError::Typing(err)),
+                        TupleType::from_annotations_of_elements(annotations, elements).map_err(
+                            |err| SignatureParseError::Annotations {
+                                annotations: annotations_str.to_owned(),
+                                tuple: tuple_str.to_owned(),
+                                source: err.into(),
+                            },
                         )?
                     }
-                    None => Tuple::from_element_types(elements),
+                    None => TupleType::Tuple(elements),
                 };
                 Type::Tuple(tuple)
             }
-            _ => Type::Tuple(Tuple::from_element_types(elements)),
+            _ => Type::Tuple(TupleType::Tuple(elements)),
         }
     };
 
@@ -313,7 +321,7 @@ fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> 
 
 fn parse_tuple_annotations(
     iter: &mut std::str::Chars,
-) -> Result<Option<TupleAnnotations>, AnnotationsError> {
+) -> Result<Option<StructAnnotations>, AnnotationsError> {
     advance_once(iter.by_ref());
     enum Accumulator {
         Name(Option<String>),
@@ -359,10 +367,13 @@ fn parse_tuple_annotations(
             }
         }
 
-        fn end(self) -> Option<TupleAnnotations> {
+        fn end(self) -> Option<StructAnnotations> {
             match self {
                 Self::Name(None) | Self::Field { name: None, .. } => None,
-                Self::Name(Some(name)) => Some(TupleAnnotations { name, fields: None }),
+                Self::Name(Some(name)) => Some(StructAnnotations {
+                    name,
+                    field_names: None,
+                }),
                 Self::Field {
                     name: Some(name),
                     previous_fields: mut fields,
@@ -371,7 +382,10 @@ fn parse_tuple_annotations(
                     if let Some(field) = current {
                         fields.get_or_insert_with(Vec::new).push(field);
                     }
-                    TupleAnnotations { name, fields }
+                    StructAnnotations {
+                        name,
+                        field_names: fields,
+                    }
                 }),
             }
         }
@@ -461,11 +475,11 @@ pub enum AnnotationsError {
     #[error("end of annotations is missing")]
     MissingTupleAnnotationEnd,
 
-    #[error("unexpected character '{0}'")]
+    #[error("unexpected annotations character '{0}'")]
     UnexpectedChar(char),
 
-    #[error("{0}")]
-    Typing(#[from] typing::TupleAnnotationsError),
+    #[error(transparent)]
+    ZipError(#[from] ty::ZipStructFieldsSizeError),
 }
 
 impl serde::Serialize for Signature {
@@ -504,6 +518,7 @@ impl<'de> serde::Deserialize<'de> for Signature {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{list_ty, map_ty, option_ty, struct_ty, tuple_ty, varargs_ty, MetaObject};
 
     #[test]
     fn test_signature_to_from_string() {
@@ -511,7 +526,7 @@ mod tests {
         macro_rules! assert_sig_to_str {
             ($t:expr, $s:expr) => {{
                 assert_eq!(
-                    Signature($t).to_string(),
+                    Signature($t.into()).to_string(),
                     $s,
                     "signature of ({t:?}) is not {s:?}",
                     t = $t,
@@ -523,7 +538,7 @@ mod tests {
             ($t:expr, $s:expr) => {{
                 assert_eq!(
                     $s.parse::<Signature>().map(|s| s.into_type()),
-                    Ok($t),
+                    Ok($t.into()),
                     "{s:?} into a signature is not {t:?}",
                     s = $s,
                     t = $t
@@ -554,97 +569,61 @@ mod tests {
         assert_sig_from_to_str!(Type::String, "s");
         assert_sig_from_to_str!(Type::Raw, "r");
         assert_sig_from_to_str!(Type::Object, "o");
-        assert_sig_from_to_str!(Type::Dynamic, "m");
-        assert_sig_from_to_str!(Type::Option(Box::new(Type::Unit)), "+v");
-        assert_sig_from_to_str!(Type::VarArgs(Box::new(Type::Dynamic)), "#m");
-        assert_sig_from_to_str!(Type::List(Box::new(Type::Int32)), "[i]");
-        assert_sig_from_to_str!(Type::List(Box::new(Type::Tuple(Tuple::unit()))), "[()]");
+        assert_sig_from_to_str!(None::<Type>, "m");
+        assert_sig_from_to_str!(ty::option_of(Type::Unit), "+v");
+        assert_sig_from_to_str!(ty::varargs_of(None), "#m");
+        assert_sig_from_to_str!(ty::list_of(Type::Int32), "[i]");
+        assert_sig_from_to_str!(ty::list_of(tuple_ty![]), "[()]");
+        assert_sig_from_to_str!(ty::map_of(Type::Float32, Type::String), "{fs}");
         assert_sig_from_to_str!(
-            Type::Map {
-                key: Box::new(Type::Float32),
-                value: Box::new(Type::String),
-            },
-            "{fs}"
-        );
-        assert_sig_from_to_str!(
-            Type::Tuple(Tuple::from_element_types(vec![
-                Type::Float32,
-                Type::String,
-                Type::UInt32
-            ],)),
+            tuple_ty![Type::Float32, Type::String, Type::UInt32],
             "(fsI)"
         );
         assert_sig_from_to_str!(
-            Type::Tuple(
-                Tuple::from_element_types_with_annotations(
-                    vec![
-                        Type::List(Box::new(Type::Tuple(Tuple::from_element_types(vec![
-                            Type::Float64,
-                            Type::Float64
-                        ])))),
-                        Type::UInt64,
-                    ],
-                    TupleAnnotations {
-                        name: "ExplorationMap".to_owned(),
-                        fields: None,
-                    }
+            struct_ty! {
+                ExplorationMap(
+                    list_ty!(tuple_ty!(Type::Float64, Type::Float64)),
+                    Type::UInt64
                 )
-                .expect("annotation error")
-            ),
+            },
             "([(dd)]L)<ExplorationMap>"
         );
         assert_sig_from_to_str!(
-            Type::Tuple(
-                Tuple::from_element_types_with_annotations(
-                    vec![
-                        Type::List(Box::new(Type::Tuple(
-                            Tuple::from_element_types_with_annotations(
-                                vec![Type::Float64, Type::Float64],
-                                TupleAnnotations {
-                                    name: "Point".to_owned(),
-                                    fields: Some(vec!["x".to_owned(), "y".to_owned()])
-                                }
-                            )
-                            .expect("annotation error")
-                        ))),
-                        Type::UInt64
-                    ],
-                    TupleAnnotations {
-                        name: "ExplorationMap".to_owned(),
-                        fields: Some(vec!["points".to_owned(), "timestamp".to_owned()])
-                    }
-                )
-                .expect("annotation error")
-            ),
+            struct_ty! {
+                ExplorationMap {
+                    points: list_ty!(struct_ty! {
+                        Point {
+                            x: Type::Float64,
+                            y: Type::Float64,
+                        }
+                    }),
+                    timestamp: Type::UInt64,
+                }
+            },
             "([(dd)<Point,x,y>]L)<ExplorationMap,points,timestamp>"
         );
         // Underscores in structure and field names are allowed.
         // Spaces between structure or field names are trimmed.
         assert_sig_from_to_str!(
             "(i)<   A_B ,  c_d   >" =>
-            Type::Tuple(Tuple::from_element_types_with_annotations(
-                vec![Type::Int32],
-                TupleAnnotations {
-                    name: "A_B".to_owned(),
-                    fields: Some(vec!["c_d".to_owned()]),
-                },
-            ).expect("annotation error")) =>
+            struct_ty!{
+                A_B {
+                    c_d: Type::Int32
+                }
+            } =>
             "(i)<A_B,c_d>"
         );
         // Annotations can be ignored if the struct name is missing.
-        assert_sig_from_to_str!("()<>" => Type::Tuple(Tuple::unit()) => "()");
-        assert_sig_from_to_str!("(i)<>" => Type::Tuple(Tuple::from_element_types(vec![Type::Int32])) => "(i)");
-        assert_sig_from_to_str!("(i)<,,,,,,,>" => Type::Tuple(Tuple::from_element_types(vec![Type::Int32])) => "(i)");
-        assert_sig_from_to_str!("(ff)<,x,y>" => Type::Tuple(Tuple::from_element_types(vec![Type::Float32, Type::Float32])) => "(ff)");
+        assert_sig_from_to_str!("()<>" => tuple_ty!() => "()");
+        assert_sig_from_to_str!("(i)<>" => tuple_ty!(Type::Int32) => "(i)");
+        assert_sig_from_to_str!("(i)<,,,,,,,>" => tuple_ty!(Type::Int32) => "(i)");
+        assert_sig_from_to_str!("(ff)<,x,y>" => tuple_ty!(Type::Float32, Type::Float32) => "(ff)");
         // Some complex type for fun.
         assert_sig_from_to_str!(
-            Type::Tuple(Tuple::from_element_types(vec![
-                Type::List(Box::new(Type::Map {
-                    key: Box::new(Type::Option(Box::new(Type::Object))),
-                    value: Box::new(Type::Raw),
-                })),
-                Type::VarArgs(Box::new(Type::Option(Box::new(Type::Dynamic)))),
-            ],)),
+            tuple_ty!(
+                list_ty!(map_ty!(option_ty!(Type::Object), Type::Raw)),
+                varargs_ty!(option_ty!(None))
+            ),
             "([{+or}]#+m)"
         );
     }
@@ -803,9 +782,9 @@ mod tests {
             Err(FromStrError(SignatureParseError::Annotations {
                 annotations: "<S,a,b>".to_owned(),
                 tuple: "(i)<S,a,b>".to_owned(),
-                source: AnnotationsError::Typing(typing::TupleAnnotationsError::BadLength {
-                    expected: 1,
-                    actual: 2
+                source: AnnotationsError::ZipError(ty::ZipStructFieldsSizeError {
+                    name_count: 2,
+                    element_count: 1
                 }),
             }))
         );
@@ -840,118 +819,20 @@ mod tests {
                      uid,name,signature>}{I(Iss)<MetaProperty,uid,name,signature>}s)\
                      <MetaObject,methods,signals,properties,description>";
         let sig: Signature = input.parse().unwrap();
-        let t = sig.into_type();
-        assert_eq!(
-            t,
-            Type::Tuple(
-                Tuple::from_element_types_with_annotations(
-                    vec![
-                        Type::Map {
-                            key: Box::new(Type::UInt32),
-                            value: Box::new(Type::Tuple(
-                                Tuple::from_element_types_with_annotations(
-                                    vec![
-                                        Type::UInt32,
-                                        Type::String,
-                                        Type::String,
-                                        Type::String,
-                                        Type::String,
-                                        Type::List(Box::new(Type::Tuple(
-                                            Tuple::from_element_types_with_annotations(
-                                                vec![Type::String, Type::String],
-                                                TupleAnnotations {
-                                                    name: "MetaMethodParameter".to_owned(),
-                                                    fields: Some(vec![
-                                                        "name".to_owned(),
-                                                        "description".to_owned(),
-                                                    ]),
-                                                },
-                                            )
-                                            .expect("annotation error")
-                                        ))),
-                                        Type::String,
-                                    ],
-                                    TupleAnnotations {
-                                        name: "MetaMethod".to_owned(),
-                                        fields: Some(vec![
-                                            "uid".to_owned(),
-                                            "returnSignature".to_owned(),
-                                            "name".to_owned(),
-                                            "parametersSignature".to_owned(),
-                                            "description".to_owned(),
-                                            "parameters".to_owned(),
-                                            "returnDescription".to_owned(),
-                                        ]),
-                                    },
-                                )
-                                .expect("annotation error")
-                            ))
-                        },
-                        Type::Map {
-                            key: Box::new(Type::UInt32),
-                            value: Box::new(Type::Tuple(
-                                Tuple::from_element_types_with_annotations(
-                                    vec![Type::UInt32, Type::String, Type::String],
-                                    TupleAnnotations {
-                                        name: "MetaSignal".to_owned(),
-                                        fields: Some(vec![
-                                            "uid".to_owned(),
-                                            "name".to_owned(),
-                                            "signature".to_owned(),
-                                        ]),
-                                    },
-                                )
-                                .expect("annotation error")
-                            ))
-                        },
-                        Type::Map {
-                            key: Box::new(Type::UInt32),
-                            value: Box::new(Type::Tuple(
-                                Tuple::from_element_types_with_annotations(
-                                    vec![Type::UInt32, Type::String, Type::String],
-                                    TupleAnnotations {
-                                        name: "MetaProperty".to_owned(),
-                                        fields: Some(vec![
-                                            "uid".to_owned(),
-                                            "name".to_owned(),
-                                            "signature".to_owned(),
-                                        ])
-                                    },
-                                )
-                                .expect("annotation error")
-                            ))
-                        },
-                        Type::String,
-                    ],
-                    TupleAnnotations {
-                        name: "MetaObject".to_owned(),
-                        fields: Some(vec![
-                            "methods".to_owned(),
-                            "signals".to_owned(),
-                            "properties".to_owned(),
-                            "description".to_owned(),
-                        ]),
-                    },
-                )
-                .expect("annotation error")
-            )
-        );
+        use ty::StaticGetType;
+        assert_eq!(sig, Signature(Some(MetaObject::get_type())));
     }
 
     #[test]
     fn test_signature_ser_de() {
         use serde_test::{assert_tokens, Token};
         assert_tokens(
-            &Signature(Type::Tuple(
-                Tuple::from_element_types_with_annotations(
-                    vec![Type::Float64, Type::Float64],
-                    TupleAnnotations {
-                        name: "Point".to_owned(),
-                        fields: Some(vec!["x".to_owned(), "y".to_owned()]),
-                    },
-                )
-                .expect("annotation error"),
-            )),
+            &Signature(Some(struct_ty! {
+                Point {
+                    x: Type::Float64,
+                    y: Type::Float64,
+                }
+            })),
             &[Token::Str("(dd)<Point,x,y>")],
         )
     }
