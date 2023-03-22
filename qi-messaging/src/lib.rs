@@ -4,8 +4,8 @@
 #![doc = include_str!("../README.md")]
 
 mod capabilities;
-pub mod channel;
 mod message;
+pub mod session;
 mod stream;
 
 #[doc(inline)]
@@ -15,4 +15,4 @@ pub use capabilities::CapabilityMap;
 pub use message::Message;
 
 #[doc(inline)]
-pub use channel::Channel;
+pub use session::Session;
