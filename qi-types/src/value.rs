@@ -26,77 +26,77 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn as_unit(&self) -> std::option::Option<()> {
+    pub fn as_unit(&self) -> Option<()> {
         match self {
             Self::Unit => Some(()),
             _ => None,
         }
     }
 
-    pub fn as_bool(&self) -> std::option::Option<bool> {
+    pub fn as_bool(&self) -> Option<bool> {
         match self {
             Self::Bool(b) => Some(*b),
             _ => None,
         }
     }
 
-    pub fn as_number(&self) -> std::option::Option<Number> {
+    pub fn as_number(&self) -> Option<Number> {
         match self {
             Self::Number(n) => Some(*n),
             _ => None,
         }
     }
 
-    pub fn as_string(&self) -> std::option::Option<&String> {
+    pub fn as_string(&self) -> Option<&String> {
         match self {
             Self::String(s) => Some(s),
             _ => None,
         }
     }
 
-    pub fn as_raw(&self) -> std::option::Option<&Raw> {
+    pub fn as_raw(&self) -> Option<&Raw> {
         match self {
             Self::Raw(r) => Some(r),
             _ => None,
         }
     }
 
-    pub fn as_option(&self) -> std::option::Option<&Option<Value>> {
+    pub fn as_option(&self) -> Option<&Option<Value>> {
         match self {
             Self::Option(o) => Some(o.as_ref()),
             _ => None,
         }
     }
 
-    pub fn as_list(&self) -> std::option::Option<&List<Value>> {
+    pub fn as_list(&self) -> Option<&List<Value>> {
         match self {
             Self::List(l) => Some(l),
             _ => None,
         }
     }
 
-    pub fn as_map(&self) -> std::option::Option<&Map<Value, Value>> {
+    pub fn as_map(&self) -> Option<&Map<Value, Value>> {
         match self {
             Self::Map(m) => Some(m),
             _ => None,
         }
     }
 
-    pub fn as_tuple(&self) -> std::option::Option<&Tuple> {
+    pub fn as_tuple(&self) -> Option<&Tuple> {
         match self {
             Self::Tuple(t) => Some(t),
             _ => None,
         }
     }
 
-    pub fn as_object(&self) -> std::option::Option<&Object> {
+    pub fn as_object(&self) -> Option<&Object> {
         match self {
             Self::Object(o) => Some(o.as_ref()),
             _ => None,
         }
     }
 
-    pub fn as_dynamic(&self) -> std::option::Option<&Dynamic> {
+    pub fn as_dynamic(&self) -> Option<&Dynamic> {
         match self {
             Self::Dynamic(d) => Some(d),
             _ => None,
@@ -153,19 +153,35 @@ impl From<Dynamic> for Value {
 }
 
 impl ty::DynamicGetType for Value {
-    fn get_type(&self) -> Type {
+    fn ty(&self) -> Option<Type> {
         match self {
-            Value::Unit => ().get_type(),
-            Value::Bool(b) => b.get_type(),
-            Value::Number(n) => n.get_type(),
-            Value::String(s) => s.get_type(),
-            Value::Raw(r) => r.get_type(),
-            Value::Option(o) => o.get_type(),
-            Value::List(l) => l.get_type(),
-            Value::Map(m) => m.get_type(),
-            Value::Tuple(t) => t.get_type(),
-            Value::Object(o) => o.get_type(),
-            Value::Dynamic(d) => d.get_type(),
+            Self::Unit => ().ty(),
+            Self::Bool(b) => b.ty(),
+            Self::Number(n) => Some(n.ty()),
+            Self::String(s) => s.ty(),
+            Self::Raw(r) => r.ty(),
+            Self::Option(o) => o.ty(),
+            Self::List(l) => l.ty(),
+            Self::Map(m) => m.ty(),
+            Self::Tuple(t) => t.ty(),
+            Self::Object(o) => o.ty(),
+            Self::Dynamic(d) => d.ty(),
+        }
+    }
+
+    fn current_ty(&self) -> Type {
+        match self {
+            Self::Unit => ().current_ty(),
+            Self::Bool(b) => b.current_ty(),
+            Self::Number(n) => n.current_ty(),
+            Self::String(s) => s.current_ty(),
+            Self::Raw(r) => r.current_ty(),
+            Self::Option(o) => o.current_ty(),
+            Self::List(l) => l.current_ty(),
+            Self::Map(m) => m.current_ty(),
+            Self::Tuple(t) => t.current_ty(),
+            Self::Object(o) => o.current_ty(),
+            Self::Dynamic(d) => d.current_ty(),
         }
     }
 }

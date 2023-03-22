@@ -10,21 +10,109 @@ use crate::{
 /// [`Dynamic`] represents a `dynamic` value in the `qi` type system.
 ///
 /// It is a value associated with its type information.
-///
-/// It is represented in the format as a value prepended with its type signature.
-#[derive(Default, Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Default, Clone, PartialEq, Eq, Debug, derive_more::From, serde::Serialize, serde::Deserialize,
+)]
 #[serde(transparent)]
+#[from(forward)]
 pub struct Dynamic(ValueWithType);
 
 impl Dynamic {
-    pub fn new(value: Value, t: Type) -> Result<Self, TypeMismatchError> {
+    pub fn new(value: Value, t: Option<Type>) -> Result<Self, TypeMismatchError> {
         Ok(Self(ValueWithType::new(value, t)?))
     }
 
     pub fn from_value(value: Value) -> Self {
         use ty::DynamicGetType;
-        let t = value.get_type();
+        let t = value.ty();
         Self(ValueWithType::new(value, t).unwrap())
+    }
+
+    pub fn into_value(self) -> Value {
+        self.0.into_value()
+    }
+
+    pub fn as_unit(&self) -> Option<()> {
+        match &self.0 {
+            ValueWithType::Unit => Some(()),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match &self.0 {
+            ValueWithType::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    pub fn as_number(&self) -> Option<Number> {
+        match &self.0 {
+            ValueWithType::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&String> {
+        match &self.0 {
+            ValueWithType::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_raw(&self) -> Option<&Raw> {
+        match &self.0 {
+            ValueWithType::Raw(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn as_option(&self) -> Option<&Option<Value>> {
+        match &self.0 {
+            ValueWithType::Option(o) => Some(&o.0),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&List<Value>> {
+        match &self.0 {
+            ValueWithType::List(l) => Some(&l.0),
+            _ => None,
+        }
+    }
+
+    pub fn as_map(&self) -> Option<&Map<Value, Value>> {
+        match &self.0 {
+            ValueWithType::Map(m) => Some(&m.value),
+            _ => None,
+        }
+    }
+
+    pub fn as_tuple(&self) -> Option<&Tuple> {
+        match &self.0 {
+            ValueWithType::Tuple(t) => Some(&t.0),
+            _ => None,
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&Object> {
+        match &self.0 {
+            ValueWithType::Object(o) => Some(o.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn as_dynamic(&self) -> Option<&Dynamic> {
+        match &self.0 {
+            ValueWithType::Dynamic(d) => Some(d),
+            _ => None,
+        }
+    }
+}
+
+impl From<Value> for Dynamic {
+    fn from(v: Value) -> Self {
+        Self::from_value(v)
     }
 }
 
@@ -35,19 +123,29 @@ impl std::fmt::Display for Dynamic {
 }
 
 impl ty::DynamicGetType for Dynamic {
-    fn get_type(&self) -> Type {
-        self.0.get_type()
+    fn ty(&self) -> Option<Type> {
+        None
+    }
+
+    fn current_ty(&self) -> Type {
+        self.0.current_ty()
     }
 }
 
 /// A value with additional type information.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, derive_more::From, derive_more::TryInto)]
 enum ValueWithType {
+    #[from]
     Unit,
+    #[from]
     Bool(bool),
+    #[from]
     Number(Number),
+    #[from]
     String(String),
+    #[from]
     Raw(Raw),
+    #[from(forward)]
     Option(OptionWithType),
     List(ListWithType),
     Map(MapWithType),
@@ -57,12 +155,12 @@ enum ValueWithType {
 }
 
 impl ValueWithType {
-    pub fn new(value: Value, t: Type) -> Result<Self, TypeMismatchError> {
+    pub fn new(value: Value, t: Option<Type>) -> Result<Self, TypeMismatchError> {
         use ty::DynamicGetType;
-        if !value.is_assignable_to(&t) {
+        if !value.has_type(t.as_ref()) {
             return Err(TypeMismatchError {
                 expected: t,
-                actual: value.get_type(),
+                actual: value.ty(),
             });
         }
         let value = match value {
@@ -75,21 +173,21 @@ impl ValueWithType {
             Value::Dynamic(d) => Self::Dynamic(d),
             Value::Option(option) => {
                 let value_type = match t {
-                    Type::Option(o) => o.as_deref().cloned(),
+                    Some(Type::Option(o)) => o.as_deref().cloned(),
                     _ => unreachable!(),
                 };
                 Self::Option(OptionWithType(*option, value_type))
             }
             Value::List(list) => {
                 let value_type = match t {
-                    Type::List(l) => l.as_deref().cloned(),
+                    Some(Type::List(l)) => l.as_deref().cloned(),
                     _ => unreachable!(),
                 };
                 Self::List(ListWithType(list, value_type))
             }
             Value::Map(map) => {
                 let (key_type, value_type) = match t {
-                    Type::Map { key, value } => {
+                    Some(Type::Map { key, value }) => {
                         (key.as_deref().cloned(), value.as_deref().cloned())
                     }
                     _ => unreachable!(),
@@ -102,7 +200,7 @@ impl ValueWithType {
             }
             Value::Tuple(tuple) => {
                 let tuple_type = match t {
-                    Type::Tuple(tuple_type) => tuple_type,
+                    Some(Type::Tuple(tuple_type)) => tuple_type,
                     _ => unreachable!(),
                 };
                 Self::Tuple(TupleWithType(tuple, tuple_type))
@@ -134,20 +232,42 @@ impl Default for ValueWithType {
     }
 }
 
+impl From<&str> for ValueWithType {
+    fn from(s: &str) -> Self {
+        Self::String(s.to_string())
+    }
+}
+
 impl ty::DynamicGetType for ValueWithType {
-    fn get_type(&self) -> Type {
+    fn ty(&self) -> Option<Type> {
         match self {
-            Self::Unit => ().get_type(),
-            Self::Bool(b) => b.get_type(),
-            Self::Number(n) => n.get_type(),
-            Self::String(s) => s.get_type(),
-            Self::Raw(r) => r.get_type(),
-            Self::Option(o) => o.get_type(),
-            Self::List(l) => l.get_type(),
-            Self::Map(m) => m.get_type(),
-            Self::Tuple(t) => t.get_type(),
-            Self::Object(o) => o.get_type(),
-            Self::Dynamic(d) => d.get_type(),
+            Self::Unit => ().ty(),
+            Self::Bool(b) => b.ty(),
+            Self::Number(n) => Some(n.ty()),
+            Self::String(s) => s.ty(),
+            Self::Raw(r) => r.ty(),
+            Self::Option(o) => Some(o.ty()),
+            Self::List(l) => Some(l.ty()),
+            Self::Map(m) => Some(m.ty()),
+            Self::Tuple(t) => Some(t.ty()),
+            Self::Object(o) => o.ty(),
+            Self::Dynamic(d) => d.ty(),
+        }
+    }
+
+    fn current_ty(&self) -> Type {
+        match self {
+            Self::Unit => ().current_ty(),
+            Self::Bool(b) => b.current_ty(),
+            Self::Number(n) => n.current_ty(),
+            Self::String(s) => s.current_ty(),
+            Self::Raw(r) => r.current_ty(),
+            Self::Option(o) => o.current_ty(),
+            Self::List(l) => l.current_ty(),
+            Self::Map(m) => m.current_ty(),
+            Self::Tuple(t) => t.current_ty(),
+            Self::Object(o) => o.current_ty(),
+            Self::Dynamic(d) => d.current_ty(),
         }
     }
 }
@@ -190,17 +310,17 @@ impl serde::Serialize for ValueWithType {
     {
         use ty::DynamicGetType;
         match self {
-            Self::Unit => serialize_signed_value(serializer, ().get_type(), &()),
-            Self::Bool(b) => serialize_signed_value(serializer, b.get_type(), b),
-            Self::Number(n) => serialize_signed_value(serializer, n.get_type(), n),
-            Self::String(s) => serialize_signed_value(serializer, s.get_type(), s),
-            Self::Raw(r) => serialize_signed_value(serializer, r.get_type(), r),
+            Self::Unit => serialize_signed_value(serializer, ().ty(), &()),
+            Self::Bool(b) => serialize_signed_value(serializer, b.ty(), b),
+            Self::Number(n) => serialize_signed_value(serializer, n.ty(), n),
+            Self::String(s) => serialize_signed_value(serializer, s.ty(), s),
+            Self::Raw(r) => serialize_signed_value(serializer, r.ty(), r),
             Self::Option(o) => o.serialize(serializer),
             Self::List(l) => l.serialize(serializer),
             Self::Map(m) => m.serialize(serializer),
             Self::Tuple(t) => t.serialize(serializer),
-            Self::Object(o) => serialize_signed_value(serializer, o.get_type(), o.as_ref()),
-            Self::Dynamic(d) => serialize_signed_value(serializer, d.get_type(), d.as_ref()),
+            Self::Object(o) => serialize_signed_value(serializer, o.ty(), o.as_ref()),
+            Self::Dynamic(d) => serialize_signed_value(serializer, d.ty(), d.as_ref()),
         }
     }
 }
@@ -350,15 +470,29 @@ impl<'de> serde::de::DeserializeSeed<'de> for ValueWithTypeSeed {
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct OptionWithType(Option<Value>, Option<Type>);
 
+impl From<OptionWithType> for Option<Value> {
+    fn from(o: OptionWithType) -> Self {
+        o.0
+    }
+}
+
 impl OptionWithType {
     fn into_value(self) -> Value {
         Value::Option(Box::new(self.0))
     }
+
+    fn ty(&self) -> Type {
+        Type::Option(self.1.clone().map(Box::new))
+    }
 }
 
 impl ty::DynamicGetType for OptionWithType {
-    fn get_type(&self) -> Type {
-        Type::Option(self.1.clone().map(Box::new))
+    fn ty(&self) -> Option<Type> {
+        Some(self.ty())
+    }
+
+    fn current_ty(&self) -> Type {
+        self.ty()
     }
 }
 
@@ -423,11 +557,19 @@ impl ListWithType {
     fn into_value(self) -> Value {
         Value::List(self.0)
     }
+
+    fn ty(&self) -> Type {
+        Type::List(self.1.clone().map(Box::new))
+    }
 }
 
 impl ty::DynamicGetType for ListWithType {
-    fn get_type(&self) -> Type {
-        Type::List(self.1.clone().map(Box::new))
+    fn ty(&self) -> Option<Type> {
+        Some(self.ty())
+    }
+
+    fn current_ty(&self) -> Type {
+        self.ty()
     }
 }
 
@@ -492,14 +634,22 @@ impl MapWithType {
     fn into_value(self) -> Value {
         Value::Map(self.value)
     }
-}
 
-impl ty::DynamicGetType for MapWithType {
-    fn get_type(&self) -> Type {
+    fn ty(&self) -> Type {
         Type::Map {
             key: self.key_type.clone().map(Box::new),
             value: self.value_type.clone().map(Box::new),
         }
+    }
+}
+
+impl ty::DynamicGetType for MapWithType {
+    fn ty(&self) -> Option<Type> {
+        Some(self.ty())
+    }
+
+    fn current_ty(&self) -> Type {
+        self.ty()
     }
 }
 
@@ -578,11 +728,19 @@ impl TupleWithType {
     fn into_value(self) -> Value {
         Value::Tuple(self.0)
     }
+
+    fn ty(&self) -> Type {
+        Type::Tuple(self.1.clone())
+    }
 }
 
 impl ty::DynamicGetType for TupleWithType {
-    fn get_type(&self) -> Type {
-        Type::Tuple(self.1.clone())
+    fn ty(&self) -> Option<Type> {
+        Some(self.ty())
+    }
+
+    fn current_ty(&self) -> Type {
+        self.ty()
     }
 }
 
@@ -706,10 +864,24 @@ impl<'de> serde::de::DeserializeSeed<'de> for TupleWithTypeSeed {
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-#[error("type mismatch error, expected {expected}, got {actual}")]
 pub struct TypeMismatchError {
-    expected: Type,
-    actual: Type,
+    expected: Option<Type>,
+    actual: Option<Type>,
+}
+
+impl std::fmt::Display for TypeMismatchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("type mismatch error, expected ")?;
+        match &self.expected {
+            Some(t) => t.fmt(f)?,
+            None => f.write_str("Dynamic")?,
+        };
+        f.write_str(", got ")?;
+        match &self.actual {
+            Some(t) => t.fmt(f),
+            None => f.write_str("Dynamic"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -749,7 +921,7 @@ mod tests {
                 ),
             ]))))),
         ]));
-        let dynamic = Dynamic::new(value, value_type).unwrap();
+        let dynamic = Dynamic::new(value, Some(value_type)).unwrap();
         assert_tokens(
             &dynamic,
             &[

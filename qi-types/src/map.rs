@@ -57,14 +57,13 @@ impl<K, V> Map<K, V> {
         }
     }
 
-    fn get_type(&self) -> Type
+    fn ty_with<F>(&self, f: F) -> Type
     where
-        K: ty::DynamicGetType,
-        V: ty::DynamicGetType,
+        F: FnMut((&K, &V)) -> (Option<Type>, Option<Type>),
     {
         let common_types = self
             .iter()
-            .map(|(key, value)| (Some(key.get_type()), Some(value.get_type())))
+            .map(f)
             .reduce(|(common_key, common_value), (key, value)| {
                 (
                     ty::common_type(common_key, key),
@@ -75,10 +74,23 @@ impl<K, V> Map<K, V> {
             Some((key, value)) => (key, value),
             None => (None, None),
         };
-        Type::Map {
-            key: key.map(Box::new),
-            value: value.map(Box::new),
-        }
+        ty::map_of(key, value)
+    }
+
+    fn ty(&self) -> Option<Type>
+    where
+        K: ty::DynamicGetType,
+        V: ty::DynamicGetType,
+    {
+        Some(self.ty_with(|(key, value)| (key.ty(), value.ty())))
+    }
+
+    fn current_ty(&self) -> Type
+    where
+        K: ty::DynamicGetType,
+        V: ty::DynamicGetType,
+    {
+        self.ty_with(|(key, value)| (Some(key.current_ty()), Some(value.current_ty())))
     }
 }
 
@@ -107,6 +119,15 @@ impl<'a, K, V> std::iter::IntoIterator for &'a Map<K, V> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
+    }
+}
+
+impl<'a, K, V> std::iter::IntoIterator for &'a mut Map<K, V> {
+    type Item = &'a mut (K, V);
+    type IntoIter = std::slice::IterMut<'a, (K, V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
     }
 }
 
@@ -142,32 +163,48 @@ where
     K: ty::StaticGetType,
     V: ty::StaticGetType,
 {
-    fn get_type() -> crate::Type {
-        ty::map_of(Some(K::get_type()), Some(V::get_type()))
+    fn ty() -> crate::Type {
+        ty::map_of(Some(K::ty()), Some(V::ty()))
     }
 }
 
 impl ty::DynamicGetType for Map<Dynamic, Dynamic> {
-    fn get_type(&self) -> Type {
-        self.get_type()
+    fn ty(&self) -> Option<Type> {
+        self.ty()
+    }
+
+    fn current_ty(&self) -> Type {
+        self.current_ty()
     }
 }
 
 impl ty::DynamicGetType for Map<Dynamic, Value> {
-    fn get_type(&self) -> Type {
-        self.get_type()
+    fn ty(&self) -> Option<Type> {
+        self.ty()
+    }
+
+    fn current_ty(&self) -> Type {
+        self.current_ty()
     }
 }
 
 impl ty::DynamicGetType for Map<Value, Dynamic> {
-    fn get_type(&self) -> Type {
-        self.get_type()
+    fn ty(&self) -> Option<Type> {
+        self.ty()
+    }
+
+    fn current_ty(&self) -> Type {
+        self.current_ty()
     }
 }
 
 impl ty::DynamicGetType for Map<Value, Value> {
-    fn get_type(&self) -> Type {
-        self.get_type()
+    fn ty(&self) -> Option<Type> {
+        self.ty()
+    }
+
+    fn current_ty(&self) -> Type {
+        self.current_ty()
     }
 }
 

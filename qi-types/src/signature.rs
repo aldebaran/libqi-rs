@@ -820,7 +820,7 @@ mod tests {
                      <MetaObject,methods,signals,properties,description>";
         let sig: Signature = input.parse().unwrap();
         use ty::StaticGetType;
-        assert_eq!(sig, Signature(Some(MetaObject::get_type())));
+        assert_eq!(sig, Signature(Some(MetaObject::ty())));
     }
 
     #[test]

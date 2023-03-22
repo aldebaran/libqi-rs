@@ -2,7 +2,7 @@ use crate::{ty, Type, Value};
 use derive_more::{AsRef, From, Index, Into, IntoIterator};
 
 impl ty::StaticGetType for () {
-    fn get_type() -> Type {
+    fn ty() -> Type {
         Type::Unit
     }
 }
@@ -58,11 +58,17 @@ impl std::fmt::Display for Tuple {
 }
 
 impl ty::DynamicGetType for Tuple {
-    fn get_type(&self) -> Type {
+    fn ty(&self) -> Option<Type> {
+        Some(Type::Tuple(ty::TupleType::Tuple(
+            self.0.iter().map(|element| element.ty()).collect(),
+        )))
+    }
+
+    fn current_ty(&self) -> Type {
         Type::Tuple(ty::TupleType::Tuple(
             self.0
                 .iter()
-                .map(|element| Some(element.get_type()))
+                .map(|element| Some(element.current_ty()))
                 .collect(),
         ))
     }

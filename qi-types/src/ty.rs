@@ -1,6 +1,6 @@
 /// The type of a value in the `qi` type system.
 ///
-/// The absence of a type means a value is dynamic, i.e. its type can change at runtime.
+/// The absence of a type equals to the unit `Dynamic` type, which is the set of all types.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Type {
     Unit,
@@ -29,13 +29,13 @@ pub enum Type {
 }
 
 impl Type {
-    pub(crate) fn is_convertible_to(&self, target: &Type) -> bool {
+    pub(crate) fn is_subtype_of(&self, target: &Type) -> bool {
         match (self, target) {
             (Type::Option(source), Type::Option(target)) => {
-                is_convertible_to(source.as_deref(), target.as_deref())
+                is_subtype_of(source.as_deref(), target.as_deref())
             }
             (Type::List(source), Type::List(target)) => {
-                is_convertible_to(source.as_deref(), target.as_deref())
+                is_subtype_of(source.as_deref(), target.as_deref())
             }
             (
                 Type::Map {
@@ -47,8 +47,8 @@ impl Type {
                     value: target_value,
                 },
             ) => {
-                is_convertible_to(source_key.as_deref(), target_key.as_deref())
-                    && is_convertible_to(source_value.as_deref(), target_value.as_deref())
+                is_subtype_of(source_key.as_deref(), target_key.as_deref())
+                    && is_subtype_of(source_value.as_deref(), target_value.as_deref())
             }
             (Type::Tuple(source), Type::Tuple(target)) => source.is_convertible_to(target),
             (source, target) => source == target,
@@ -478,15 +478,24 @@ macro_rules! struct_ty {
 
 /// Trait for types that can be statically reflected on.
 pub trait StaticGetType {
-    fn get_type() -> Type;
+    fn ty() -> Type;
 }
 
 /// Trait for types that can be dynamically reflected on.
 pub trait DynamicGetType {
-    fn get_type(&self) -> Type;
+    fn ty(&self) -> Option<Type>;
 
-    fn is_assignable_to(&self, t: &Type) -> bool {
-        self.get_type().is_convertible_to(t)
+    /// This always returns a value, meaning that this function must always
+    /// go as deep into internal types as necessary to return as much type
+    /// information as possible. More specifically, it must inspect dynamic values.
+    fn current_ty(&self) -> Type;
+
+    fn has_type(&self, t: Option<&Type>) -> bool {
+        match (self.ty(), t) {
+            (Some(this), Some(t)) => this.is_subtype_of(t),
+            (None, None) => true,
+            _ => false,
+        }
     }
 }
 
@@ -495,19 +504,25 @@ impl<T> DynamicGetType for T
 where
     T: StaticGetType,
 {
-    fn get_type(&self) -> Type {
-        T::get_type()
+    fn ty(&self) -> Option<Type> {
+        Some(T::ty())
+    }
+
+    fn current_ty(&self) -> Type {
+        T::ty()
     }
 }
 
-fn is_convertible_to(source: Option<&Type>, target: Option<&Type>) -> bool {
+/// All types are subtypes of "Dynamic", which contains all types.
+/// Dynamic is when no type information, i.e when no type information is present.
+fn is_subtype_of(source: Option<&Type>, target: Option<&Type>) -> bool {
     match (source, target) {
-        // No target type information, conversion is allowed.
+        // No target type, source is a subtype.
         (_, None) => true,
-        // No source type information, conversion is not allowed.
+        // No source type but with some target type, it is never a subtype.
         (None, Some(_)) => false,
-        // Both source and target type information, check for standard conversion.
-        (Some(source), Some(target)) => source.is_convertible_to(target),
+        // Both source and target type information, check for standard type set inclusion.
+        (Some(source), Some(target)) => source.is_subtype_of(target),
     }
 }
 

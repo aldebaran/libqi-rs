@@ -1,3 +1,6 @@
+#![doc(test(attr(deny(warnings))))]
+#![doc = include_str!("../README.md")]
+
 mod dynamic;
 mod map;
 mod num_bool;
@@ -25,13 +28,13 @@ pub use bytes::Bytes as Raw;
 pub use std::vec::Vec as List;
 
 impl ty::StaticGetType for String {
-    fn get_type() -> Type {
+    fn ty() -> Type {
         Type::String
     }
 }
 
 impl ty::StaticGetType for Raw {
-    fn get_type() -> Type {
+    fn ty() -> Type {
         Type::Raw
     }
 }
@@ -40,23 +43,32 @@ impl<T> ty::StaticGetType for Option<T>
 where
     T: ty::StaticGetType,
 {
-    fn get_type() -> Type {
-        ty::option_of(T::get_type())
+    fn ty() -> Type {
+        ty::option_of(T::ty())
     }
 }
 
 impl ty::DynamicGetType for Option<Value> {
-    fn get_type(&self) -> Type {
-        match self {
-            Some(value) => ty::option_of(value.get_type()),
-            None => Type::Option(None),
-        }
+    fn ty(&self) -> Option<Type> {
+        Some(ty::option_of(
+            self.as_ref().map(ty::DynamicGetType::ty).flatten(),
+        ))
+    }
+
+    fn current_ty(&self) -> Type {
+        ty::option_of(self.as_ref().map(ty::DynamicGetType::current_ty))
     }
 }
 
 impl ty::DynamicGetType for Option<Dynamic> {
-    fn get_type(&self) -> Type {
-        Type::Option(None)
+    fn ty(&self) -> Option<Type> {
+        Some(ty::option_of(
+            self.as_ref().map(ty::DynamicGetType::ty).flatten(),
+        ))
+    }
+
+    fn current_ty(&self) -> Type {
+        ty::option_of(self.as_ref().map(ty::DynamicGetType::current_ty))
     }
 }
 
@@ -64,25 +76,48 @@ impl<T> ty::StaticGetType for List<T>
 where
     T: ty::StaticGetType,
 {
-    fn get_type() -> Type {
-        ty::list_of(T::get_type())
+    fn ty() -> Type {
+        ty::list_of(T::ty())
     }
 }
 
 impl ty::DynamicGetType for List<Value> {
-    fn get_type(&self) -> Type {
+    fn ty(&self) -> Option<Type> {
         let t = self
             .iter()
-            .map(|value| Some(value.get_type()))
+            .map(|value| value.ty())
             .reduce(ty::common_type)
             .flatten();
-        Type::List(t.map(Box::new))
+        Some(ty::list_of(t))
+    }
+
+    fn current_ty(&self) -> Type {
+        let t = self
+            .iter()
+            .map(|value| Some(value.current_ty()))
+            .reduce(ty::common_type)
+            .flatten();
+        ty::list_of(t)
     }
 }
 
 impl ty::DynamicGetType for List<Dynamic> {
-    fn get_type(&self) -> Type {
-        Type::List(None)
+    fn ty(&self) -> Option<Type> {
+        let t = self
+            .iter()
+            .map(|value| value.ty())
+            .reduce(ty::common_type)
+            .flatten();
+        Some(ty::list_of(t))
+    }
+
+    fn current_ty(&self) -> Type {
+        let t = self
+            .iter()
+            .map(|value| Some(value.current_ty()))
+            .reduce(ty::common_type)
+            .flatten();
+        ty::list_of(t)
     }
 }
 

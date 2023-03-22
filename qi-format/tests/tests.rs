@@ -70,7 +70,11 @@ fn test_dynamic_to_from_bytes() {
     let dynamic: Dynamic = from_bytes(&bytes_in).unwrap();
     assert_eq!(
         dynamic,
-        Dynamic::new(Value::from("The robot is not localized"), Type::String).unwrap()
+        Dynamic::new(
+            Value::from("The robot is not localized"),
+            Some(Type::String)
+        )
+        .unwrap()
     );
     let bytes_out = to_bytes(&dynamic).unwrap();
     assert_eq!(bytes_in.as_slice(), &bytes_out);
@@ -224,7 +228,7 @@ fn test_object_to_from_bytes() {
                     },
                     2 => MetaMethod {
                         uid: 2,
-                        return_signature: Signature::new(Some(MetaObject::get_type())),
+                        return_signature: Signature::new(Some(MetaObject::ty())),
                         name: String::from("metaObject"),
                         parameters_signature: Signature::new(Some(tuple_ty![Type::UInt32])),
                         description: String::new(),

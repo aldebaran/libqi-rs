@@ -1,0 +1,18 @@
+[package]
+name = "qi-utils"
+description = ""
+license-file = "LICENSE.txt"
+repository = "https://github.com/nyibbang/libqi-rs"
+version = "0.1.0-dev"
+edition = "2021"
+rust-version = "1.59"
+
+[dependencies]
+anyhow = "1.0.69"
+futures = "0.3.27"
+qi-messaging = { path = "../qi-messaging" }
+tokio = { version = "1.26.0", features = ["rt-multi-thread", "macros", "net"] }
+tokio-util = { version = "0.7.7", features = ["codec"] }
+
+[[bin]]
+name = "qi-cli"

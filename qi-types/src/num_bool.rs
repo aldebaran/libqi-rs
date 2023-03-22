@@ -8,7 +8,7 @@ pub type Float64 = OrderedFloat<f64>;
 macro_rules! impl_ty_traits {
     ($nt:ident => $vt:ident, $($tail:tt)*) => {
         impl $crate::ty::StaticGetType for $nt {
-            fn get_type() -> Type {
+            fn ty() -> Type {
                 Type::$vt
             }
         }
@@ -123,11 +123,7 @@ impl Number {
         }
     }
 
-    pub fn is_assignable_to_value_type(&self, t: &Type) -> bool {
-        &self.get_type() == t
-    }
-
-    fn get_type(&self) -> Type {
+    pub fn ty(&self) -> Type {
         match self {
             Self::Int8(_) => Type::Int8,
             Self::UInt8(_) => Type::UInt8,
@@ -173,19 +169,12 @@ impl std::fmt::Display for Number {
 }
 
 impl ty::DynamicGetType for Number {
-    fn get_type(&self) -> Type {
-        match self {
-            Number::Int8(v) => v.get_type(),
-            Number::UInt8(v) => v.get_type(),
-            Number::Int16(v) => v.get_type(),
-            Number::UInt16(v) => v.get_type(),
-            Number::Int32(v) => v.get_type(),
-            Number::UInt32(v) => v.get_type(),
-            Number::Int64(v) => v.get_type(),
-            Number::UInt64(v) => v.get_type(),
-            Number::Float32(v) => v.get_type(),
-            Number::Float64(v) => v.get_type(),
-        }
+    fn ty(&self) -> Option<Type> {
+        Some(self.ty())
+    }
+
+    fn current_ty(&self) -> Type {
+        self.ty()
     }
 }
 
@@ -351,16 +340,16 @@ mod tests {
 
     #[test]
     fn test_number_get_type() {
-        assert_eq!(Number::from(1i8).get_type(), Type::Int8);
-        assert_eq!(Number::from(1u8).get_type(), Type::UInt8);
-        assert_eq!(Number::from(1i16).get_type(), Type::Int16);
-        assert_eq!(Number::from(1u16).get_type(), Type::UInt16);
-        assert_eq!(Number::from(1i32).get_type(), Type::Int32);
-        assert_eq!(Number::from(1u32).get_type(), Type::UInt32);
-        assert_eq!(Number::from(1i64).get_type(), Type::Int64);
-        assert_eq!(Number::from(1u64).get_type(), Type::UInt64);
-        assert_eq!(Number::from(1f32).get_type(), Type::Float32);
-        assert_eq!(Number::from(1f64).get_type(), Type::Float64);
+        assert_eq!(Number::from(1i8).ty(), Type::Int8);
+        assert_eq!(Number::from(1u8).ty(), Type::UInt8);
+        assert_eq!(Number::from(1i16).ty(), Type::Int16);
+        assert_eq!(Number::from(1u16).ty(), Type::UInt16);
+        assert_eq!(Number::from(1i32).ty(), Type::Int32);
+        assert_eq!(Number::from(1u32).ty(), Type::UInt32);
+        assert_eq!(Number::from(1i64).ty(), Type::Int64);
+        assert_eq!(Number::from(1u64).ty(), Type::UInt64);
+        assert_eq!(Number::from(1f32).ty(), Type::Float32);
+        assert_eq!(Number::from(1f64).ty(), Type::Float64);
     }
 
     #[test]

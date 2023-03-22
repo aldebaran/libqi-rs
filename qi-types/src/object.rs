@@ -17,7 +17,7 @@ impl std::fmt::Display for Object {
 }
 
 impl ty::StaticGetType for Object {
-    fn get_type() -> Type {
+    fn ty() -> Type {
         Type::Object
     }
 }
@@ -67,17 +67,17 @@ pub struct MetaObject {
 }
 
 impl ty::StaticGetType for MetaObject {
-    fn get_type() -> Type {
+    fn ty() -> Type {
         struct_ty! {
             MetaObject {
                 methods: ty::map_of(
-                    Type::UInt32, MetaMethod::get_type()
+                    Type::UInt32, MetaMethod::ty()
                 ),
                 signals: ty::map_of(
-                    Type::UInt32, MetaSignal::get_type()
+                    Type::UInt32, MetaSignal::ty()
                 ),
                 properties: ty::map_of(
-                    Type::UInt32, MetaProperty::get_type()
+                    Type::UInt32, MetaProperty::ty()
                 ),
                 description: Type::String,
             }
@@ -108,7 +108,7 @@ pub struct MetaMethod {
 }
 
 impl ty::StaticGetType for MetaMethod {
-    fn get_type() -> Type {
+    fn ty() -> Type {
         struct_ty! {
             MetaMethod {
                 uid: Type::UInt32,
@@ -116,7 +116,7 @@ impl ty::StaticGetType for MetaMethod {
                 name: Type::String,
                 parametersSignature: Type::String,
                 description: Type::String,
-                parameters: ty::list_of(MetaMethodParameter::get_type()),
+                parameters: ty::list_of(MetaMethodParameter::ty()),
                 returnDescription: Type::String,
             }
         }
@@ -141,7 +141,7 @@ pub struct MetaMethodParameter {
 }
 
 impl ty::StaticGetType for MetaMethodParameter {
-    fn get_type() -> Type {
+    fn ty() -> Type {
         struct_ty! {
             MetaMethodParameter {
                 name: Type::String,
@@ -170,7 +170,7 @@ pub struct MetaSignal {
 }
 
 impl ty::StaticGetType for MetaSignal {
-    fn get_type() -> Type {
+    fn ty() -> Type {
         struct_ty! {
             MetaSignal {
                 uid: Type::UInt32,
@@ -200,7 +200,7 @@ pub struct MetaProperty {
 }
 
 impl ty::StaticGetType for MetaProperty {
-    fn get_type() -> Type {
+    fn ty() -> Type {
         struct_ty! {
             MetaProperty {
                 uid: Type::UInt32,
