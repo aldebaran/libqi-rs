@@ -6,34 +6,26 @@ use tokio_util::codec::Framed;
 
 pin_project! {
     #[derive(Debug)]
-    pub struct Stream<T> {
+    pub struct Stream<IO> {
         #[pin]
-        io: Framed<T, MessageCodec>,
-        message_id: message::Id,
+        io: Framed<IO, MessageCodec>,
     }
 }
 
-impl<T> Stream<T>
+impl<IO> Stream<IO>
 where
-    T: tokio::io::AsyncRead + tokio::io::AsyncWrite,
+    IO: tokio::io::AsyncRead + tokio::io::AsyncWrite,
 {
-    pub fn new(io: T) -> Self {
+    pub fn new(io: IO) -> Self {
         Self {
             io: Framed::new(io, MessageCodec),
-            message_id: message::Id::new(0),
         }
     }
 }
 
-impl<T> Stream<T> {
-    pub fn next_message_id(&mut self) -> message::Id {
-        self.message_id.increment()
-    }
-}
-
-impl<T> futures::Sink<Message> for Stream<T>
+impl<IO> futures::Sink<Message> for Stream<IO>
 where
-    T: tokio::io::AsyncWrite,
+    IO: tokio::io::AsyncWrite,
 {
     type Error = EncodeError;
 

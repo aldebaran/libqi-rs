@@ -41,9 +41,7 @@
 //!
 //!  The total header size is therefore 28 bytes.
 
-use crate::capabilities;
 use bytes::{Buf, BufMut};
-use qi_format::{from_bytes, to_bytes};
 
 fn read<B, F, T>(buf: &mut B, read_fn: F) -> Result<T, NotEnoughDataError>
 where
@@ -98,7 +96,7 @@ pub struct NotEnoughDataError {
 }
 
 macro_rules! define_message_newtype {
-    ($name:ident($t:ty): $read:tt -> $readerr:ident, $write:tt) => {
+    ($vis:vis $name:ident($t:ty): $read:tt -> $readerr:ident, $write:tt) => {
         #[derive(
             Default,
             Debug,
@@ -113,20 +111,20 @@ macro_rules! define_message_newtype {
             derive_more::Into,
             derive_more::Display,
         )]
-        pub struct $name($t);
+        $vis struct $name($t);
 
         impl $name {
             const SIZE: usize = std::mem::size_of::<$t>();
 
-            pub const fn new(val: $t) -> Self {
+            $vis const fn new(val: $t) -> Self {
                 Self(val)
             }
 
-            const fn from(val: $t) -> Self {
+            $vis const fn from(val: $t) -> Self {
                 Self(val)
             }
 
-            const fn into(self) -> $t {
+            $vis const fn into(self) -> $t {
                 self.0
             }
 
@@ -149,15 +147,15 @@ macro_rules! define_message_newtype {
             Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error,
         )]
         #[error(transparent)]
-        pub struct $readerr(#[from] NotEnoughDataError);
+        struct $readerr(#[from] NotEnoughDataError);
     };
 }
 
-define_message_newtype!(Id(u32): read_u32_le -> IdReadError, put_u32_le);
+define_message_newtype!(pub Id(u32): read_u32_le -> IdReadError, put_u32_le);
 define_message_newtype!(Version(u16): read_u16_le -> VersionReadError, put_u16_le);
-define_message_newtype!(Service(u32): read_u32_le -> ServiceReadError, put_u32_le);
-define_message_newtype!(Object(u32): read_u32_le -> ObjectReadError, put_u32_le);
-define_message_newtype!(Action(u32): read_u32_le -> ActionReadError, put_u32_le);
+define_message_newtype!(pub Service(u32): read_u32_le -> ServiceReadError, put_u32_le);
+define_message_newtype!(pub Object(u32): read_u32_le -> ObjectReadError, put_u32_le);
+define_message_newtype!(pub Action(u32): read_u32_le -> ActionReadError, put_u32_le);
 
 impl Id {
     pub fn increment(&mut self) -> Id {
@@ -169,10 +167,6 @@ impl Id {
 
 impl Version {
     const CURRENT: Self = Self(0);
-}
-
-impl Service {
-    const SERVER: Self = Self(0);
 }
 
 #[derive(
@@ -298,7 +292,7 @@ enum PayloadSizeWriteError {
     num_derive::ToPrimitive,
 )]
 #[repr(u8)]
-enum Type {
+pub enum Type {
     #[display(fmt = "call")]
     Call = 1,
     #[display(fmt = "reply")]
@@ -309,8 +303,8 @@ enum Type {
     Post = 4,
     #[display(fmt = "event")]
     Event = 5,
-    #[display(fmt = "capability")]
-    Capability = 6,
+    #[display(fmt = "capabilities")]
+    Capabilities = 6,
     #[display(fmt = "cancel")]
     Cancel = 7,
     #[display(fmt = "canceled")]
@@ -361,7 +355,7 @@ impl std::convert::TryFrom<u8> for Type {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, thiserror::Error)]
 #[error("invalid message type value {0}")]
-struct InvalidTypeValueError(u8);
+pub struct InvalidTypeValueError(u8);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 enum TypeReadError {
@@ -375,7 +369,7 @@ enum TypeReadError {
 bitflags::bitflags! {
     #[derive(Default, derive_more::Display)]
     #[display(fmt = "{:b}", "self.bits()")]
-    struct Flags: u8 {
+    pub struct Flags: u8 {
         const DYNAMIC_PAYLOAD = 0b00000001;
         const RETURN_TYPE = 0b00000010;
     }
@@ -383,6 +377,14 @@ bitflags::bitflags! {
 
 impl Flags {
     const SIZE: usize = std::mem::size_of::<u8>();
+
+    pub fn has_dynamic_payload(&self) -> bool {
+        self.contains(Self::DYNAMIC_PAYLOAD)
+    }
+
+    pub fn has_return_type(&self) -> bool {
+        self.contains(Self::RETURN_TYPE)
+    }
 
     fn read<B>(buf: &mut B) -> Result<Self, FlagsReadError>
     where
@@ -411,7 +413,7 @@ impl std::convert::TryFrom<u8> for Flags {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error("invalid message flags value {0}")]
-struct InvalidFlagsValueError(u8);
+pub struct InvalidFlagsValueError(u8);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 enum FlagsReadError {
@@ -635,9 +637,13 @@ impl From<PayloadSizeWriteError> for HeaderWriteError {
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-struct Payload(Vec<u8>);
+pub struct Payload(Vec<u8>);
 
 impl Payload {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
     fn read<B>(size: usize, buf: &mut B) -> Result<Self, PayloadReadError>
     where
         B: Buf,
@@ -661,8 +667,18 @@ impl Payload {
         buf.put_slice(&self.0);
     }
 
-    fn size(&self) -> usize {
+    pub fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub fn size(&self) -> usize {
         self.0.len()
+    }
+}
+
+impl AsRef<[u8]> for Payload {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -675,13 +691,13 @@ pub struct PayloadReadError(#[from] pub NotEnoughDataError);
     fmt = "message(id={id}, type={ty}, flags={flags}, service={service}, object={object}, action={action})"
 )]
 pub struct Message {
-    id: Id,
-    ty: Type,
-    flags: Flags,
-    service: Service,
-    object: Object,
-    action: Action,
-    payload: Payload,
+    pub id: Id,
+    pub ty: Type,
+    pub flags: Flags,
+    pub service: Service,
+    pub object: Object,
+    pub action: Action,
+    pub payload: Payload,
 }
 
 impl Message {
@@ -724,16 +740,6 @@ impl Message {
     pub fn size(&self) -> usize {
         Header::SIZE + self.payload.size()
     }
-
-    pub fn into_capability(self) -> Result<Capability, IntoCapabilityError> {
-        match self.ty {
-            Type::Capability => Ok(Capability {
-                id: self.id,
-                capabilities: from_bytes(&self.payload.0)?,
-            }),
-            _ => Err(IntoCapabilityError::BadType(self)),
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
@@ -745,170 +751,9 @@ pub enum ReadError {
     Payload(#[from] PayloadReadError),
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum IntoMessageError {
-    #[error("serialization error: {0}")]
-    SerializationError(#[from] qi_format::Error),
-}
-
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct Call {
-    pub id: Id,
-    pub dynamic_payload: bool,
-    pub return_type: bool,
-    pub service: Service,
-    pub object: Object,
-    pub action: Action,
-    pub payload: Vec<u8>,
-}
-
-impl Call {
-    pub fn builder(id: Id) -> CallBuilder {
-        CallBuilder {
-            call: Self {
-                id,
-                ..Default::default()
-            },
-        }
-    }
-}
-
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct CallBuilder {
-    call: Call,
-}
-
-impl CallBuilder {
-    pub fn dynamic_payload(mut self, value: bool) -> Self {
-        self.call.dynamic_payload = value;
-        self
-    }
-
-    pub fn return_type(mut self, value: bool) -> Self {
-        self.call.return_type = value;
-        self
-    }
-
-    pub fn service(mut self, value: Service) -> Self {
-        self.call.service = value;
-        self
-    }
-
-    pub fn object(mut self, value: Object) -> Self {
-        self.call.object = value;
-        self
-    }
-
-    pub fn action(mut self, value: Action) -> Self {
-        self.call.action = value;
-        self
-    }
-
-    pub fn payload(mut self, value: Vec<u8>) -> Self {
-        self.call.payload = value;
-        self
-    }
-
-    pub fn build(self) -> Call {
-        self.call
-    }
-}
-
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct Reply {
-    pub id: Id,
-    pub dynamic_payload: bool,
-    pub service: Service,
-    pub object: Object,
-    pub action: Action,
-    pub payload: Vec<u8>,
-}
-
-impl Reply {
-    pub fn builder_to(call: &Call) -> ReplyBuilder {
-        ReplyBuilder {
-            reply: Self {
-                id: call.id,
-                service: call.service,
-                object: call.object,
-                action: call.action,
-                ..Default::default()
-            },
-        }
-    }
-}
-
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct ReplyBuilder {
-    reply: Reply,
-}
-
-impl ReplyBuilder {
-    pub fn dynamic_payload(mut self, value: bool) -> Self {
-        self.reply.dynamic_payload = value;
-        self
-    }
-
-    pub fn payload(mut self, value: Vec<u8>) -> Self {
-        self.reply.payload = value;
-        self
-    }
-
-    pub fn build(self) -> Reply {
-        self.reply
-    }
-}
-
-#[derive(Default, Clone, PartialEq, Eq, Debug)]
-pub struct Capability {
-    pub id: Id,
-    pub capabilities: capabilities::CapabilityMap,
-}
-
-impl Capability {
-    pub fn new(id: Id, capabilities: capabilities::CapabilityMap) -> Self {
-        Self { id, capabilities }
-    }
-
-    pub fn into_message(self) -> Result<Message, IntoMessageError> {
-        Ok(Message {
-            id: self.id,
-            ty: Type::Capability,
-            flags: Flags::empty(),
-            service: Service::SERVER,
-            payload: Payload(to_bytes(&self.capabilities)?),
-            ..Default::default()
-        })
-    }
-}
-
-impl TryFrom<Capability> for Message {
-    type Error = IntoMessageError;
-    fn try_from(c: Capability) -> Result<Self, Self::Error> {
-        c.into_message()
-    }
-}
-
-impl TryFrom<Message> for Capability {
-    type Error = IntoCapabilityError;
-    fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        msg.into_capability()
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum IntoCapabilityError {
-    #[error("message {0} is not of type \"{}\"", Type::Capability)]
-    BadType(Message),
-
-    #[error("map deserialization error: {0}")]
-    MapDeserialization(#[from] qi_format::Error),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_matches::assert_matches;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -916,57 +761,9 @@ mod tests {
         assert_eq!(Header::SIZE, 28);
     }
 
-    fn samples() -> [Message; 3] {
-        [
-            Message {
-                header: Header {
-                    id: 123,
-                    ty: Type::Post,
-                    version: Version::CURRENT,
-                    flags: Flags::RETURN_TYPE,
-                    subject: Method::try_from_values(
-                        Service::Custom(543.into()),
-                        Object::Other(32.into()),
-                        action::ObjectMethod::Terminate,
-                    )
-                    .unwrap(),
-                },
-                payload: vec![1, 2, 3],
-            },
-            Message {
-                header: Header {
-                    id: 9034,
-                    ty: Type::Event,
-                    version: Version::CURRENT,
-                    flags: Flags::empty(),
-                    subject: Method::try_from_values(
-                        Service::Custom(90934.into()),
-                        Object::Other(178.into()),
-                        action::ObjectMethod::Metaobject,
-                    )
-                    .unwrap(),
-                },
-                payload: vec![],
-            },
-            Message {
-                header: Header {
-                    id: 21932,
-                    version: Version::CURRENT,
-                    kind: Type::Capability,
-                    flags: Flags::DYNAMIC_PAYLOAD,
-                    subject: ServiceDirectory {
-                        action: action::ServiceDirectoryMethod::UnregisterService,
-                    }
-                    .into(),
-                },
-                payload: vec![100, 200, 255],
-            },
-        ]
-    }
-
     #[test]
-    fn test_decode_message_then_deserialize_annotated_value_from_payload() {
-        let input = [
+    fn test_message_read() {
+        let mut input: &[u8] = &[
             0x42, 0xde, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
             // payload
@@ -974,38 +771,22 @@ mod tests {
             0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
             0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
-        let message = MessageCodec
-            .decode(&mut bytes::BytesMut::from(input.as_slice()))
-            .unwrap()
-            .unwrap();
+        let message = Message::read(&mut input).unwrap();
         assert_eq!(
             message,
             Message {
-                header: Header {
-                    id: 990340,
-                    version: Version(0),
-                    kind: Type::Error,
-                    flags: Flags::empty(),
-                    subject: Subject::try_from_values(
-                        method::service::Id(47),
-                        method::object::Id(1),
-                        method::action::Id(178)
-                    )
-                    .unwrap(),
-                },
-                payload: bytes::Bytes::from_static(&[
+                id: Id::new(990340),
+                ty: Type::Error,
+                flags: Flags::empty(),
+                service: Service::new(47),
+                object: Object::new(1),
+                action: Action::new(178),
+                payload: Payload::new(vec![
                     0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20,
                     0x72, 0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20,
                     0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64
                 ]),
             }
-        );
-        use qi_format::{from_bytes, Dynamic, Type, Value};
-        let value: Dynamic = from_bytes(&message.payload).unwrap();
-        assert_eq!(
-            value,
-            Dynamic::from_type_and_value(Type::String, Value::from("The robot is not localized"))
-                .unwrap()
         );
     }
 
@@ -1013,60 +794,228 @@ mod tests {
     fn test_message_write() {
         use crate::message::*;
         let msg = Message {
-            header: Header {
-                id: 329,
-                version: Version(12),
-                kind: Type::Capability,
-                flags: Flags::RETURN_TYPE,
-                subject: method::ServiceDirectory {
-                    action: method::action::ServiceDirectory::ServiceReady,
-                }
-                .into(),
-            },
-            payload: vec![0x17, 0x2b, 0xe6, 0x01, 0x5f],
+            id: Id(329),
+            ty: Type::Capabilities,
+            flags: Flags::RETURN_TYPE,
+            service: Service(1),
+            object: Object(1),
+            action: Action(104),
+            payload: Payload(vec![0x17, 0x2b, 0xe6, 0x01, 0x5f]),
         };
-        let mut buf = bytes::BytesMut::new();
-        MessageCodec.encode(msg, &mut buf).unwrap();
+        let mut buf = Vec::new();
+        msg.write(&mut buf).unwrap();
+
         assert_eq!(
-            &buf,
-            &[
+            buf,
+            [
                 0x42, 0xde, 0xad, 0x42, // cookie
                 0x49, 0x01, 0x00, 0x00, // id
                 0x05, 0x00, 0x00, 0x00, // size
-                0x0c, 0x00, 0x06, 0x02, // version, type, flags
+                0x00, 0x00, 0x06, 0x02, // version, type, flags
                 0x01, 0x00, 0x00, 0x00, // service
                 0x01, 0x00, 0x00, 0x00, // object
                 0x68, 0x00, 0x00, 0x00, // action
                 0x17, 0x2b, 0xe6, 0x01, 0x5f, // payload
-            ][..]
+            ]
         );
     }
 
     #[test]
-    fn test_message_read_bad_cookie() {
-        let input = [
+    fn test_message_read_invalid_magic_cookie_value() {
+        let mut input: &[u8] = &[
             0x42, 0xdf, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
             0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72,
             0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
             0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
-        let message = MessageCodec.decode(&mut bytes::BytesMut::from(input.as_slice()));
-        assert_matches!(message, Err(DecodeError::BadMagicCookie(0x42dfad42)));
+        let message = Message::read(&mut input);
+        assert_eq!(
+            message,
+            Err(ReadError::Header(
+                HeaderReadError::InvalidMessageCookieValue(0x42dfad42)
+            ))
+        );
+    }
+
+    #[test]
+    fn test_message_read_invalid_type_value() {
+        let mut input: &[u8] = &[
+            0x42, 0xde, 0xad, 0x42, // cookie,
+            0x84, 0x1c, 0x0f, 0x00, // id
+            0x23, 0x00, 0x00, 0x00, // size
+            0x00, 0x00, 0xaa, 0x00, // version, type, flags
+            0x2f, 0x00, 0x00, 0x00, // service
+            0x01, 0x00, 0x00, 0x00, // object
+            0xb2, 0x00, 0x00, 0x00, // action
+        ];
+        let message = Message::read(&mut input);
+        assert_eq!(
+            message,
+            Err(ReadError::Header(HeaderReadError::InvalidTypeValue(0xaa)))
+        );
+    }
+
+    #[test]
+    fn test_message_read_invalid_flags_value() {
+        let mut input: &[u8] = &[
+            0x42, 0xde, 0xad, 0x42, // cookie,
+            0x84, 0x1c, 0x0f, 0x00, // id
+            0x23, 0x00, 0x00, 0x00, // size
+            0x00, 0x00, 0x03, 0x13, // version, type, flags
+            0x2f, 0x00, 0x00, 0x00, // service
+            0x01, 0x00, 0x00, 0x00, // object
+            0xb2, 0x00, 0x00, 0x00, // action
+        ];
+        let message = Message::read(&mut input);
+        assert_eq!(
+            message,
+            Err(ReadError::Header(HeaderReadError::InvalidFlagsValue(0x13)))
+        );
+    }
+
+    #[test]
+    fn test_message_read_unsupported_version() {
+        let mut input: &[u8] = &[
+            0x42, 0xde, 0xad, 0x42, // cookie,
+            0x84, 0x1c, 0x0f, 0x00, // id
+            0x23, 0x00, 0x00, 0x00, // size
+            0x12, 0x34, 0x03, 0x00, // version, type, flags
+            0x2f, 0x00, 0x00, 0x00, // service
+            0x01, 0x00, 0x00, 0x00, // object
+            0xb2, 0x00, 0x00, 0x00, // action
+        ];
+        let message = Message::read(&mut input);
+        assert_eq!(
+            message,
+            Err(ReadError::Header(HeaderReadError::UnsupportedVersion(
+                0x3412
+            )))
+        );
     }
 
     #[test]
     fn test_message_read_not_enough_data() {
-        let input = &[
+        fn check_header(mut input: &[u8], actual: usize) {
+            let message = Message::read(&mut input);
+            assert_eq!(
+                message,
+                Err(ReadError::Header(HeaderReadError::NotEnoughData(
+                    NotEnoughDataError {
+                        expected: 28,
+                        actual
+                    }
+                )))
+            );
+        }
+
+        check_header(
+            &[
+                0x42, 0xde, 0xad, // cookie, 1 byte short
+            ],
+            3,
+        );
+
+        check_header(
+            &[
+                0x42, 0xde, 0xad, 0x42, // cookie,
+                0x84, 0x1c, 0x0f, // id, 1 byte short
+            ],
+            7,
+        );
+
+        check_header(
+            &[
+                0x42, 0xde, 0xad, 0x42, // cookie,
+                0x84, 0x1c, 0x0f, 0x00, // id
+                0x23, 0x00, 0x00, // size, 1 byte short
+            ],
+            11,
+        );
+
+        check_header(
+            &[
+                0x42, 0xde, 0xad, 0x42, // cookie,
+                0x84, 0x1c, 0x0f, 0x00, // id
+                0x23, 0x00, 0x00, 0x00, // size
+                0x00, // version 1 byte short
+            ],
+            13,
+        );
+
+        check_header(
+            &[
+                0x42, 0xde, 0xad, 0x42, // cookie,
+                0x84, 0x1c, 0x0f, 0x00, // id
+                0x23, 0x00, 0x00, 0x00, // size
+                0x00, 0x00, // version, type 1 byte short
+            ],
+            14,
+        );
+
+        check_header(
+            &[
+                0x42, 0xde, 0xad, 0x42, // cookie,
+                0x84, 0x1c, 0x0f, 0x00, // id
+                0x23, 0x00, 0x00, 0x00, // size
+                0x00, 0x00, 0x03, // version, type, flags 1 byte short
+            ],
+            15,
+        );
+
+        check_header(
+            &[
+                0x42, 0xde, 0xad, 0x42, // cookie,
+                0x84, 0x1c, 0x0f, 0x00, // id
+                0x23, 0x00, 0x00, 0x00, // size
+                0x00, 0x00, 0x03, 0x00, // version, type, flags
+                0x2f, 0x00, 0x00, // service, 1 byte short
+            ],
+            19,
+        );
+
+        check_header(
+            &[
+                0x42, 0xde, 0xad, 0x42, // cookie,
+                0x84, 0x1c, 0x0f, 0x00, // id
+                0x23, 0x00, 0x00, 0x00, // size
+                0x00, 0x00, 0x03, 0x00, // version, type, flags
+                0x2f, 0x00, 0x00, 0x00, // service
+                0x01, 0x00, 0x00, // object, 1 byte short
+            ],
+            23,
+        );
+
+        check_header(
+            &[
+                0x42, 0xde, 0xad, 0x42, // cookie,
+                0x84, 0x1c, 0x0f, 0x00, // id
+                0x23, 0x00, 0x00, 0x00, // size
+                0x00, 0x00, 0x03, 0x00, // version, type, flags
+                0x2f, 0x00, 0x00, 0x00, // service
+                0x01, 0x00, 0x00, 0x00, // object
+                0xb2, 0x00, 0x00, // action, 1 byte short
+            ],
+            27,
+        );
+
+        let mut input: &[u8] = &[
             0x42, 0xde, 0xad, 0x42, // cookie,
             0x84, 0x1c, 0x0f, 0x00, // id
-            0x23, 0x00, 0x00, 0x00, // size
+            0x04, 0x00, 0x00, 0x00, // size
             0x00, 0x00, 0x03, 0x00, // version, type, flags
             0x2f, 0x00, 0x00, 0x00, // service
             0x01, 0x00, 0x00, 0x00, // object
-            0xb2, 0x00, 0x00, // action, 1 byte short
+            0xb2, 0x00, 0x00, 0x00, // action
+            0x01, 0x02, 0x03, // payload, 1 byte short
         ];
-        let message = MessageCodec.decode(&mut bytes::BytesMut::from(input.as_slice()));
-        assert_matches!(message, Ok(None));
+        let message = Message::read(&mut input);
+        assert_eq!(
+            message,
+            Err(ReadError::Payload(PayloadReadError(NotEnoughDataError {
+                expected: 4,
+                actual: 3
+            })))
+        );
     }
 }

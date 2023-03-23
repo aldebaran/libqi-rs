@@ -4,15 +4,14 @@
 #![doc = include_str!("../README.md")]
 
 mod capabilities;
+//pub mod client;
 mod message;
-pub mod session;
+mod req_rep;
+//pub mod server;
+mod session;
 mod stream;
 
-#[doc(inline)]
-pub use capabilities::CapabilityMap;
-
-#[doc(inline)]
-pub use message::Message;
-
-#[doc(inline)]
 pub use session::Session;
+
+pub use qi_format as format;
+pub use qi_types as types;

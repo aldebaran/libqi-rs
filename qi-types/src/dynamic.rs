@@ -60,8 +60,22 @@ impl Dynamic {
         }
     }
 
+    pub fn into_string(self) -> Option<String> {
+        match self.0 {
+            ValueWithType::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
     pub fn as_raw(&self) -> Option<&Raw> {
         match &self.0 {
+            ValueWithType::Raw(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn into_raw(self) -> Option<Raw> {
+        match self.0 {
             ValueWithType::Raw(r) => Some(r),
             _ => None,
         }
@@ -74,9 +88,23 @@ impl Dynamic {
         }
     }
 
+    pub fn into_option(self) -> Option<Option<Value>> {
+        match self.0 {
+            ValueWithType::Option(o) => Some(o.0),
+            _ => None,
+        }
+    }
+
     pub fn as_list(&self) -> Option<&List<Value>> {
         match &self.0 {
             ValueWithType::List(l) => Some(&l.0),
+            _ => None,
+        }
+    }
+
+    pub fn into_list(self) -> Option<List<Value>> {
+        match self.0 {
+            ValueWithType::List(l) => Some(l.0),
             _ => None,
         }
     }
@@ -88,9 +116,23 @@ impl Dynamic {
         }
     }
 
+    pub fn into_map(self) -> Option<Map<Value, Value>> {
+        match self.0 {
+            ValueWithType::Map(m) => Some(m.value),
+            _ => None,
+        }
+    }
+
     pub fn as_tuple(&self) -> Option<&Tuple> {
         match &self.0 {
             ValueWithType::Tuple(t) => Some(&t.0),
+            _ => None,
+        }
+    }
+
+    pub fn into_tuple(self) -> Option<Tuple> {
+        match self.0 {
+            ValueWithType::Tuple(t) => Some(t.0),
             _ => None,
         }
     }
@@ -102,9 +144,23 @@ impl Dynamic {
         }
     }
 
-    pub fn as_dynamic(&self) -> Option<&Dynamic> {
+    pub fn into_object(self) -> Option<Object> {
+        match self.0 {
+            ValueWithType::Object(o) => Some(*o),
+            _ => None,
+        }
+    }
+
+    pub fn as_inner_dynamic(&self) -> Option<&Dynamic> {
         match &self.0 {
             ValueWithType::Dynamic(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn into_inner_dynamic(self) -> Option<Dynamic> {
+        match self.0 {
+            ValueWithType::Dynamic(d) => Some(*d),
             _ => None,
         }
     }

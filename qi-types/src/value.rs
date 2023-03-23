@@ -54,7 +54,21 @@ impl Value {
         }
     }
 
+    pub fn into_string(self) -> Option<String> {
+        match self {
+            Self::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
     pub fn as_raw(&self) -> Option<&Raw> {
+        match self {
+            Self::Raw(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn into_raw(self) -> Option<Raw> {
         match self {
             Self::Raw(r) => Some(r),
             _ => None,
@@ -68,7 +82,21 @@ impl Value {
         }
     }
 
+    pub fn into_option(self) -> Option<Option<Value>> {
+        match self {
+            Self::Option(o) => Some(*o),
+            _ => None,
+        }
+    }
+
     pub fn as_list(&self) -> Option<&List<Value>> {
+        match self {
+            Self::List(l) => Some(l),
+            _ => None,
+        }
+    }
+
+    pub fn into_list(self) -> Option<List<Value>> {
         match self {
             Self::List(l) => Some(l),
             _ => None,
@@ -82,7 +110,21 @@ impl Value {
         }
     }
 
+    pub fn into_map(self) -> Option<Map<Value, Value>> {
+        match self {
+            Self::Map(m) => Some(m),
+            _ => None,
+        }
+    }
+
     pub fn as_tuple(&self) -> Option<&Tuple> {
+        match self {
+            Self::Tuple(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    pub fn into_tuple(self) -> Option<Tuple> {
         match self {
             Self::Tuple(t) => Some(t),
             _ => None,
@@ -96,9 +138,23 @@ impl Value {
         }
     }
 
+    pub fn into_object(self) -> Option<Object> {
+        match self {
+            Self::Object(o) => Some(*o),
+            _ => None,
+        }
+    }
+
     pub fn as_dynamic(&self) -> Option<&Dynamic> {
         match self {
             Self::Dynamic(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn into_dynamic(self) -> Option<Dynamic> {
+        match self {
+            Self::Dynamic(d) => Some(*d),
             _ => None,
         }
     }
