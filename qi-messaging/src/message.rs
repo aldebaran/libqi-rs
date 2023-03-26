@@ -116,10 +116,12 @@ macro_rules! define_message_newtype {
         impl $name {
             const SIZE: usize = std::mem::size_of::<$t>();
 
+            #[allow(dead_code)]
             $vis const fn new(val: $t) -> Self {
                 Self(val)
             }
 
+            #[allow(dead_code)]
             $vis const fn from(val: $t) -> Self {
                 Self(val)
             }

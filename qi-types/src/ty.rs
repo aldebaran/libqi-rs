@@ -488,7 +488,7 @@ pub trait DynamicGetType {
     /// This always returns a value, meaning that this function must always
     /// go as deep into internal types as necessary to return as much type
     /// information as possible. More specifically, it must inspect dynamic values.
-    fn current_ty(&self) -> Type;
+    fn deep_ty(&self) -> Type;
 
     fn has_type(&self, t: Option<&Type>) -> bool {
         match (self.ty(), t) {
@@ -508,7 +508,7 @@ where
         Some(T::ty())
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         T::ty()
     }
 }

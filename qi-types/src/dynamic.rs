@@ -10,207 +10,32 @@ use crate::{
 /// [`Dynamic`] represents a `dynamic` value in the `qi` type system.
 ///
 /// It is a value associated with its type information.
-#[derive(
-    Default, Clone, PartialEq, Eq, Debug, derive_more::From, serde::Serialize, serde::Deserialize,
-)]
-#[serde(transparent)]
-#[from(forward)]
-pub struct Dynamic(ValueWithType);
-
-impl Dynamic {
-    pub fn new(value: Value, t: Option<Type>) -> Result<Self, TypeMismatchError> {
-        Ok(Self(ValueWithType::new(value, t)?))
-    }
-
-    pub fn from_value(value: Value) -> Self {
-        use ty::DynamicGetType;
-        let t = value.ty();
-        Self(ValueWithType::new(value, t).unwrap())
-    }
-
-    pub fn into_value(self) -> Value {
-        self.0.into_value()
-    }
-
-    pub fn as_unit(&self) -> Option<()> {
-        match &self.0 {
-            ValueWithType::Unit => Some(()),
-            _ => None,
-        }
-    }
-
-    pub fn as_bool(&self) -> Option<bool> {
-        match &self.0 {
-            ValueWithType::Bool(b) => Some(*b),
-            _ => None,
-        }
-    }
-
-    pub fn as_number(&self) -> Option<Number> {
-        match &self.0 {
-            ValueWithType::Number(n) => Some(*n),
-            _ => None,
-        }
-    }
-
-    pub fn as_string(&self) -> Option<&String> {
-        match &self.0 {
-            ValueWithType::String(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    pub fn into_string(self) -> Option<String> {
-        match self.0 {
-            ValueWithType::String(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    pub fn as_raw(&self) -> Option<&Raw> {
-        match &self.0 {
-            ValueWithType::Raw(r) => Some(r),
-            _ => None,
-        }
-    }
-
-    pub fn into_raw(self) -> Option<Raw> {
-        match self.0 {
-            ValueWithType::Raw(r) => Some(r),
-            _ => None,
-        }
-    }
-
-    pub fn as_option(&self) -> Option<&Option<Value>> {
-        match &self.0 {
-            ValueWithType::Option(o) => Some(&o.0),
-            _ => None,
-        }
-    }
-
-    pub fn into_option(self) -> Option<Option<Value>> {
-        match self.0 {
-            ValueWithType::Option(o) => Some(o.0),
-            _ => None,
-        }
-    }
-
-    pub fn as_list(&self) -> Option<&List<Value>> {
-        match &self.0 {
-            ValueWithType::List(l) => Some(&l.0),
-            _ => None,
-        }
-    }
-
-    pub fn into_list(self) -> Option<List<Value>> {
-        match self.0 {
-            ValueWithType::List(l) => Some(l.0),
-            _ => None,
-        }
-    }
-
-    pub fn as_map(&self) -> Option<&Map<Value, Value>> {
-        match &self.0 {
-            ValueWithType::Map(m) => Some(&m.value),
-            _ => None,
-        }
-    }
-
-    pub fn into_map(self) -> Option<Map<Value, Value>> {
-        match self.0 {
-            ValueWithType::Map(m) => Some(m.value),
-            _ => None,
-        }
-    }
-
-    pub fn as_tuple(&self) -> Option<&Tuple> {
-        match &self.0 {
-            ValueWithType::Tuple(t) => Some(&t.0),
-            _ => None,
-        }
-    }
-
-    pub fn into_tuple(self) -> Option<Tuple> {
-        match self.0 {
-            ValueWithType::Tuple(t) => Some(t.0),
-            _ => None,
-        }
-    }
-
-    pub fn as_object(&self) -> Option<&Object> {
-        match &self.0 {
-            ValueWithType::Object(o) => Some(o.as_ref()),
-            _ => None,
-        }
-    }
-
-    pub fn into_object(self) -> Option<Object> {
-        match self.0 {
-            ValueWithType::Object(o) => Some(*o),
-            _ => None,
-        }
-    }
-
-    pub fn as_inner_dynamic(&self) -> Option<&Dynamic> {
-        match &self.0 {
-            ValueWithType::Dynamic(d) => Some(d),
-            _ => None,
-        }
-    }
-
-    pub fn into_inner_dynamic(self) -> Option<Dynamic> {
-        match self.0 {
-            ValueWithType::Dynamic(d) => Some(*d),
-            _ => None,
-        }
-    }
-}
-
-impl From<Value> for Dynamic {
-    fn from(v: Value) -> Self {
-        Self::from_value(v)
-    }
-}
-
-impl std::fmt::Display for Dynamic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl ty::DynamicGetType for Dynamic {
-    fn ty(&self) -> Option<Type> {
-        None
-    }
-
-    fn current_ty(&self) -> Type {
-        self.0.current_ty()
-    }
-}
-
-/// A value with additional type information.
-#[derive(Clone, PartialEq, Eq, Debug, derive_more::From, derive_more::TryInto)]
-enum ValueWithType {
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, derive_more::From, derive_more::TryInto)]
+pub enum Dynamic {
     #[from]
     Unit,
     #[from]
     Bool(bool),
-    #[from]
+    #[from(forward)]
     Number(Number),
     #[from]
     String(String),
     #[from]
     Raw(Raw),
-    #[from(forward)]
-    Option(OptionWithType),
-    List(ListWithType),
-    Map(MapWithType),
-    Tuple(TupleWithType),
+    #[from]
+    Option(OptionDynamic),
+    #[from]
+    List(ListDynamic),
+    #[from]
+    Map(MapDynamic),
+    #[from]
+    Tuple(TupleDynamic),
     Object(Box<Object>),
+    #[try_into(ignore)]
     Dynamic(Box<Dynamic>),
 }
 
-impl ValueWithType {
+impl Dynamic {
     pub fn new(value: Value, t: Option<Type>) -> Result<Self, TypeMismatchError> {
         use ty::DynamicGetType;
         if !value.has_type(t.as_ref()) {
@@ -232,14 +57,14 @@ impl ValueWithType {
                     Some(Type::Option(o)) => o.as_deref().cloned(),
                     _ => unreachable!(),
                 };
-                Self::Option(OptionWithType(*option, value_type))
+                Self::Option(OptionDynamic(*option, value_type))
             }
             Value::List(list) => {
                 let value_type = match t {
                     Some(Type::List(l)) => l.as_deref().cloned(),
                     _ => unreachable!(),
                 };
-                Self::List(ListWithType(list, value_type))
+                Self::List(ListDynamic(list, value_type))
             }
             Value::Map(map) => {
                 let (key_type, value_type) = match t {
@@ -248,7 +73,7 @@ impl ValueWithType {
                     }
                     _ => unreachable!(),
                 };
-                Self::Map(MapWithType {
+                Self::Map(MapDynamic {
                     value: map,
                     key_type,
                     value_type,
@@ -259,10 +84,149 @@ impl ValueWithType {
                     Some(Type::Tuple(tuple_type)) => tuple_type,
                     _ => unreachable!(),
                 };
-                Self::Tuple(TupleWithType(tuple, tuple_type))
+                Self::Tuple(TupleDynamic(tuple, tuple_type))
             }
         };
         Ok(value)
+    }
+
+    pub fn from_value(value: Value) -> Self {
+        use ty::DynamicGetType;
+        let t = value.ty();
+        Self::new(value, t).unwrap()
+    }
+
+    pub fn as_unit(&self) -> Option<()> {
+        match self {
+            Dynamic::Unit => Some(()),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Dynamic::Bool(b) => Some(*b),
+            _ => None,
+        }
+    }
+
+    pub fn as_number(&self) -> Option<Number> {
+        match self {
+            Dynamic::Number(n) => Some(*n),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&String> {
+        match self {
+            Dynamic::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn into_string(self) -> Option<String> {
+        match self {
+            Dynamic::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn as_raw(&self) -> Option<&Raw> {
+        match self {
+            Dynamic::Raw(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn into_raw(self) -> Option<Raw> {
+        match self {
+            Dynamic::Raw(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    pub fn as_option(&self) -> Option<&Option<Value>> {
+        match self {
+            Dynamic::Option(o) => Some(&o.0),
+            _ => None,
+        }
+    }
+
+    pub fn into_option(self) -> Option<Option<Value>> {
+        match self {
+            Dynamic::Option(o) => Some(o.0),
+            _ => None,
+        }
+    }
+
+    pub fn as_list(&self) -> Option<&List<Value>> {
+        match self {
+            Dynamic::List(l) => Some(&l.0),
+            _ => None,
+        }
+    }
+
+    pub fn into_list(self) -> Option<List<Value>> {
+        match self {
+            Dynamic::List(l) => Some(l.0),
+            _ => None,
+        }
+    }
+
+    pub fn as_map(&self) -> Option<&Map<Value, Value>> {
+        match self {
+            Dynamic::Map(m) => Some(&m.value),
+            _ => None,
+        }
+    }
+
+    pub fn into_map(self) -> Option<Map<Value, Value>> {
+        match self {
+            Dynamic::Map(m) => Some(m.value),
+            _ => None,
+        }
+    }
+
+    pub fn as_tuple(&self) -> Option<&Tuple> {
+        match self {
+            Dynamic::Tuple(t) => Some(&t.0),
+            _ => None,
+        }
+    }
+
+    pub fn into_tuple(self) -> Option<Tuple> {
+        match self {
+            Dynamic::Tuple(t) => Some(t.0),
+            _ => None,
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&Object> {
+        match self {
+            Dynamic::Object(o) => Some(o.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn into_object(self) -> Option<Object> {
+        match self {
+            Dynamic::Object(o) => Some(*o),
+            _ => None,
+        }
+    }
+
+    pub fn as_inner_dynamic(&self) -> Option<&Dynamic> {
+        match self {
+            Dynamic::Dynamic(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    pub fn into_inner_dynamic(self) -> Option<Dynamic> {
+        match self {
+            Dynamic::Dynamic(d) => Some(*d),
+            _ => None,
+        }
     }
 
     pub fn into_value(self) -> Value {
@@ -282,53 +246,53 @@ impl ValueWithType {
     }
 }
 
-impl Default for ValueWithType {
+impl Default for Dynamic {
     fn default() -> Self {
         Self::Unit
     }
 }
 
-impl From<&str> for ValueWithType {
+impl From<&str> for Dynamic {
     fn from(s: &str) -> Self {
-        Self::String(s.to_string())
+        Dynamic::String(s.to_owned())
     }
 }
 
-impl ty::DynamicGetType for ValueWithType {
+impl From<Option<Value>> for Dynamic {
+    fn from(v: Option<Value>) -> Self {
+        Self::Option(OptionDynamic::from(v))
+    }
+}
+
+impl From<Object> for Dynamic {
+    fn from(v: Object) -> Self {
+        Self::Object(Box::new(v))
+    }
+}
+
+impl ty::DynamicGetType for Dynamic {
     fn ty(&self) -> Option<Type> {
-        match self {
-            Self::Unit => ().ty(),
-            Self::Bool(b) => b.ty(),
-            Self::Number(n) => Some(n.ty()),
-            Self::String(s) => s.ty(),
-            Self::Raw(r) => r.ty(),
-            Self::Option(o) => Some(o.ty()),
-            Self::List(l) => Some(l.ty()),
-            Self::Map(m) => Some(m.ty()),
-            Self::Tuple(t) => Some(t.ty()),
-            Self::Object(o) => o.ty(),
-            Self::Dynamic(d) => d.ty(),
-        }
+        None
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         match self {
-            Self::Unit => ().current_ty(),
-            Self::Bool(b) => b.current_ty(),
-            Self::Number(n) => n.current_ty(),
-            Self::String(s) => s.current_ty(),
-            Self::Raw(r) => r.current_ty(),
-            Self::Option(o) => o.current_ty(),
-            Self::List(l) => l.current_ty(),
-            Self::Map(m) => m.current_ty(),
-            Self::Tuple(t) => t.current_ty(),
-            Self::Object(o) => o.current_ty(),
-            Self::Dynamic(d) => d.current_ty(),
+            Self::Unit => ().deep_ty(),
+            Self::Bool(b) => b.deep_ty(),
+            Self::Number(n) => n.deep_ty(),
+            Self::String(s) => s.deep_ty(),
+            Self::Raw(r) => r.deep_ty(),
+            Self::Option(o) => o.deep_ty(),
+            Self::List(l) => l.deep_ty(),
+            Self::Map(m) => m.deep_ty(),
+            Self::Tuple(t) => t.deep_ty(),
+            Self::Object(o) => o.deep_ty(),
+            Self::Dynamic(d) => d.deep_ty(),
         }
     }
 }
 
-impl std::fmt::Display for ValueWithType {
+impl std::fmt::Display for Dynamic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
             Self::Unit => f.write_str("()"),
@@ -359,7 +323,7 @@ where
     serializer.end()
 }
 
-impl serde::Serialize for ValueWithType {
+impl serde::Serialize for Dynamic {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -381,7 +345,7 @@ impl serde::Serialize for ValueWithType {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for ValueWithType {
+impl<'de> serde::Deserialize<'de> for Dynamic {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -389,7 +353,7 @@ impl<'de> serde::Deserialize<'de> for ValueWithType {
         struct Visitor;
 
         impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = ValueWithType;
+            type Value = Dynamic;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a dynamic value")
@@ -410,7 +374,7 @@ impl<'de> serde::Deserialize<'de> for ValueWithType {
 
                 // Value
                 let value = seq
-                    .next_element_seed(ValueWithTypeSeed(value_type))?
+                    .next_element_seed(DynamicSeed(value_type))?
                     .ok_or_else(|| invalid_length(1))?;
 
                 Ok(value)
@@ -421,10 +385,10 @@ impl<'de> serde::Deserialize<'de> for ValueWithType {
     }
 }
 
-struct ValueWithTypeSeed(Option<Type>);
+struct DynamicSeed(Option<Type>);
 
-impl<'de> serde::de::DeserializeSeed<'de> for ValueWithTypeSeed {
-    type Value = ValueWithType;
+impl<'de> serde::de::DeserializeSeed<'de> for DynamicSeed {
+    type Value = Dynamic;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -435,106 +399,104 @@ impl<'de> serde::de::DeserializeSeed<'de> for ValueWithTypeSeed {
             Some(t) => match t {
                 Type::Unit => {
                     <()>::deserialize(deserializer)?;
-                    ValueWithType::Unit
+                    Dynamic::Unit
                 }
                 Type::Bool => {
                     let v = bool::deserialize(deserializer)?;
-                    ValueWithType::Bool(v)
+                    Dynamic::Bool(v)
                 }
                 Type::Int8 => {
                     let v = i8::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::Int8(v))
+                    Dynamic::Number(Number::Int8(v))
                 }
                 Type::UInt8 => {
                     let v = u8::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::UInt8(v))
+                    Dynamic::Number(Number::UInt8(v))
                 }
                 Type::Int16 => {
                     let v = i16::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::Int16(v))
+                    Dynamic::Number(Number::Int16(v))
                 }
                 Type::UInt16 => {
                     let v = u16::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::UInt16(v))
+                    Dynamic::Number(Number::UInt16(v))
                 }
                 Type::Int32 => {
                     let v = i32::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::Int32(v))
+                    Dynamic::Number(Number::Int32(v))
                 }
                 Type::UInt32 => {
                     let v = u32::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::UInt32(v))
+                    Dynamic::Number(Number::UInt32(v))
                 }
                 Type::Int64 => {
                     let v = i64::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::Int64(v))
+                    Dynamic::Number(Number::Int64(v))
                 }
                 Type::UInt64 => {
                     let v = u64::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::UInt64(v))
+                    Dynamic::Number(Number::UInt64(v))
                 }
                 Type::Float32 => {
                     let v = Float32::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::Float32(v))
+                    Dynamic::Number(Number::Float32(v))
                 }
                 Type::Float64 => {
                     let v = Float64::deserialize(deserializer)?;
-                    ValueWithType::Number(Number::Float64(v))
+                    Dynamic::Number(Number::Float64(v))
                 }
                 Type::String => {
                     let v = String::deserialize(deserializer)?;
-                    ValueWithType::String(v)
+                    Dynamic::String(v)
                 }
                 Type::Raw => {
                     let v = Raw::deserialize(deserializer)?;
-                    ValueWithType::Raw(v)
+                    Dynamic::Raw(v)
                 }
                 Type::Object => {
                     let v = Object::deserialize(deserializer)?;
-                    ValueWithType::Object(Box::new(v))
+                    Dynamic::Object(Box::new(v))
                 }
                 Type::Option(t) => {
-                    let v = OptionWithTypeSeed(t.as_deref().cloned()).deserialize(deserializer)?;
-                    ValueWithType::Option(v)
+                    let v = OptionDynamicSeed(t.as_deref().cloned()).deserialize(deserializer)?;
+                    Dynamic::Option(v)
                 }
                 Type::List(t) | Type::VarArgs(t) => {
-                    let v = ListWithTypeSeed(t.as_deref().cloned()).deserialize(deserializer)?;
-                    ValueWithType::List(v)
+                    let v = ListDynamicSeed(t.as_deref().cloned()).deserialize(deserializer)?;
+                    Dynamic::List(v)
                 }
                 Type::Map { key, value } => {
-                    let v = MapWithTypeSeed {
+                    let v = MapDynamicSeed {
                         key: key.as_deref().cloned(),
                         value: value.as_deref().cloned(),
                     }
                     .deserialize(deserializer)?;
-                    ValueWithType::Map(v)
+                    Dynamic::Map(v)
                 }
                 Type::Tuple(tuple) => {
-                    let v = TupleWithTypeSeed(tuple).deserialize(deserializer)?;
-                    ValueWithType::Tuple(v)
+                    let v = TupleDynamicSeed(tuple).deserialize(deserializer)?;
+                    Dynamic::Tuple(v)
                 }
             },
             None => {
                 let v = Dynamic::deserialize(deserializer)?;
-                ValueWithType::Dynamic(Box::new(v))
+                Dynamic::Dynamic(Box::new(v))
             }
         };
         Ok(value)
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-struct OptionWithType(Option<Value>, Option<Type>);
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct OptionDynamic(Option<Value>, Option<Type>);
 
-impl From<OptionWithType> for Option<Value> {
-    fn from(o: OptionWithType) -> Self {
-        o.0
-    }
-}
-
-impl OptionWithType {
-    fn into_value(self) -> Value {
+impl OptionDynamic {
+    pub fn into_value(self) -> Value {
         Value::Option(Box::new(self.0))
+    }
+
+    pub fn into_option(self) -> Option<Value> {
+        self.0
     }
 
     fn ty(&self) -> Type {
@@ -542,23 +504,42 @@ impl OptionWithType {
     }
 }
 
-impl ty::DynamicGetType for OptionWithType {
+impl ty::DynamicGetType for OptionDynamic {
     fn ty(&self) -> Option<Type> {
         Some(self.ty())
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         self.ty()
     }
 }
 
-impl std::fmt::Display for OptionWithType {
+impl std::fmt::Display for OptionDynamic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_option(&self.0)
     }
 }
 
-impl serde::Serialize for OptionWithType {
+impl From<Option<Value>> for OptionDynamic {
+    fn from(v: Option<Value>) -> Self {
+        let ty = v.as_ref().and_then(ty::DynamicGetType::ty);
+        Self(v, ty)
+    }
+}
+
+impl From<OptionDynamic> for Value {
+    fn from(o: OptionDynamic) -> Self {
+        o.into_value()
+    }
+}
+
+impl From<OptionDynamic> for Option<Value> {
+    fn from(o: OptionDynamic) -> Self {
+        o.into_option()
+    }
+}
+
+impl serde::Serialize for OptionDynamic {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -567,10 +548,10 @@ impl serde::Serialize for OptionWithType {
     }
 }
 
-struct OptionWithTypeSeed(Option<Type>);
+struct OptionDynamicSeed(Option<Type>);
 
-impl<'de> serde::de::DeserializeSeed<'de> for OptionWithTypeSeed {
-    type Value = OptionWithType;
+impl<'de> serde::de::DeserializeSeed<'de> for OptionDynamicSeed {
+    type Value = OptionDynamic;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -578,7 +559,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for OptionWithTypeSeed {
     {
         struct Visitor(Option<Type>);
         impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = OptionWithType;
+            type Value = OptionDynamic;
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("an optional value")
             }
@@ -588,30 +569,34 @@ impl<'de> serde::de::DeserializeSeed<'de> for OptionWithTypeSeed {
                 D: serde::Deserializer<'de>,
             {
                 use serde::de::DeserializeSeed;
-                let typed_value = ValueWithTypeSeed(self.0.clone()).deserialize(deserializer)?;
+                let typed_value = DynamicSeed(self.0.clone()).deserialize(deserializer)?;
                 // Drop the type information and transform into a simple value. The type
                 // information is already stored with the optional.
                 let value = typed_value.into_value();
-                Ok(OptionWithType(Some(value), self.0))
+                Ok(OptionDynamic(Some(value), self.0))
             }
 
             fn visit_none<E>(self) -> Result<Self::Value, E>
             where
                 E: serde::de::Error,
             {
-                Ok(OptionWithType(None, self.0))
+                Ok(OptionDynamic(None, self.0))
             }
         }
         deserializer.deserialize_option(Visitor(self.0))
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-struct ListWithType(List<Value>, Option<Type>);
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct ListDynamic(List<Value>, Option<Type>);
 
-impl ListWithType {
-    fn into_value(self) -> Value {
+impl ListDynamic {
+    pub fn into_value(self) -> Value {
         Value::List(self.0)
+    }
+
+    pub fn into_list(self) -> List<Value> {
+        self.0
     }
 
     fn ty(&self) -> Type {
@@ -619,23 +604,35 @@ impl ListWithType {
     }
 }
 
-impl ty::DynamicGetType for ListWithType {
+impl ty::DynamicGetType for ListDynamic {
     fn ty(&self) -> Option<Type> {
         Some(self.ty())
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         self.ty()
     }
 }
 
-impl std::fmt::Display for ListWithType {
+impl From<ListDynamic> for Value {
+    fn from(l: ListDynamic) -> Self {
+        l.into_value()
+    }
+}
+
+impl From<ListDynamic> for List<Value> {
+    fn from(l: ListDynamic) -> Self {
+        l.into_list()
+    }
+}
+
+impl std::fmt::Display for ListDynamic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_list(&self.0)
     }
 }
 
-impl serde::Serialize for ListWithType {
+impl serde::Serialize for ListDynamic {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -644,10 +641,10 @@ impl serde::Serialize for ListWithType {
     }
 }
 
-struct ListWithTypeSeed(Option<Type>);
+struct ListDynamicSeed(Option<Type>);
 
-impl<'de> serde::de::DeserializeSeed<'de> for ListWithTypeSeed {
-    type Value = ListWithType;
+impl<'de> serde::de::DeserializeSeed<'de> for ListDynamicSeed {
+    type Value = ListDynamic;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -655,7 +652,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for ListWithTypeSeed {
     {
         struct Visitor(Option<Type>);
         impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = ListWithType;
+            type Value = ListDynamic;
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a list or varargs value")
             }
@@ -665,30 +662,32 @@ impl<'de> serde::de::DeserializeSeed<'de> for ListWithTypeSeed {
                 A: serde::de::SeqAccess<'de>,
             {
                 let mut list = List::new();
-                while let Some(typed_value) =
-                    seq.next_element_seed(ValueWithTypeSeed(self.0.clone()))?
-                {
+                while let Some(typed_value) = seq.next_element_seed(DynamicSeed(self.0.clone()))? {
                     // Drop the type information and transform into a simple value. The type
                     // information is already stored with the list.
                     list.push(typed_value.into_value());
                 }
-                Ok(ListWithType(list, self.0))
+                Ok(ListDynamic(list, self.0))
             }
         }
         deserializer.deserialize_seq(Visitor(self.0))
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-struct MapWithType {
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct MapDynamic {
     value: Map<Value, Value>,
     key_type: Option<Type>,
     value_type: Option<Type>,
 }
 
-impl MapWithType {
-    fn into_value(self) -> Value {
+impl MapDynamic {
+    pub fn into_value(self) -> Value {
         Value::Map(self.value)
+    }
+
+    pub fn into_map(self) -> Map<Value, Value> {
+        self.value
     }
 
     fn ty(&self) -> Type {
@@ -699,23 +698,35 @@ impl MapWithType {
     }
 }
 
-impl ty::DynamicGetType for MapWithType {
+impl ty::DynamicGetType for MapDynamic {
     fn ty(&self) -> Option<Type> {
         Some(self.ty())
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         self.ty()
     }
 }
 
-impl std::fmt::Display for MapWithType {
+impl From<MapDynamic> for Value {
+    fn from(m: MapDynamic) -> Self {
+        m.into_value()
+    }
+}
+
+impl From<MapDynamic> for Map<Value, Value> {
+    fn from(m: MapDynamic) -> Self {
+        m.into_map()
+    }
+}
+
+impl std::fmt::Display for MapDynamic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.value.fmt(f)
     }
 }
 
-impl serde::Serialize for MapWithType {
+impl serde::Serialize for MapDynamic {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -728,13 +739,13 @@ impl serde::Serialize for MapWithType {
     }
 }
 
-struct MapWithTypeSeed {
+struct MapDynamicSeed {
     key: Option<Type>,
     value: Option<Type>,
 }
 
-impl<'de> serde::de::DeserializeSeed<'de> for MapWithTypeSeed {
-    type Value = MapWithType;
+impl<'de> serde::de::DeserializeSeed<'de> for MapDynamicSeed {
+    type Value = MapDynamic;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -745,7 +756,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for MapWithTypeSeed {
             value: Option<Type>,
         }
         impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = MapWithType;
+            type Value = MapDynamic;
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a map value")
             }
@@ -756,14 +767,14 @@ impl<'de> serde::de::DeserializeSeed<'de> for MapWithTypeSeed {
             {
                 let mut pair_vec = Vec::new();
                 while let Some((key, value)) = map.next_entry_seed(
-                    ValueWithTypeSeed(self.key.clone()),
-                    ValueWithTypeSeed(self.value.clone()),
+                    DynamicSeed(self.key.clone()),
+                    DynamicSeed(self.value.clone()),
                 )? {
                     // Drop the type information and transform into simple values. The types
                     // information are already stored with the map.
                     pair_vec.push((key.into_value(), value.into_value()));
                 }
-                Ok(MapWithType {
+                Ok(MapDynamic {
                     value: Map::from_iter(pair_vec),
                     key_type: self.key,
                     value_type: self.value,
@@ -777,12 +788,16 @@ impl<'de> serde::de::DeserializeSeed<'de> for MapWithTypeSeed {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-struct TupleWithType(Tuple, ty::TupleType);
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct TupleDynamic(Tuple, ty::TupleType);
 
-impl TupleWithType {
-    fn into_value(self) -> Value {
+impl TupleDynamic {
+    pub fn into_value(self) -> Value {
         Value::Tuple(self.0)
+    }
+
+    pub fn into_tuple(self) -> Tuple {
+        self.0
     }
 
     fn ty(&self) -> Type {
@@ -790,23 +805,35 @@ impl TupleWithType {
     }
 }
 
-impl ty::DynamicGetType for TupleWithType {
+impl ty::DynamicGetType for TupleDynamic {
     fn ty(&self) -> Option<Type> {
         Some(self.ty())
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         self.ty()
     }
 }
 
-impl std::fmt::Display for TupleWithType {
+impl From<TupleDynamic> for Value {
+    fn from(t: TupleDynamic) -> Self {
+        t.into_value()
+    }
+}
+
+impl From<TupleDynamic> for Tuple {
+    fn from(t: TupleDynamic) -> Self {
+        t.into_tuple()
+    }
+}
+
+impl std::fmt::Display for TupleDynamic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
 }
 
-impl serde::Serialize for TupleWithType {
+impl serde::Serialize for TupleDynamic {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -815,10 +842,10 @@ impl serde::Serialize for TupleWithType {
     }
 }
 
-struct TupleWithTypeSeed(ty::TupleType);
+struct TupleDynamicSeed(ty::TupleType);
 
-impl<'de> serde::de::DeserializeSeed<'de> for TupleWithTypeSeed {
-    type Value = TupleWithType;
+impl<'de> serde::de::DeserializeSeed<'de> for TupleDynamicSeed {
+    type Value = TupleDynamic;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
@@ -836,7 +863,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for TupleWithTypeSeed {
         {
             let mut elements = Vec::new();
             for element_type in element_types {
-                match seq.next_element_seed(ValueWithTypeSeed(element_type))? {
+                match seq.next_element_seed(DynamicSeed(element_type))? {
                     Some(element) => elements.push(element.into_value()),
                     None => {
                         return Err(serde::de::Error::invalid_length(elements.len(), expecting))
@@ -848,7 +875,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for TupleWithTypeSeed {
 
         struct TupleVisitor(ty::TupleType);
         impl<'de> serde::de::Visitor<'de> for TupleVisitor {
-            type Value = TupleWithType;
+            type Value = TupleDynamic;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(f, "a tuple value of size {len}", len = self.0.len())
             }
@@ -858,13 +885,13 @@ impl<'de> serde::de::DeserializeSeed<'de> for TupleWithTypeSeed {
                 A: serde::de::SeqAccess<'de>,
             {
                 let tuple = deser_tuple_from_seq(seq, self.0.element_types(), &self)?;
-                Ok(TupleWithType(tuple, self.0))
+                Ok(TupleDynamic(tuple, self.0))
             }
         }
 
         struct StructVisitor(String, Vec<ty::StructField>);
         impl<'de> serde::de::Visitor<'de> for StructVisitor {
-            type Value = TupleWithType;
+            type Value = TupleDynamic;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(f, "a struct value of size {len}", len = self.1.len(),)
             }
@@ -878,7 +905,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for TupleWithTypeSeed {
                     self.1.iter().map(|field| field.value_type.clone()),
                     &self,
                 )?;
-                Ok(TupleWithType(tuple, ty::TupleType::Struct(self.0, self.1)))
+                Ok(TupleDynamic(tuple, ty::TupleType::Struct(self.0, self.1)))
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -889,7 +916,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for TupleWithTypeSeed {
                 for field in &self.1 {
                     match map.next_entry_seed(
                         std::marker::PhantomData::<&str>,
-                        ValueWithTypeSeed(field.value_type.clone()),
+                        DynamicSeed(field.value_type.clone()),
                     )? {
                         Some((key, value)) if key == field.name => {
                             elements.push(value.into_value())
@@ -904,7 +931,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for TupleWithTypeSeed {
                 }
 
                 let tuple = Tuple::from_vec(elements);
-                Ok(TupleWithType(tuple, ty::TupleType::Struct(self.0, self.1)))
+                Ok(TupleDynamic(tuple, ty::TupleType::Struct(self.0, self.1)))
             }
         }
 

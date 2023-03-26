@@ -4,13 +4,16 @@
 #![doc = include_str!("../README.md")]
 
 mod capabilities;
-//pub mod client;
+pub mod client;
+mod codec;
+mod dispatch;
 mod message;
-mod req_rep;
-//pub mod server;
+mod message_types;
+pub mod server;
 mod session;
-mod stream;
 
+pub use message::{Action, Object, Service};
+pub use message_types::Response;
 pub use session::Session;
 
 pub use qi_format as format;

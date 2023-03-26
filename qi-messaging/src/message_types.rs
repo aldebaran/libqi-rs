@@ -6,7 +6,7 @@ pub use crate::{
 };
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct Call<T> {
+pub struct Call<T = ()> {
     id: Id,
     dynamic_payload: bool,
     return_type: bool,
@@ -32,6 +32,9 @@ impl<T> Call<T> {
     where
         T: serde::de::DeserializeOwned,
     {
+        if msg.ty != Type::Call {
+            return Err(CallFromMessageError::BadType(msg));
+        }
         Ok(Self {
             id: msg.id,
             dynamic_payload: msg.flags.has_dynamic_payload(),
@@ -69,7 +72,7 @@ pub enum CallFromMessageError {
     BadType(Message),
 
     #[error("payload format error: {0}")]
-    PayloadFormatError(#[from] format::Error),
+    PayloadFormat(#[from] format::Error),
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -130,6 +133,7 @@ impl CallBuilder {
     }
 }
 
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub struct CallBuilderWithArg<T> {
     call: Call<T>,
 }
@@ -141,7 +145,7 @@ impl<T> CallBuilderWithArg<T> {
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub struct Reply<T> {
+pub struct Reply<T = ()> {
     id: Id,
     dynamic_payload: bool,
     service: Service,
@@ -177,6 +181,9 @@ impl<T> Reply<T> {
     where
         T: serde::de::DeserializeOwned,
     {
+        if msg.ty != Type::Reply {
+            return Err(ReplyFromMessageError::BadType(msg));
+        }
         Ok(Self {
             id: msg.id,
             dynamic_payload: msg.flags.has_dynamic_payload(),
@@ -213,7 +220,7 @@ pub enum ReplyFromMessageError {
     BadType(Message),
 
     #[error("payload format error: {0}")]
-    PayloadFormatError(#[from] format::Error),
+    PayloadFormat(#[from] format::Error),
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -275,14 +282,17 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn from_message(message: Message) -> Result<Self, ErrorFromMessageError> {
+    pub fn from_message(msg: Message) -> Result<Self, ErrorFromMessageError> {
+        if msg.ty != Type::Error {
+            return Err(ErrorFromMessageError::BadType(msg));
+        }
         Ok(Self {
-            id: message.id,
-            service: message.service,
-            object: message.object,
-            action: message.action,
+            id: msg.id,
+            service: msg.service,
+            object: msg.object,
+            action: msg.action,
             description: {
-                let description: Dynamic = format::from_bytes(message.payload.as_ref())?;
+                let description: Dynamic = format::from_bytes(msg.payload.as_ref())?;
                 description
                     .into_string()
                     .ok_or(ErrorFromMessageError::DynamicValueIsNotAString)?
@@ -340,7 +350,7 @@ pub enum ErrorFromMessageError {
     DynamicValueIsNotAString,
 
     #[error("payload format error: {0}")]
-    PayloadFormatError(#[from] format::Error),
+    PayloadFormat(#[from] format::Error),
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
@@ -380,7 +390,7 @@ pub struct Canceled {
 }
 
 impl Canceled {
-    fn new_for<T>(call: &Call<T>) -> Self {
+    pub fn new_for<T>(call: &Call<T>) -> Self {
         Self {
             id: call.id,
             service: call.service,
@@ -388,13 +398,82 @@ impl Canceled {
             action: call.action,
         }
     }
+
+    pub fn from_message(msg: Message) -> Result<Self, CanceledFromMessageError> {
+        if msg.ty != Type::Canceled {
+            return Err(CanceledFromMessageError::BadType(msg));
+        }
+        Ok(Self {
+            id: msg.id,
+            service: msg.service,
+            object: msg.object,
+            action: msg.action,
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CanceledFromMessageError {
+    #[error("message {0} has not the \"{}\" type", Type::Canceled)]
+    BadType(Message),
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, derive_more::From)]
-pub enum Response<T> {
+pub enum Response<T = ()> {
     Reply(Reply<T>),
     Error(Error),
     Canceled(Canceled),
+}
+
+impl<T> Response<T> {
+    pub fn from_message(msg: Message) -> Result<Self, ResponseFromMessageError>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        match msg.ty {
+            Type::Reply => Reply::from_message(msg)
+                .map(Self::Reply)
+                .map_err(|err| match err {
+                    ReplyFromMessageError::PayloadFormat(err) => {
+                        ResponseFromMessageError::PayloadFormat(err)
+                    }
+                    ReplyFromMessageError::BadType(_) => unreachable!(),
+                }),
+            Type::Error => Error::from_message(msg)
+                .map(Self::Error)
+                .map_err(|err| match err {
+                    ErrorFromMessageError::DynamicValueIsNotAString => {
+                        ResponseFromMessageError::ErrorDynamicValueIsNotString
+                    }
+                    ErrorFromMessageError::PayloadFormat(err) => {
+                        ResponseFromMessageError::PayloadFormat(err)
+                    }
+                    ErrorFromMessageError::BadType(_) => unreachable!(),
+                }),
+            Type::Canceled => Canceled::from_message(msg)
+                .map(Self::Canceled)
+                .map_err(|err| match err {
+                    CanceledFromMessageError::BadType(_) => unreachable!(),
+                }),
+            _ => Err(ResponseFromMessageError::BadType(msg)),
+        }
+    }
+}
+
+pub fn is_response(msg: &Message) -> bool {
+    msg.ty == Type::Reply || msg.ty == Type::Error || msg.ty == Type::Canceled
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ResponseFromMessageError {
+    #[error("message {0} is not a response")]
+    BadType(Message),
+
+    #[error("error message dynamic value is not a string")]
+    ErrorDynamicValueIsNotString,
+
+    #[error("payload format error: {0}")]
+    PayloadFormat(#[from] format::Error),
 }
 
 #[cfg(test)]

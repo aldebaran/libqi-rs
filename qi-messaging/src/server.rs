@@ -1,6 +1,7 @@
 use crate::{
     message::{Action, Object, Service},
-    req_rep::CallBuilder,
+    message_types::CallBuilder,
+    session::CallRequestBuilder,
 };
 
 const SERVICE: Service = Service::new(0);
@@ -14,6 +15,16 @@ pub trait ToServer {
 }
 
 impl ToServer for CallBuilder {
+    fn to_server(self) -> Self {
+        self.service(SERVICE).object(OBJECT)
+    }
+
+    fn authenticate(self) -> Self {
+        self.action(AUTHENTICATE_ACTION)
+    }
+}
+
+impl<R> ToServer for CallRequestBuilder<R> {
     fn to_server(self) -> Self {
         self.service(SERVICE).object(OBJECT)
     }

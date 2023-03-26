@@ -1,9 +1,10 @@
 use crate::{
     format,
     message::{self, Flags, Id, Message, Payload, Type},
-    types,
+    types::{self, Dynamic},
 };
 use derive_more::{From, Into};
+use std::cmp::Ordering;
 
 const SERVICE: message::Service = message::Service::new(0);
 
@@ -14,19 +15,14 @@ pub(crate) struct AdvertiseCapabilities {
 }
 
 impl AdvertiseCapabilities {
-    pub fn new(id: Id, map: Map) -> Self {
-        Self { id, map }
-    }
-
     pub fn from_message(msg: Message) -> Result<Self, FromMessageError> {
-        use format::from_bytes;
-        match msg.ty {
-            Type::Capabilities => Ok(Self {
-                id: msg.id,
-                map: from_bytes(msg.payload.as_ref())?,
-            }),
-            _ => Err(FromMessageError::BadType(msg)),
+        if msg.ty != Type::Capabilities {
+            return Err(FromMessageError::BadType(msg));
         }
+        Ok(Self {
+            id: msg.id,
+            map: format::from_bytes(msg.payload.as_ref())?,
+        })
     }
 
     pub fn into_message(self) -> Result<Message, IntoMessageError> {
@@ -39,10 +35,6 @@ impl AdvertiseCapabilities {
             payload: Payload::new(to_bytes(&self.map)?),
             ..Default::default()
         })
-    }
-
-    pub fn into_map(self) -> Map {
-        self.map
     }
 }
 
@@ -73,7 +65,7 @@ impl TryFrom<Message> for AdvertiseCapabilities {
     }
 }
 
-type MapImpl = types::Map<String, types::Dynamic>;
+type MapImpl = types::Map<String, Dynamic>;
 
 #[derive(
     Default, Clone, PartialEq, Eq, Debug, From, Into, serde::Serialize, serde::Deserialize,
@@ -85,68 +77,105 @@ impl Map {
         Self(MapImpl::new())
     }
 
-    pub fn set_capability(&mut self, name: &str, value: bool) -> &mut Self {
-        self.0.insert(name.into(), types::Dynamic::from(value));
-        self
+    pub fn set_capability<K, V>(&mut self, name: K, value: V)
+    where
+        K: Into<String>,
+        V: Into<Dynamic>,
+    {
+        self.0.insert(name.into(), value.into());
     }
 
-    pub fn iter(&self) -> Iter {
-        Iter {
-            iter: (&self.0).into_iter(),
-        }
+    pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
+        self.into_iter()
     }
 
-    pub fn has_capability(&self, key: &str) -> bool {
-        let item = self
-            .iter()
-            .find_map(|(k, v)| if k == key { Some(v) } else { None });
-        item == Some(true)
+    pub fn get_capability<K>(&self, key: K) -> Option<&Dynamic>
+    where
+        K: PartialEq<String>,
+    {
+        self.0.get(&key)
     }
 
-    pub fn merged_with(&self, other: &Self) -> Self {
-        let mut res = Map::new();
-        for (capability, enabled) in self.iter() {
-            res.set_capability(capability, enabled && other.has_capability(capability));
+    pub fn has_flag_capability<K>(&self, key: K) -> bool
+    where
+        K: PartialEq<String>,
+    {
+        matches!(self.get_capability(key), Some(Dynamic::Bool(true)))
+    }
+
+    pub fn update_to_minimums_with<F>(&mut self, other: &Self, mut default: F)
+    where
+        F: FnMut(&mut Dynamic),
+    {
+        use types::map::Entry;
+        for (key, other_value) in other.iter() {
+            match self.0.entry(key.clone()) {
+                Entry::Occupied(mut entry) => {
+                    // Prefer values from this map when no ordering can be made. Only use the other map
+                    // values if they are strictly inferior.
+                    if let Some(Ordering::Less) = other_value.partial_cmp(entry.get()) {
+                        entry.insert(other_value.clone());
+                    }
+                }
+                Entry::Vacant(entry) => {
+                    // The value does not exist in this one but exists in the other, set them to
+                    // the default.
+                    let mut value = other_value.clone();
+                    default(&mut value);
+                    entry.insert(value);
+                }
+            }
         }
-        for (capability, enabled) in other.iter() {
-            res.set_capability(capability, enabled && self.has_capability(capability));
+
+        // Check for capabilities that were present in this one but not in the other, and reset
+        // them to the default.
+        for value in
+            self.0
+                .iter_mut()
+                .filter_map(|(key, value)| match other.get_capability(key.as_str()) {
+                    Some(_) => None,
+                    None => Some(value),
+                })
+        {
+            default(value);
         }
-        res
     }
 }
 
 impl<'a> std::iter::IntoIterator for &'a Map {
-    type Item = <Iter<'a> as std::iter::Iterator>::Item;
-    type IntoIter = Iter<'a>;
+    type Item = <&'a MapImpl as IntoIterator>::Item;
+    type IntoIter = <&'a MapImpl as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-pub struct Iter<'a> {
-    iter: <&'a MapImpl as IntoIterator>::IntoIter,
-}
-
-impl<'a> std::iter::Iterator for Iter<'a> {
-    type Item = (&'a String, bool);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let item = self.iter.next();
-        item.map(|(k, v)| (k, v.as_bool().expect("capability map value must be a bool")))
+        (&self.0).into_iter()
     }
 }
 
 impl<K, V> std::iter::FromIterator<(K, V)> for Map
 where
     K: Into<String>,
-    V: Into<bool>,
+    V: Into<Dynamic>,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         Self(MapImpl::from_iter(
-            iter.into_iter()
-                .map(|(k, v)| (k.into(), types::Dynamic::from(v.into()))),
+            iter.into_iter().map(|(k, v)| (k.into(), v.into())),
         ))
+    }
+}
+
+pub fn default_capability(value: &mut Dynamic) {
+    match value {
+        Dynamic::Unit => {}
+        Dynamic::Bool(v) => *v = Default::default(),
+        Dynamic::Number(v) => *v = Default::default(),
+        Dynamic::String(v) => *v = Default::default(),
+        Dynamic::Raw(v) => *v = Default::default(),
+        Dynamic::Option(v) => *v = Default::default(),
+        Dynamic::List(v) => *v = Default::default(),
+        Dynamic::Map(v) => *v = Default::default(),
+        Dynamic::Tuple(v) => *v = Default::default(),
+        Dynamic::Object(v) => *v = Default::default(),
+        Dynamic::Dynamic(v) => *v = Default::default(),
     }
 }
 
@@ -173,11 +202,11 @@ impl Common {
 
     pub fn from_map(map: Map) -> Self {
         Self {
-            client_server_socket: map.has_capability(Self::CLIENT_SERVER_SOCKET),
-            message_flags: map.has_capability(Self::MESSAGE_FLAGS),
-            remote_cancelable_calls: map.has_capability(Self::REMOTE_CANCELABLE_CALLS),
-            object_ptr_uid: map.has_capability(Self::OBJECT_PTR_UID),
-            relative_endpoint_uri: map.has_capability(Self::RELATIVE_ENDPOINT_URI),
+            client_server_socket: map.has_flag_capability(Self::CLIENT_SERVER_SOCKET),
+            message_flags: map.has_flag_capability(Self::MESSAGE_FLAGS),
+            remote_cancelable_calls: map.has_flag_capability(Self::REMOTE_CANCELABLE_CALLS),
+            object_ptr_uid: map.has_flag_capability(Self::OBJECT_PTR_UID),
+            relative_endpoint_uri: map.has_flag_capability(Self::RELATIVE_ENDPOINT_URI),
         }
     }
 
@@ -217,10 +246,11 @@ pub fn local() -> Map {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
 
     #[test]
     fn test_capability_map_merge_with() {
-        let m1 = Map::from_iter([
+        let mut m = Map::from_iter([
             ("A", true),
             ("B", true),
             ("C", false),
@@ -236,14 +266,15 @@ mod tests {
             ("G", true),
             ("H", false),
         ]);
-        let m = m1.merged_with(&m2);
-        assert!(m.has_capability("A"));
-        assert!(!m.has_capability("B"));
-        assert!(!m.has_capability("C"));
-        assert!(!m.has_capability("D"));
-        assert!(!m.has_capability("E"));
-        assert!(!m.has_capability("F"));
-        assert!(!m.has_capability("G"));
-        assert!(!m.has_capability("H"));
+        m.update_to_minimums_with(&m2, default_capability);
+        assert_matches!(m.get_capability("A"), Some(Dynamic::Bool(true)));
+        assert_matches!(m.get_capability("B"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get_capability("C"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get_capability("D"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get_capability("E"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get_capability("F"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get_capability("G"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get_capability("H"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get_capability("I"), None);
     }
 }

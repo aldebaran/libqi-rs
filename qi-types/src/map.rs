@@ -5,7 +5,9 @@ use derive_more::{From, Index, Into, IntoIterator};
 ///
 /// This type guarantees the unicity of keys. When an insertion is done, if the key already exists
 /// in the map, its value is overwritten with the inserted one.
-#[derive(Default, Clone, PartialEq, Eq, From, Into, Index, IntoIterator, Debug)]
+#[derive(
+    Default, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Index, IntoIterator, Debug,
+)]
 pub struct Map<K, V>(Vec<(K, V)>);
 
 impl<K, V> Map<K, V> {
@@ -25,6 +27,10 @@ impl<K, V> Map<K, V> {
         self.0.iter().map(|(k, v)| (k, v))
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&mut K, &mut V)> {
+        self.0.iter_mut().map(|(k, v)| (k, v))
+    }
+
     pub fn get<'s, Q>(&'s self, key: &Q) -> Option<&'s V>
     where
         Q: PartialEq<K>,
@@ -32,6 +38,27 @@ impl<K, V> Map<K, V> {
         self.0
             .iter()
             .find_map(|(k, v)| if key == k { Some(v) } else { None })
+    }
+
+    pub fn entry(&mut self, key: K) -> Entry<'_, K, V>
+    where
+        K: PartialEq,
+    {
+        let item = self
+            .0
+            .iter_mut()
+            .enumerate()
+            .find(|(_idx, (k, _v))| k == &key);
+        match item {
+            Some((idx, _pair)) => Entry::Occupied(OccupiedEntry {
+                vec: &mut self.0,
+                idx,
+            }),
+            None => Entry::Vacant(VacantEntry {
+                key,
+                vec: &mut self.0,
+            }),
+        }
     }
 
     fn position<Q>(&self, key: &Q) -> Option<usize>
@@ -90,7 +117,66 @@ impl<K, V> Map<K, V> {
         K: ty::DynamicGetType,
         V: ty::DynamicGetType,
     {
-        self.ty_with(|(key, value)| (Some(key.current_ty()), Some(value.current_ty())))
+        self.ty_with(|(key, value)| (Some(key.deep_ty()), Some(value.deep_ty())))
+    }
+}
+
+#[derive(Debug)]
+pub enum Entry<'a, K, V> {
+    Occupied(OccupiedEntry<'a, K, V>),
+    Vacant(VacantEntry<'a, K, V>),
+}
+
+#[derive(Debug)]
+pub struct OccupiedEntry<'a, K, V> {
+    vec: &'a mut Vec<(K, V)>,
+    idx: usize,
+}
+
+impl<'a, K, V> OccupiedEntry<'a, K, V> {
+    pub fn key(&self) -> &K {
+        &self.vec[self.idx].0
+    }
+
+    pub fn get(&self) -> &V {
+        &self.vec[self.idx].1
+    }
+
+    pub fn get_mut(&mut self) -> &mut V {
+        &mut self.vec[self.idx].1
+    }
+
+    pub fn insert(&mut self, value: V) -> V {
+        std::mem::replace(self.get_mut(), value)
+    }
+
+    pub fn remove(self) -> V {
+        self.remove_entry().1
+    }
+
+    pub fn remove_entry(self) -> (K, V) {
+        self.vec.remove(self.idx)
+    }
+}
+
+#[derive(Debug)]
+pub struct VacantEntry<'a, K, V> {
+    key: K,
+    vec: &'a mut Vec<(K, V)>,
+}
+
+impl<'a, K, V> VacantEntry<'a, K, V> {
+    pub fn key(&self) -> &K {
+        &self.key
+    }
+
+    pub fn into_key(self) -> K {
+        self.key
+    }
+
+    pub fn insert(self, value: V) -> &'a mut V {
+        self.vec.push((self.key, value));
+        &mut self.vec.last_mut().unwrap().1
     }
 }
 
@@ -173,7 +259,7 @@ impl ty::DynamicGetType for Map<Dynamic, Dynamic> {
         self.ty()
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         self.current_ty()
     }
 }
@@ -183,7 +269,7 @@ impl ty::DynamicGetType for Map<Dynamic, Value> {
         self.ty()
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         self.current_ty()
     }
 }
@@ -193,7 +279,7 @@ impl ty::DynamicGetType for Map<Value, Dynamic> {
         self.ty()
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         self.current_ty()
     }
 }
@@ -203,7 +289,7 @@ impl ty::DynamicGetType for Map<Value, Value> {
         self.ty()
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         self.current_ty()
     }
 }

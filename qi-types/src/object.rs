@@ -1,6 +1,8 @@
 use crate::{struct_ty, ty, List, Map, Signature, Type};
 
-#[derive(Clone, Default, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Default, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub struct Object {
     pub meta_object: MetaObject,
     pub service_id: u32,
@@ -58,7 +60,9 @@ mod serde_sha1 {
     }
 }
 
-#[derive(Clone, Default, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Default, PartialEq, Eq, PartialOrd, Ord, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub struct MetaObject {
     pub methods: Map<u32, MetaMethod>,
     pub signals: Map<u32, MetaSignal>,

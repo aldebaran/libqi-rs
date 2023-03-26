@@ -8,7 +8,9 @@ impl ty::StaticGetType for () {
 }
 
 /// [`Tuple`] represents a `tuple` value in the `qi` type system.
-#[derive(Default, Clone, PartialEq, Eq, From, Into, Index, IntoIterator, AsRef, Debug)]
+#[derive(
+    Default, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Index, IntoIterator, AsRef, Debug,
+)]
 #[into_iterator(owned, ref)]
 pub struct Tuple(Vec<Value>);
 
@@ -64,11 +66,11 @@ impl ty::DynamicGetType for Tuple {
         )))
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         Type::Tuple(ty::TupleType::Tuple(
             self.0
                 .iter()
-                .map(|element| Some(element.current_ty()))
+                .map(|element| Some(element.deep_ty()))
                 .collect(),
         ))
     }

@@ -4,24 +4,31 @@ use crate::{
     ty::{self, Type},
     Dynamic, FormatterExt, List, Map, Object, Raw,
 };
-use derive_more::{From, TryInto};
 
 /// The [`Value`] structure represents any value of `qi` type system and
 /// is is an enumeration of every types of values.
-#[derive(Clone, From, TryInto, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, derive_more::From, derive_more::TryInto)]
 pub enum Value {
+    #[from]
     Unit,
+    #[from]
     Bool(bool),
-    #[from(ignore)]
+    #[from(forward)]
     Number(Number),
+    #[from]
     String(String),
+    #[from]
     Raw(Raw),
     #[try_into(ignore)] // Conflicts with standard conversion T -> Opt<T>
     Option(Box<Option<Value>>),
+    #[from]
     List(List<Value>),
+    #[from]
     Map(Map<Value, Value>),
+    #[from]
     Tuple(Tuple),
     Object(Box<Object>),
+    #[try_into(ignore)]
     Dynamic(Box<Dynamic>),
 }
 
@@ -162,22 +169,13 @@ impl Value {
 
 impl Default for Value {
     fn default() -> Self {
-        Value::Unit
+        Self::Unit
     }
 }
 
-impl<T> From<T> for Value
-where
-    T: Into<Number>,
-{
-    fn from(v: T) -> Self {
-        Value::Number(v.into())
-    }
-}
-
-impl<'s> From<&'s str> for Value {
-    fn from(s: &'s str) -> Self {
-        Value::String(String::from(s))
+impl From<&str> for Value {
+    fn from(s: &str) -> Self {
+        Self::String(s.to_owned())
     }
 }
 
@@ -197,14 +195,8 @@ impl From<Option<Value>> for Value {
 }
 
 impl From<Object> for Value {
-    fn from(o: Object) -> Self {
-        Self::Object(Box::new(o))
-    }
-}
-
-impl From<Dynamic> for Value {
-    fn from(d: Dynamic) -> Self {
-        Self::Dynamic(Box::new(d))
+    fn from(v: Object) -> Self {
+        Self::Object(Box::new(v))
     }
 }
 
@@ -225,19 +217,19 @@ impl ty::DynamicGetType for Value {
         }
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         match self {
-            Self::Unit => ().current_ty(),
-            Self::Bool(b) => b.current_ty(),
-            Self::Number(n) => n.current_ty(),
-            Self::String(s) => s.current_ty(),
-            Self::Raw(r) => r.current_ty(),
-            Self::Option(o) => o.current_ty(),
-            Self::List(l) => l.current_ty(),
-            Self::Map(m) => m.current_ty(),
-            Self::Tuple(t) => t.current_ty(),
-            Self::Object(o) => o.current_ty(),
-            Self::Dynamic(d) => d.current_ty(),
+            Self::Unit => ().deep_ty(),
+            Self::Bool(b) => b.deep_ty(),
+            Self::Number(n) => n.deep_ty(),
+            Self::String(s) => s.deep_ty(),
+            Self::Raw(r) => r.deep_ty(),
+            Self::Option(o) => o.deep_ty(),
+            Self::List(l) => l.deep_ty(),
+            Self::Map(m) => m.deep_ty(),
+            Self::Tuple(t) => t.deep_ty(),
+            Self::Object(o) => o.deep_ty(),
+            Self::Dynamic(d) => d.deep_ty(),
         }
     }
 }

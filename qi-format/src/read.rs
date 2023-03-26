@@ -1,5 +1,6 @@
 use crate::{Error, Result};
-use qi_types::Raw;
+use qi_types::{DisplayBytes, Raw};
+use std::string::ToString;
 
 mod private {
     pub trait Sealed {}
@@ -167,7 +168,9 @@ where
     // equivalence: string -> raw
     fn read_str(&mut self) -> Result<Self::Str> {
         let raw = self.read_raw()?;
-        let str = String::from_utf8(raw.into()).map_err(|e| e.utf8_error())?;
+        let str = String::from_utf8(raw.into()).map_err(|err| {
+            Error::InvalidStrUtf8(DisplayBytes(err.as_bytes()).to_string(), err.utf8_error())
+        })?;
         Ok(str)
     }
 }
@@ -223,7 +226,8 @@ impl<'b> Read for SliceRead<'b> {
     // equivalence: string -> raw
     fn read_str(&mut self) -> Result<Self::Str> {
         let raw = self.read_raw()?;
-        let str = std::str::from_utf8(raw)?;
+        let str = std::str::from_utf8(raw)
+            .map_err(|err| Error::InvalidStrUtf8(DisplayBytes(raw).to_string(), err))?;
         Ok(str)
     }
 }

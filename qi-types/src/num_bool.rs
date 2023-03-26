@@ -139,6 +139,12 @@ impl Number {
     }
 }
 
+impl Default for Number {
+    fn default() -> Self {
+        Self::Int32(0)
+    }
+}
+
 impl From<f32> for Number {
     fn from(f: f32) -> Self {
         Number::from(OrderedFloat(f))
@@ -173,7 +179,7 @@ impl ty::DynamicGetType for Number {
         Some(self.ty())
     }
 
-    fn current_ty(&self) -> Type {
+    fn deep_ty(&self) -> Type {
         self.ty()
     }
 }

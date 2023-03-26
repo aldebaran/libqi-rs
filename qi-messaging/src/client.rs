@@ -1,82 +1,62 @@
+pub use crate::session::Connection;
 use crate::{
-    capabilities, server,
-    session::{self, Call, CallBuilder, Inner, Response, Session},
-    stream::Stream,
+    capabilities,
+    message_types::Response,
+    server,
+    session::{self, Session},
 };
-use async_trait::async_trait;
+use std::future::Future;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-pub async fn connect<IO>(io: IO) -> Result<Client, Error>
+pub fn connect<IO>(io: IO) -> (impl Future<Output = Result<Client, Error>>, Connection<IO>)
 where
-    IO: AsyncRead + AsyncWrite + Sync,
+    IO: 'static + AsyncRead + AsyncWrite + Unpin,
 {
-    let stream = Stream::new(io);
-    let over_stream = Inner::new(stream);
-    let client = Client::connect(over_stream).await?;
-    Ok(client)
+    let (bare_session, connection) = session::make_bare(io);
+    let client = async move {
+        let mut capabilities = capabilities::local();
+
+        use server::ToServer;
+        let auth_response = bare_session
+            .call()
+            .to_server()
+            .authenticate()
+            .argument(&capabilities)
+            .send()?;
+
+        let remote_capabilities = match auth_response.await? {
+            Response::Reply(value) => value.into_value(),
+            Response::Error(_error) => todo!(),
+            Response::Canceled(_canceled) => todo!(),
+        };
+
+        capabilities
+            .update_to_minimums_with(&remote_capabilities, capabilities::default_capability);
+        Ok(Client {
+            bare_session,
+            capabilities,
+        })
+    };
+    (client, connection)
 }
 
 #[derive(Debug)]
-pub struct Client<S> {
-    session: S,
+pub struct Client {
+    bare_session: session::Bare,
     capabilities: capabilities::Map,
 }
 
-impl<S> Client<S>
-where
-    S: Session,
-{
-    async fn connect(session: S) -> Result<Self, Error> {
-        let local_capabilities = capabilities::local();
-
-        use server::ToServer;
-        let authenticate = session
-            .create_call()
-            .to_server()
-            .authenticate()
-            .argument(&local_capabilities)
-            .build();
-
-        let response = session.send_call_request(authenticate).await?;
-
-        let remote_capabilities = match response {
-            Response::Ok(value) => value.into_value(),
-            Response::Error => todo!(),
-            Response::Canceled => todo!(),
-        };
-
-        let capabilities = local_capabilities.merged_with(remote_capabilities);
-
-        Ok(Self {
-            session,
-            capabilities,
-        })
-    }
-}
-
-#[async_trait]
-impl<S> Session for Client<S>
-where
-    S: Session + Sync,
-{
-    fn create_call(&self) -> CallBuilder {
-        self.session.create_call()
-    }
-
-    async fn send_call_request<T, R>(&self, call: Call<T>) -> Result<Response<R>, session::Error>
-    where
-        T: Send,
-    {
-        let response = self.session.send_call_request(call);
-        response.await
+impl Session for Client {
+    fn call<R>(&self) -> session::CallRequestBuilder<R> {
+        self.bare_session.call()
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {}
 
-impl From<session::Error> for Error {
-    fn from(_: session::Error) -> Self {
+impl From<session::SendCallRequestError> for Error {
+    fn from(_: session::SendCallRequestError) -> Self {
         todo!()
     }
 }

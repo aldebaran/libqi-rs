@@ -1,76 +1,8 @@
+use crate::message::{self, Message};
 use std::io::Cursor;
 
-use crate::message::{self, Message};
-use pin_project_lite::pin_project;
-use tokio_util::codec::Framed;
-
-pin_project! {
-    #[derive(Debug)]
-    pub struct Stream<IO> {
-        #[pin]
-        io: Framed<IO, MessageCodec>,
-    }
-}
-
-impl<IO> Stream<IO>
-where
-    IO: tokio::io::AsyncRead + tokio::io::AsyncWrite,
-{
-    pub fn new(io: IO) -> Self {
-        Self {
-            io: Framed::new(io, MessageCodec),
-        }
-    }
-}
-
-impl<IO> futures::Sink<Message> for Stream<IO>
-where
-    IO: tokio::io::AsyncWrite,
-{
-    type Error = EncodeError;
-
-    fn poll_ready(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.project().io.poll_ready(cx)
-    }
-
-    fn start_send(self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
-        self.project().io.start_send(item)
-    }
-
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.project().io.poll_flush(cx)
-    }
-
-    fn poll_close(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        self.project().io.poll_close(cx)
-    }
-}
-
-impl<T> futures::Stream for Stream<T>
-where
-    T: tokio::io::AsyncRead,
-{
-    type Item = Result<Message, DecodeError>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        self.project().io.poll_next(cx)
-    }
-}
-
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-struct MessageCodec;
+pub struct MessageCodec;
 
 impl tokio_util::codec::Decoder for MessageCodec {
     type Item = Message;
