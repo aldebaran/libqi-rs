@@ -460,9 +460,7 @@ pub enum SignatureParseError {
     #[error("end of tuple starting at input \"{0}\" is missing")]
     MissingTupleEnd(String),
 
-    #[error(
-        "parsing of tuple \"{tuple}\" annotations starting at input \"{annotations}\" failed: {source}"
-    )]
+    #[error("parsing of tuple \"{tuple}\" annotations starting at input \"{annotations}\" failed")]
     Annotations {
         annotations: String,
         tuple: String,

@@ -262,37 +262,28 @@ where
     E: IntoIterator,
     E::Item: Into<Option<Type>>,
 {
-    let mut names = names.into_iter();
-    let mut elements = elements.into_iter();
+    let mut names = names.into_iter().fuse();
+    let mut elements = elements.into_iter().fuse();
     let mut fields = Vec::new();
-    for count in 0.. {
-        match (names.next(), elements.next()) {
-            (Some(name), Some(element)) => fields.push(StructField {
-                name: name.into(),
-                value_type: element.into(),
-            }),
-            (Some(_), None) => {
-                return Err(ZipStructFieldsSizeError {
-                    name_count: count + 1,
-                    element_count: count,
-                })
-            }
-            (None, Some(_)) => {
-                return Err(ZipStructFieldsSizeError {
-                    name_count: count,
-                    element_count: count + 1,
-                })
-            }
-            (None, None) => break,
-        }
+    while let (Some(name), Some(element)) = (names.next(), elements.next()) {
+        fields.push(StructField {
+            name: name.into(),
+            value_type: element.into(),
+        })
+    }
+    let name_count = fields.len() + names.count();
+    let element_count = fields.len() + elements.count();
+    if name_count != element_count {
+        return Err(ZipStructFieldsSizeError {
+            name_count,
+            element_count,
+        });
     }
     Ok(fields)
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, thiserror::Error)]
-#[error(
-    "zip of structure fields error of sizes, got {element_count} elements for {name_count} names"
-)]
+#[error("error zipping structure fields names and elements, got {name_count} names for {element_count} elements")]
 pub struct ZipStructFieldsSizeError {
     pub name_count: usize,
     pub element_count: usize,

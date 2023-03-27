@@ -14,7 +14,7 @@ impl<T> Params<T> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ParamsBuilder<T = ()> {
     service: Service,
     object: Object,
@@ -53,6 +53,18 @@ impl<T> ParamsBuilder<T> {
         self
     }
 
+    pub fn build(self) -> Params<T>
+    where
+        T: Default,
+    {
+        Params {
+            service: self.service,
+            object: self.object,
+            action: self.action,
+            argument: T::default(),
+        }
+    }
+
     pub fn argument(self, argument: T) -> ParamsBuilderWithArg<T> {
         ParamsBuilderWithArg {
             service: self.service,
@@ -63,7 +75,7 @@ impl<T> ParamsBuilder<T> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ParamsBuilderWithArg<T = ()> {
     service: Service,
     object: Object,

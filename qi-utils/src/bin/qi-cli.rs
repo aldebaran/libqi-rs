@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
 
     let session = session.await?;
 
-    let my_service_info_call = session.call(
+    let my_service_info = session.call(
         call::Params::builder()
             .service(Service::from(1))
             .object(Object::from(1))
@@ -45,12 +45,30 @@ async fn main() -> Result<()> {
             .build(),
     )?;
 
-    match my_service_info_call.await? {
+    match my_service_info.await? {
         call::Result::Ok::<ServiceInfo>(info) => {
             println!("MyService: {info:?}");
-            Ok(())
         }
         call::Result::Err(error) => bail!(error),
         call::Result::Canceled => bail!("the call to ServiceDirectory.service has been canceled"),
-    }
+    };
+
+    let services = session.call(
+        call::Params::builder()
+            .service(Service::from(1))
+            .object(Object::from(1))
+            .action(Action::from(101))
+            .argument(())
+            .build(),
+    )?;
+    let _services = match services.await? {
+        call::Result::Ok::<Vec<ServiceInfo>>(services) => {
+            println!("services: {services:?}");
+            services
+        }
+        call::Result::Err(error) => bail!(error),
+        call::Result::Canceled => bail!("the call to ServiceDirectory.services has been canceled"),
+    };
+
+    Ok(())
 }

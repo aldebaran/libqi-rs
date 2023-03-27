@@ -11,6 +11,7 @@ rust-version = "1.59"
 anyhow = "1.0.69"
 futures = "0.3.27"
 iri-string = { version = "0.5.6", features = ["serde-std"] }
+qi-types = { path = "../qi-types" }
 qi-messaging = { path = "../qi-messaging" }
 serde = "1.0.158"
 tokio = { version = "1.26.0", features = ["rt-multi-thread", "macros", "net"] }

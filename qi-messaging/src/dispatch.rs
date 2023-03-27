@@ -10,8 +10,8 @@ use std::{
     task::Poll,
 };
 use sync::{mpsc, oneshot};
+use tokio::io::{AsyncRead, AsyncWrite};
 pub use tokio::sync;
-use tokio::{io::AsyncRead, io::AsyncWrite};
 use tokio_util::codec::Framed;
 use tracing::trace;
 
@@ -58,20 +58,40 @@ pub type CallResponseReceiver = oneshot::Receiver<CallResponse>;
 
 pub type ResponseRecvError = oneshot::error::RecvError;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub struct CallRequest {
     pub service: Service,
     pub object: Object,
     pub action: Action,
-    pub payload: Vec<u8>, // TODO: use ypes::Value ? it necessitates copying data which is
+    pub payload: Vec<u8>, // TODO: use types::Value ? it necessitates copying data which is
                           // suboptimal.
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Hash, Debug)]
+impl std::fmt::Debug for CallRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CallRequest")
+            .field("service", &self.service)
+            .field("object", &self.object)
+            .field("action", &self.action)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub enum CallResponse {
     Reply(Vec<u8>),
     Error(Vec<u8>),
     Canceled,
+}
+
+impl std::fmt::Debug for CallResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Reply(b) => f.write_str("CallResponse::Reply"),
+            Self::Error(b) => f.write_str("CallResponse::Error"),
+            Self::Canceled => f.write_str("CallResponse::Canceled"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -141,8 +161,6 @@ where
             // It will resume on its own when necessary and will be finished once we poll the dispatch
             // again waiting for the sink to be ready.
             if let Poll::Ready(Err(err)) = self.io.poll_flush_unpin(cx) {
-                // "In most cases, if the sink encounters an error, the sink will permanently be
-                // unable to receive items." => terminate the connection with an error.
                 return Poll::Ready(Err(err.into()));
             };
 
@@ -153,11 +171,11 @@ where
                         MessageClassification::CallResponse(id, resp) => {
                             match self.dispatch_call_responses_tx.remove(&id) {
                                 Some(dispatch_response_tx) => {
-                                    trace!("dispatching call response {resp:?}");
+                                    trace!("dispatching call response id={id} {resp:?}");
                                     dispatch_response_tx.send(resp)
                                 }
                                 None => {
-                                    trace!("discarding unwanted call response {resp:?}");
+                                    trace!("discarding unwanted call response id={id} {resp:?}");
                                 }
                             }
                         }
@@ -192,10 +210,10 @@ where
                         // request was dropped, and therefore we should abort any
                         // call.
                         if resp_tx.is_closed() {
-                            trace!("discarding request for call {req:?} as it was dropped");
+                            trace!("discarding request for call id={id} {req:?} as it was dropped");
                         } else {
                             // Send the request message on the channel.
-                            trace!("sending request {req:?}");
+                            trace!("sending request id={id} {req:?}");
                             self.io.start_send_unpin(call_request_to_message(id, req))?;
                             entry.insert(resp_tx);
                         }
@@ -333,7 +351,7 @@ mod tests {
         assert_eq!(resp, CallResponse::Reply(vec![4, 5, 6]));
 
         drop(dispatch_client);
-        dispatch_fut.await.unwrap();
+        dispatch_fut.await.unwrap().unwrap();
     }
 
     #[test]

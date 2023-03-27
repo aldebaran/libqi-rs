@@ -51,7 +51,7 @@ where
 impl ty::DynamicGetType for Option<Value> {
     fn ty(&self) -> Option<Type> {
         Some(ty::option_of(
-            self.as_ref().map(ty::DynamicGetType::ty).flatten(),
+            self.as_ref().and_then(ty::DynamicGetType::ty),
         ))
     }
 
@@ -63,7 +63,7 @@ impl ty::DynamicGetType for Option<Value> {
 impl ty::DynamicGetType for Option<Dynamic> {
     fn ty(&self) -> Option<Type> {
         Some(ty::option_of(
-            self.as_ref().map(ty::DynamicGetType::ty).flatten(),
+            self.as_ref().and_then(ty::DynamicGetType::ty),
         ))
     }
 
