@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use iri_string::types::UriString;
-use qi_messaging::{client, Action, Object, Response, Service, Session};
+use qi_messaging::{call, session, Action, Object, Service};
 use std::net::Ipv4Addr;
 use tokio::net::TcpStream;
 
@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let tcp_stream = TcpStream::connect((Ipv4Addr::LOCALHOST, 9559)).await?;
-    let (client, connect) = client::connect(tcp_stream);
+    let (session, connect) = session::connect(tcp_stream);
 
     tokio::spawn(async move {
         if let Err(err) = connect.await {
@@ -34,23 +34,23 @@ async fn main() -> Result<()> {
         }
     });
 
-    let client = client.await?;
+    let session = session.await?;
 
-    let my_service_info_response = client
-        .call()
-        .service(Service::from(1))
-        .object(Object::from(1))
-        .action(Action::from(100))
-        .argument("MyService")
-        .send()?;
+    let my_service_info_call = session.call(
+        call::Params::builder()
+            .service(Service::from(1))
+            .object(Object::from(1))
+            .action(Action::from(100))
+            .argument("MyService")
+            .build(),
+    )?;
 
-    match my_service_info_response.await? {
-        Response::Reply(reply) => {
-            let info: ServiceInfo = reply.into_value();
+    match my_service_info_call.await? {
+        call::Result::Ok::<ServiceInfo>(info) => {
             println!("MyService: {info:?}");
             Ok(())
         }
-        Response::Error(error) => bail!(error.into_description()),
-        Response::Canceled(_) => bail!("the call to ServiceDirectory.service has been canceled"),
+        call::Result::Err(error) => bail!(error),
+        call::Result::Canceled => bail!("the call to ServiceDirectory.service has been canceled"),
     }
 }

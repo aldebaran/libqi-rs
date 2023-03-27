@@ -169,7 +169,7 @@ where
     fn read_str(&mut self) -> Result<Self::Str> {
         let raw = self.read_raw()?;
         let str = String::from_utf8(raw.into()).map_err(|err| {
-            Error::InvalidStrUtf8(DisplayBytes(err.as_bytes()).to_string(), err.utf8_error())
+            Error::InvalidStringUtf8(DisplayBytes(err.as_bytes()).to_string(), err.utf8_error())
         })?;
         Ok(str)
     }
@@ -227,7 +227,7 @@ impl<'b> Read for SliceRead<'b> {
     fn read_str(&mut self) -> Result<Self::Str> {
         let raw = self.read_raw()?;
         let str = std::str::from_utf8(raw)
-            .map_err(|err| Error::InvalidStrUtf8(DisplayBytes(raw).to_string(), err))?;
+            .map_err(|err| Error::InvalidStringUtf8(DisplayBytes(raw).to_string(), err))?;
         Ok(str)
     }
 }
@@ -262,7 +262,7 @@ mod tests {
             ][..],
         );
         assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, "abc"));
-        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_)));
+        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_, _)));
         assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, String::new()));
         assert_matches!(read.read_str(), Err(Error::Io(_)));
     }
@@ -296,7 +296,7 @@ mod tests {
     fn test_slice_read_string() {
         let mut read = SliceRead::new(&[1, 0, 0, 0, 100, 4, 0, 0, 0, 0, 159, 146, 150, 0, 0, 0, 0]);
         assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, "d"));
-        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_)));
+        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_, _)));
         assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, String::new()));
         assert_matches!(read.read_str(), Err(Error::Io(_)));
     }

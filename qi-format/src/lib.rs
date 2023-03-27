@@ -7,20 +7,16 @@ const FALSE_BOOL: u8 = 0;
 const TRUE_BOOL: u8 = 1;
 
 mod read;
-#[doc(inline)]
-pub use read::*;
 
 mod write;
-#[doc(inline)]
-pub use write::*;
 
 pub mod ser;
 #[doc(inline)]
-pub use ser::*;
+pub use ser::{to_bytes, to_writer, Serialize, Serializer};
 
 pub mod de;
 #[doc(inline)]
-pub use de::*;
+pub use de::{from_bytes, from_reader, Deserializer};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -43,7 +39,7 @@ pub enum Error {
     UnexpectedElement(usize),
 
     #[error("string data \"{0}\" is not valid UTF-8")]
-    InvalidStrUtf8(String, #[source] std::str::Utf8Error),
+    InvalidStringUtf8(String, #[source] std::str::Utf8Error),
 
     #[error("{0}")]
     Custom(std::string::String),

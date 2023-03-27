@@ -103,7 +103,7 @@ impl Map {
         matches!(self.get_capability(key), Some(Dynamic::Bool(true)))
     }
 
-    pub fn update_to_minimums_with<F>(&mut self, other: &Self, mut default: F)
+    pub fn resolve_minimums_against<F>(&mut self, other: &Self, mut default: F)
     where
         F: FnMut(&mut Dynamic),
     {
@@ -266,7 +266,7 @@ mod tests {
             ("G", true),
             ("H", false),
         ]);
-        m.update_to_minimums_with(&m2, default_capability);
+        m.resolve_minimums_against(&m2, default_capability);
         assert_matches!(m.get_capability("A"), Some(Dynamic::Bool(true)));
         assert_matches!(m.get_capability("B"), Some(Dynamic::Bool(false)));
         assert_matches!(m.get_capability("C"), Some(Dynamic::Bool(false)));

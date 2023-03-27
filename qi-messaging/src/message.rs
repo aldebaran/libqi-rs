@@ -43,58 +43,6 @@
 
 use bytes::{Buf, BufMut};
 
-fn read<B, F, T>(buf: &mut B, read_fn: F) -> Result<T, NotEnoughDataError>
-where
-    B: Buf,
-    F: FnOnce(&mut B) -> T,
-{
-    let value_size = std::mem::size_of::<T>();
-    let data_len = buf.remaining();
-    if data_len < value_size {
-        return Err(NotEnoughDataError {
-            expected: value_size,
-            actual: data_len,
-        });
-    }
-    let value = read_fn(buf);
-    Ok(value)
-}
-
-fn read_u8<B>(buf: &mut B) -> Result<u8, NotEnoughDataError>
-where
-    B: Buf,
-{
-    read(buf, Buf::get_u8)
-}
-
-fn read_u16_le<B>(buf: &mut B) -> Result<u16, NotEnoughDataError>
-where
-    B: Buf,
-{
-    read(buf, Buf::get_u16_le)
-}
-
-fn read_u32_be<B>(buf: &mut B) -> Result<u32, NotEnoughDataError>
-where
-    B: Buf,
-{
-    read(buf, Buf::get_u32)
-}
-
-fn read_u32_le<B>(buf: &mut B) -> Result<u32, NotEnoughDataError>
-where
-    B: Buf,
-{
-    read(buf, Buf::get_u32_le)
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-#[error("not enough data to read value, expected {expected} bytes but only got {actual} bytes")]
-pub struct NotEnoughDataError {
-    pub expected: usize,
-    pub actual: usize,
-}
-
 macro_rules! define_message_newtype {
     ($vis:vis $name:ident($t:ty): $read:tt -> $readerr:ident, $write:tt) => {
         #[derive(
@@ -638,7 +586,18 @@ impl From<PayloadSizeWriteError> for HeaderWriteError {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+#[derive(
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Hash,
+    derive_more::From,
+    derive_more::Into,
+)]
 pub struct Payload(Vec<u8>);
 
 impl Payload {
@@ -751,6 +710,58 @@ pub enum ReadError {
 
     #[error("error reading message payload: {0}")]
     Payload(#[from] PayloadReadError),
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
+#[error("not enough data to read value, expected {expected} bytes but only got {actual} bytes")]
+pub struct NotEnoughDataError {
+    pub expected: usize,
+    pub actual: usize,
+}
+
+fn read<B, F, T>(buf: &mut B, read_fn: F) -> Result<T, NotEnoughDataError>
+where
+    B: Buf,
+    F: FnOnce(&mut B) -> T,
+{
+    let value_size = std::mem::size_of::<T>();
+    let data_len = buf.remaining();
+    if data_len < value_size {
+        return Err(NotEnoughDataError {
+            expected: value_size,
+            actual: data_len,
+        });
+    }
+    let value = read_fn(buf);
+    Ok(value)
+}
+
+fn read_u8<B>(buf: &mut B) -> Result<u8, NotEnoughDataError>
+where
+    B: Buf,
+{
+    read(buf, Buf::get_u8)
+}
+
+fn read_u16_le<B>(buf: &mut B) -> Result<u16, NotEnoughDataError>
+where
+    B: Buf,
+{
+    read(buf, Buf::get_u16_le)
+}
+
+fn read_u32_be<B>(buf: &mut B) -> Result<u32, NotEnoughDataError>
+where
+    B: Buf,
+{
+    read(buf, Buf::get_u32)
+}
+
+fn read_u32_le<B>(buf: &mut B) -> Result<u32, NotEnoughDataError>
+where
+    B: Buf,
+{
+    read(buf, Buf::get_u32_le)
 }
 
 #[cfg(test)]

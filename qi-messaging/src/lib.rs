@@ -3,18 +3,17 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
+pub mod call;
 mod capabilities;
-pub mod client;
+mod channel;
 mod codec;
+mod connection;
 mod dispatch;
 mod message;
-mod message_types;
 pub mod server;
-mod session;
+pub mod session;
 
 pub use message::{Action, Object, Service};
-pub use message_types::Response;
-pub use session::Session;
 
 pub use qi_format as format;
 pub use qi_types as types;

@@ -1,35 +1,34 @@
 use crate::{
+    call::{ParamsBuilder, ParamsBuilderWithArg},
     message::{Action, Object, Service},
-    message_types::CallBuilder,
-    session::CallRequestBuilder,
 };
 
 const SERVICE: Service = Service::new(0);
 const OBJECT: Object = Object::new(0);
 const AUTHENTICATE_ACTION: Action = Action::new(8);
 
-pub trait ToServer {
+pub trait ServerCall {
     fn to_server(self) -> Self;
 
-    fn authenticate(self) -> Self;
+    fn server_authenticate(self) -> Self;
 }
 
-impl ToServer for CallBuilder {
+impl<T> ServerCall for ParamsBuilder<T> {
     fn to_server(self) -> Self {
         self.service(SERVICE).object(OBJECT)
     }
 
-    fn authenticate(self) -> Self {
-        self.action(AUTHENTICATE_ACTION)
+    fn server_authenticate(self) -> Self {
+        self.to_server().action(AUTHENTICATE_ACTION)
     }
 }
 
-impl<R> ToServer for CallRequestBuilder<R> {
+impl<T> ServerCall for ParamsBuilderWithArg<T> {
     fn to_server(self) -> Self {
         self.service(SERVICE).object(OBJECT)
     }
 
-    fn authenticate(self) -> Self {
-        self.action(AUTHENTICATE_ACTION)
+    fn server_authenticate(self) -> Self {
+        self.to_server().action(AUTHENTICATE_ACTION)
     }
 }
