@@ -5,17 +5,20 @@ use std::{future::Future, marker::PhantomData, task::Poll};
 
 #[derive(derive_new::new, Debug)]
 pub(crate) struct Channel {
-    dispatch_client: dispatch::RequestSender,
+    dispatch: dispatch::OrderSender,
 }
 
 impl Channel {
-    pub fn call<T, R>(&self, params: call::Params<T>) -> Result<Call<R>, CallStartError>
+    pub async fn call<T, R>(&self, params: call::Params<T>) -> Result<Call<R>, CallStartError>
     where
         T: serde::Serialize,
     {
-        let req = call_params_to_dispatch_request(params)?;
-        let resp_rx = self.dispatch_client.send_call(req)?;
-        Ok(Call::new(resp_rx))
+        let req = dispatch::call::Request {
+            recipient: params.recipient,
+            payload: format::to_bytes(&params.argument)?,
+        };
+        let result = self.dispatch.send_call_request(req).await?;
+        Ok(Call::new(result))
     }
 }
 
@@ -28,8 +31,8 @@ pub enum CallStartError {
     ConnectionDropped,
 }
 
-impl From<dispatch::RequestSendError> for CallStartError {
-    fn from(_err: dispatch::RequestSendError) -> Self {
+impl From<dispatch::OrderSendError> for CallStartError {
+    fn from(_err: dispatch::OrderSendError) -> Self {
         Self::ConnectionDropped
     }
 }
@@ -39,15 +42,15 @@ pin_project! {
     #[must_use = "futures do nothing unless you `.await` or poll them"]
     pub struct Call<R> {
         #[pin]
-        resp_rx: dispatch::CallResponseReceiver,
+        result: dispatch::call::RequestResultReceiver,
         phantom: PhantomData<R>,
     }
 }
 
 impl<R> Call<R> {
-    pub(crate) fn new(resp_rx: dispatch::CallResponseReceiver) -> Self {
+    pub(crate) fn new(result: dispatch::call::RequestResultReceiver) -> Self {
         Self {
-            resp_rx,
+            result,
             phantom: PhantomData,
         }
     }
@@ -60,9 +63,21 @@ where
     type Output = Result<call::Result<R>, CallEndError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        let response = ready!(self.project().resp_rx.poll(cx))?;
-        let result = call_response_to_call_result(response)?;
-        Poll::Ready(Ok(result))
+        let resp = ready!(self.project().result.poll(cx))??;
+        let res = match resp {
+            dispatch::call::Response::Reply(payload) => {
+                Ok(call::Result::Ok(format::from_bytes(&payload)?))
+            }
+            dispatch::call::Response::Error(payload) => {
+                let dynamic: Dynamic = format::from_bytes(&payload)?;
+                match dynamic.into_string() {
+                    Some(err) => Ok(call::Result::Err(err)),
+                    None => Err(CallEndError::ResponseErrorDynamicValueIsNotString),
+                }
+            }
+            dispatch::call::Response::Canceled => Ok(call::Result::Canceled),
+        };
+        Poll::Ready(res)
     }
 }
 
@@ -74,47 +89,18 @@ pub enum CallEndError {
     #[error("format error while deserializing the payload of a request response")]
     ResponsePayloadFormat(#[from] format::Error),
 
-    #[error("connection has been dropped")]
-    ConnectionDropped,
+    #[error("message dispatch is closed")]
+    MessageDispatchClosed,
 }
 
-impl From<dispatch::ResponseRecvError> for CallEndError {
-    fn from(_err: dispatch::ResponseRecvError) -> Self {
-        Self::ConnectionDropped
+impl From<dispatch::call::Error> for CallEndError {
+    fn from(_err: dispatch::call::Error) -> Self {
+        todo!()
     }
 }
 
-fn call_params_to_dispatch_request<T>(
-    params: call::Params<T>,
-) -> Result<dispatch::CallRequest, CallStartError>
-where
-    T: serde::Serialize,
-{
-    Ok(dispatch::CallRequest {
-        service: params.service,
-        object: params.object,
-        action: params.action,
-        payload: format::to_bytes(&params.argument)?,
-    })
-}
-
-fn call_response_to_call_result<T>(
-    resp: dispatch::CallResponse,
-) -> Result<call::Result<T>, CallEndError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    match resp {
-        dispatch::CallResponse::Reply(payload) => {
-            Ok(call::Result::Ok(format::from_bytes(&payload)?))
-        }
-        dispatch::CallResponse::Error(payload) => {
-            let dynamic: Dynamic = format::from_bytes(&payload)?;
-            match dynamic.into_string() {
-                Some(err) => Ok(call::Result::Err(err)),
-                None => Err(CallEndError::ResponseErrorDynamicValueIsNotString),
-            }
-        }
-        dispatch::CallResponse::Canceled => Ok(call::Result::Canceled),
+impl From<dispatch::call::RequestResultRecvError> for CallEndError {
+    fn from(_err: dispatch::call::RequestResultRecvError) -> Self {
+        Self::MessageDispatchClosed
     }
 }

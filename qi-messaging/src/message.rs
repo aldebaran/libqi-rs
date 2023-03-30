@@ -58,7 +58,10 @@ macro_rules! define_message_newtype {
             derive_more::From,
             derive_more::Into,
             derive_more::Display,
+            serde::Serialize,
+            serde::Deserialize,
         )]
+        #[serde(transparent)]
         $vis struct $name($t);
 
         impl $name {
@@ -72,10 +75,6 @@ macro_rules! define_message_newtype {
             #[allow(dead_code)]
             $vis const fn from(val: $t) -> Self {
                 Self(val)
-            }
-
-            $vis const fn into(self) -> $t {
-                self.0
             }
 
             fn read<B>(buf: &mut B) -> Result<Self, $readerr>
@@ -97,11 +96,11 @@ macro_rules! define_message_newtype {
             Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error,
         )]
         #[error(transparent)]
-        struct $readerr(#[from] NotEnoughDataError);
+        struct $readerr(#[from] EndOfInputError);
     };
 }
 
-define_message_newtype!(pub Id(u32): read_u32_le -> IdReadError, put_u32_le);
+define_message_newtype!(pub(crate) Id(u32): read_u32_le -> IdReadError, put_u32_le);
 define_message_newtype!(Version(u16): read_u16_le -> VersionReadError, put_u16_le);
 define_message_newtype!(pub Service(u32): read_u32_le -> ServiceReadError, put_u32_le);
 define_message_newtype!(pub Object(u32): read_u32_le -> ObjectReadError, put_u32_le);
@@ -120,13 +119,23 @@ impl Version {
 }
 
 #[derive(
+    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
+)]
+#[display(fmt = "action:{action}@object:{object}@service:{service}")]
+pub struct Recipient {
+    pub service: Service,
+    pub object: Object,
+    pub action: Action,
+}
+
+#[derive(
     Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::Display,
 )]
 #[display(fmt = "{:#x}", "Self::VALUE")]
-struct MagicCookie;
+pub(crate) struct MagicCookie;
 
 impl MagicCookie {
-    const SIZE: usize = std::mem::size_of::<u32>();
+    pub(crate) const SIZE: usize = std::mem::size_of::<u32>();
     const VALUE: u32 = 0x42dead42;
 
     fn read<B>(buf: &mut B) -> Result<Self, MagicCookieReadError>
@@ -155,7 +164,7 @@ enum MagicCookieReadError {
     InvalidValue(u32),
 
     #[error(transparent)]
-    NotEnoughData(#[from] NotEnoughDataError),
+    EndOfInput(#[from] EndOfInputError),
 }
 
 #[derive(
@@ -176,10 +185,6 @@ struct PayloadSize(usize);
 
 impl PayloadSize {
     const SIZE: usize = std::mem::size_of::<u32>();
-
-    const fn into(self) -> usize {
-        self.0
-    }
 
     fn read<B>(buf: &mut B) -> Result<Self, PayloadSizeReadError>
     where
@@ -216,7 +221,7 @@ enum PayloadSizeReadError {
     CannotBeRepresentedAsUSize(u32),
 
     #[error(transparent)]
-    NotEnoughData(#[from] NotEnoughDataError),
+    EndOfInput(#[from] EndOfInputError),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
@@ -242,7 +247,7 @@ enum PayloadSizeWriteError {
     num_derive::ToPrimitive,
 )]
 #[repr(u8)]
-pub enum Type {
+pub(crate) enum Type {
     #[display(fmt = "call")]
     Call = 1,
     #[display(fmt = "reply")]
@@ -305,7 +310,7 @@ impl std::convert::TryFrom<u8> for Type {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, thiserror::Error)]
 #[error("invalid message type value {0}")]
-pub struct InvalidTypeValueError(u8);
+pub(crate) struct InvalidTypeValueError(u8);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 enum TypeReadError {
@@ -313,13 +318,13 @@ enum TypeReadError {
     InvalidValue(u8),
 
     #[error(transparent)]
-    NotEnoughData(#[from] NotEnoughDataError),
+    EndOfInput(#[from] EndOfInputError),
 }
 
 bitflags::bitflags! {
     #[derive(Default, derive_more::Display)]
     #[display(fmt = "{:b}", "self.bits()")]
-    pub struct Flags: u8 {
+    pub(crate) struct Flags: u8 {
         const DYNAMIC_PAYLOAD = 0b00000001;
         const RETURN_TYPE = 0b00000010;
     }
@@ -327,14 +332,6 @@ bitflags::bitflags! {
 
 impl Flags {
     const SIZE: usize = std::mem::size_of::<u8>();
-
-    pub fn has_dynamic_payload(&self) -> bool {
-        self.contains(Self::DYNAMIC_PAYLOAD)
-    }
-
-    pub fn has_return_type(&self) -> bool {
-        self.contains(Self::RETURN_TYPE)
-    }
 
     fn read<B>(buf: &mut B) -> Result<Self, FlagsReadError>
     where
@@ -363,7 +360,7 @@ impl std::convert::TryFrom<u8> for Flags {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error("invalid message flags value {0}")]
-pub struct InvalidFlagsValueError(u8);
+pub(crate) struct InvalidFlagsValueError(u8);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 enum FlagsReadError {
@@ -371,18 +368,18 @@ enum FlagsReadError {
     InvalidValue(u8),
 
     #[error(transparent)]
-    NotEnoughData(#[from] NotEnoughDataError),
+    EndOfInput(#[from] EndOfInputError),
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-struct Header {
-    pub id: Id,
-    pub ty: Type,
-    pub payload_size: PayloadSize,
-    pub flags: Flags,
-    pub service: Service,
-    pub object: Object,
-    pub action: Action,
+pub(crate) struct Header {
+    id: Id,
+    ty: Type,
+    payload_size: PayloadSize,
+    flags: Flags,
+    service: Service,
+    object: Object,
+    action: Action,
 }
 
 impl Header {
@@ -395,9 +392,9 @@ impl Header {
     const SERVICE_OFFSET: usize = Self::FLAGS_OFFSET + Flags::SIZE;
     const OBJECT_OFFSET: usize = Self::SERVICE_OFFSET + Service::SIZE;
     const ACTION_OFFSET: usize = Self::OBJECT_OFFSET + Object::SIZE;
-    const SIZE: usize = Self::ACTION_OFFSET + Action::SIZE;
+    pub(crate) const SIZE: usize = Self::ACTION_OFFSET + Action::SIZE;
 
-    fn read<B>(buf: &mut B) -> Result<Self, HeaderReadError>
+    pub(crate) fn read<B>(buf: &mut B) -> Result<Self, HeaderReadError>
     where
         B: Buf,
     {
@@ -424,27 +421,34 @@ impl Header {
         })
     }
 
-    fn write<B>(self, buf: &mut B) -> Result<(), HeaderWriteError>
+    pub(crate) fn write<B>(self, buf: &mut B) -> Result<(), HeaderWriteError>
     where
         B: BufMut,
     {
-        MagicCookie.write(buf);
-        self.id.write(buf);
-        self.payload_size.write(buf)?;
-        Version::CURRENT.write(buf);
-        self.ty.write(buf);
-        self.flags.write(buf);
-        self.service.write(buf);
-        self.object.write(buf);
-        self.action.write(buf);
+        let mut hbuf = [0u8; Header::SIZE];
+        let mut hbuf_ref = hbuf.as_mut();
+        MagicCookie.write(&mut hbuf_ref);
+        self.id.write(&mut hbuf_ref);
+        self.payload_size.write(&mut hbuf_ref)?;
+        Version::CURRENT.write(&mut hbuf_ref);
+        self.ty.write(&mut hbuf_ref);
+        self.flags.write(&mut hbuf_ref);
+        self.service.write(&mut hbuf_ref);
+        self.object.write(&mut hbuf_ref);
+        self.action.write(&mut hbuf_ref);
+        buf.put(hbuf.as_ref());
         Ok(())
+    }
+
+    pub(crate) fn payload_size(&self) -> usize {
+        self.payload_size.0
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub enum HeaderReadError {
+pub(crate) enum HeaderReadError {
     #[error(transparent)]
-    NotEnoughData(#[from] NotEnoughDataError),
+    EndOfInput(#[from] EndOfInputError),
 
     #[error("{}", MagicCookieReadError::InvalidValue(*.0))]
     InvalidMessageCookieValue(u32),
@@ -466,8 +470,8 @@ impl From<MagicCookieReadError> for HeaderReadError {
     fn from(e: MagicCookieReadError) -> Self {
         match e {
             MagicCookieReadError::InvalidValue(v) => Self::InvalidMessageCookieValue(v),
-            MagicCookieReadError::NotEnoughData(NotEnoughDataError { actual, .. }) => {
-                Self::NotEnoughData(NotEnoughDataError {
+            MagicCookieReadError::EndOfInput(EndOfInputError { actual, .. }) => {
+                Self::EndOfInput(EndOfInputError {
                     expected: Header::SIZE,
                     actual,
                 })
@@ -478,8 +482,8 @@ impl From<MagicCookieReadError> for HeaderReadError {
 
 impl From<IdReadError> for HeaderReadError {
     fn from(e: IdReadError) -> Self {
-        let IdReadError(NotEnoughDataError { actual, .. }) = e;
-        Self::NotEnoughData(NotEnoughDataError {
+        let IdReadError(EndOfInputError { actual, .. }) = e;
+        Self::EndOfInput(EndOfInputError {
             expected: Header::SIZE,
             actual: Header::ID_OFFSET + actual,
         })
@@ -492,8 +496,8 @@ impl From<PayloadSizeReadError> for HeaderReadError {
             PayloadSizeReadError::CannotBeRepresentedAsUSize(s) => {
                 Self::PayloadSizeCannotBeRepresentedAsUSize(s)
             }
-            PayloadSizeReadError::NotEnoughData(NotEnoughDataError { actual, .. }) => {
-                Self::NotEnoughData(NotEnoughDataError {
+            PayloadSizeReadError::EndOfInput(EndOfInputError { actual, .. }) => {
+                Self::EndOfInput(EndOfInputError {
                     expected: Header::SIZE,
                     actual: Header::PAYLOAD_SIZE_OFFSET + actual,
                 })
@@ -504,8 +508,8 @@ impl From<PayloadSizeReadError> for HeaderReadError {
 
 impl From<VersionReadError> for HeaderReadError {
     fn from(e: VersionReadError) -> Self {
-        let VersionReadError(NotEnoughDataError { actual, .. }) = e;
-        Self::NotEnoughData(NotEnoughDataError {
+        let VersionReadError(EndOfInputError { actual, .. }) = e;
+        Self::EndOfInput(EndOfInputError {
             expected: Header::SIZE,
             actual: Header::VERSION_OFFSET + actual,
         })
@@ -516,8 +520,8 @@ impl From<TypeReadError> for HeaderReadError {
     fn from(e: TypeReadError) -> Self {
         match e {
             TypeReadError::InvalidValue(v) => Self::InvalidTypeValue(v),
-            TypeReadError::NotEnoughData(NotEnoughDataError { actual, .. }) => {
-                Self::NotEnoughData(NotEnoughDataError {
+            TypeReadError::EndOfInput(EndOfInputError { actual, .. }) => {
+                Self::EndOfInput(EndOfInputError {
                     expected: Header::SIZE,
                     actual: Header::TYPE_OFFSET + actual,
                 })
@@ -530,8 +534,8 @@ impl From<FlagsReadError> for HeaderReadError {
     fn from(e: FlagsReadError) -> Self {
         match e {
             FlagsReadError::InvalidValue(v) => Self::InvalidFlagsValue(v),
-            FlagsReadError::NotEnoughData(NotEnoughDataError { actual, .. }) => {
-                Self::NotEnoughData(NotEnoughDataError {
+            FlagsReadError::EndOfInput(EndOfInputError { actual, .. }) => {
+                Self::EndOfInput(EndOfInputError {
                     expected: Header::SIZE,
                     actual: Header::FLAGS_OFFSET + actual,
                 })
@@ -542,8 +546,8 @@ impl From<FlagsReadError> for HeaderReadError {
 
 impl From<ServiceReadError> for HeaderReadError {
     fn from(e: ServiceReadError) -> Self {
-        let ServiceReadError(NotEnoughDataError { actual, .. }) = e;
-        Self::NotEnoughData(NotEnoughDataError {
+        let ServiceReadError(EndOfInputError { actual, .. }) = e;
+        Self::EndOfInput(EndOfInputError {
             expected: Header::SIZE,
             actual: Header::SERVICE_OFFSET + actual,
         })
@@ -552,8 +556,8 @@ impl From<ServiceReadError> for HeaderReadError {
 
 impl From<ObjectReadError> for HeaderReadError {
     fn from(e: ObjectReadError) -> Self {
-        let ObjectReadError(NotEnoughDataError { actual, .. }) = e;
-        Self::NotEnoughData(NotEnoughDataError {
+        let ObjectReadError(EndOfInputError { actual, .. }) = e;
+        Self::EndOfInput(EndOfInputError {
             expected: Header::SIZE,
             actual: Header::OBJECT_OFFSET + actual,
         })
@@ -562,8 +566,8 @@ impl From<ObjectReadError> for HeaderReadError {
 
 impl From<ActionReadError> for HeaderReadError {
     fn from(e: ActionReadError) -> Self {
-        let ActionReadError(NotEnoughDataError { actual, .. }) = e;
-        Self::NotEnoughData(NotEnoughDataError {
+        let ActionReadError(EndOfInputError { actual, .. }) = e;
+        Self::EndOfInput(EndOfInputError {
             expected: Header::SIZE,
             actual: Header::ACTION_OFFSET + actual,
         })
@@ -571,7 +575,7 @@ impl From<ActionReadError> for HeaderReadError {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub enum HeaderWriteError {
+pub(crate) enum HeaderWriteError {
     #[error("{}", PayloadSizeWriteError::CannotBeRepresentedAsU32(*.0))]
     PayloadSizeCannotBeRepresentedAsU32(usize),
 }
@@ -598,20 +602,20 @@ impl From<PayloadSizeWriteError> for HeaderWriteError {
     derive_more::From,
     derive_more::Into,
 )]
-pub struct Payload(Vec<u8>);
+pub(crate) struct Payload(Vec<u8>);
 
 impl Payload {
-    pub fn new(bytes: Vec<u8>) -> Self {
+    pub(crate) fn new(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
 
-    fn read<B>(size: usize, buf: &mut B) -> Result<Self, PayloadReadError>
+    pub(crate) fn read<B>(size: usize, buf: &mut B) -> Result<Self, PayloadReadError>
     where
         B: Buf,
     {
         let data_len = buf.remaining();
         if data_len < size {
-            return Err(PayloadReadError(NotEnoughDataError {
+            return Err(PayloadReadError(EndOfInputError {
                 expected: size,
                 actual: data_len,
             }));
@@ -628,11 +632,7 @@ impl Payload {
         buf.put_slice(&self.0);
     }
 
-    pub fn bytes(&self) -> &[u8] {
-        &self.0
-    }
-
-    pub fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         self.0.len()
     }
 }
@@ -645,42 +645,34 @@ impl AsRef<[u8]> for Payload {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error(transparent)]
-pub struct PayloadReadError(#[from] pub NotEnoughDataError);
+pub(crate) struct PayloadReadError(#[from] pub(crate) EndOfInputError);
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, derive_more::Display)]
-#[display(
-    fmt = "message(id={id}, type={ty}, flags={flags}, service={service}, object={object}, action={action})"
-)]
-pub struct Message {
-    pub id: Id,
-    pub ty: Type,
-    pub flags: Flags,
-    pub service: Service,
-    pub object: Object,
-    pub action: Action,
-    pub payload: Payload,
+#[display(fmt = "message(id={id}, type={ty}, flags={flags}, recipient={recipient})")]
+pub(crate) struct Message {
+    pub(crate) id: Id,
+    pub(crate) ty: Type,
+    pub(crate) flags: Flags,
+    pub(crate) recipient: Recipient,
+    pub(crate) payload: Payload,
 }
 
 impl Message {
-    pub fn read<B>(buf: &mut B) -> Result<Self, ReadError>
-    where
-        B: Buf,
-    {
-        let header = Header::read(buf)?;
-        let payload = Payload::read(header.payload_size.into(), buf)?;
-
-        Ok(Self {
+    pub(crate) fn new(header: Header, payload: Payload) -> Self {
+        Self {
             id: header.id,
             ty: header.ty,
             flags: header.flags,
-            service: header.service,
-            object: header.object,
-            action: header.action,
+            recipient: Recipient {
+                service: header.service,
+                object: header.object,
+                action: header.action,
+            },
             payload,
-        })
+        }
     }
 
-    pub fn write<B>(self, buf: &mut B) -> Result<(), HeaderWriteError>
+    pub(crate) fn write<B>(self, buf: &mut B) -> Result<(), HeaderWriteError>
     where
         B: BufMut,
     {
@@ -689,37 +681,28 @@ impl Message {
             ty: self.ty,
             payload_size: PayloadSize(self.payload.size()),
             flags: self.flags,
-            service: self.service,
-            object: self.object,
-            action: self.action,
+            service: self.recipient.service,
+            object: self.recipient.object,
+            action: self.recipient.action,
         }
         .write(buf)?;
         self.payload.write(buf);
         Ok(())
     }
 
-    pub fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         Header::SIZE + self.payload.size()
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub enum ReadError {
-    #[error("error reading message header: {0}")]
-    Header(#[from] HeaderReadError),
-
-    #[error("error reading message payload: {0}")]
-    Payload(#[from] PayloadReadError),
-}
-
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-#[error("not enough data to read value, expected {expected} bytes but only got {actual} bytes")]
-pub struct NotEnoughDataError {
-    pub expected: usize,
-    pub actual: usize,
+#[error("end of input: not enough data to read value, expected {expected} bytes but only got {actual} bytes")]
+pub(crate) struct EndOfInputError {
+    pub(crate) expected: usize,
+    pub(crate) actual: usize,
 }
 
-fn read<B, F, T>(buf: &mut B, read_fn: F) -> Result<T, NotEnoughDataError>
+fn read<B, F, T>(buf: &mut B, read_fn: F) -> Result<T, EndOfInputError>
 where
     B: Buf,
     F: FnOnce(&mut B) -> T,
@@ -727,7 +710,7 @@ where
     let value_size = std::mem::size_of::<T>();
     let data_len = buf.remaining();
     if data_len < value_size {
-        return Err(NotEnoughDataError {
+        return Err(EndOfInputError {
             expected: value_size,
             actual: data_len,
         });
@@ -736,28 +719,28 @@ where
     Ok(value)
 }
 
-fn read_u8<B>(buf: &mut B) -> Result<u8, NotEnoughDataError>
+fn read_u8<B>(buf: &mut B) -> Result<u8, EndOfInputError>
 where
     B: Buf,
 {
     read(buf, Buf::get_u8)
 }
 
-fn read_u16_le<B>(buf: &mut B) -> Result<u16, NotEnoughDataError>
+fn read_u16_le<B>(buf: &mut B) -> Result<u16, EndOfInputError>
 where
     B: Buf,
 {
     read(buf, Buf::get_u16_le)
 }
 
-fn read_u32_be<B>(buf: &mut B) -> Result<u32, NotEnoughDataError>
+fn read_u32_be<B>(buf: &mut B) -> Result<u32, EndOfInputError>
 where
     B: Buf,
 {
     read(buf, Buf::get_u32)
 }
 
-fn read_u32_le<B>(buf: &mut B) -> Result<u32, NotEnoughDataError>
+fn read_u32_le<B>(buf: &mut B) -> Result<u32, EndOfInputError>
 where
     B: Buf,
 {
@@ -784,16 +767,20 @@ mod tests {
             0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
             0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
-        let message = Message::read(&mut input).unwrap();
+        let header = Header::read(&mut input).unwrap();
+        let payload = Payload::read(header.payload_size(), &mut input).unwrap();
+        let message = Message::new(header, payload);
         assert_eq!(
             message,
             Message {
                 id: Id::new(990340),
                 ty: Type::Error,
                 flags: Flags::empty(),
-                service: Service::new(47),
-                object: Object::new(1),
-                action: Action::new(178),
+                recipient: Recipient {
+                    service: Service::new(47),
+                    object: Object::new(1),
+                    action: Action::new(178),
+                },
                 payload: Payload::new(vec![
                     0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20,
                     0x72, 0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20,
@@ -810,9 +797,11 @@ mod tests {
             id: Id(329),
             ty: Type::Capabilities,
             flags: Flags::RETURN_TYPE,
-            service: Service(1),
-            object: Object(1),
-            action: Action(104),
+            recipient: Recipient {
+                service: Service(1),
+                object: Object(1),
+                action: Action(104),
+            },
             payload: Payload(vec![0x17, 0x2b, 0xe6, 0x01, 0x5f]),
         };
         let mut buf = Vec::new();
@@ -834,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn test_message_read_invalid_magic_cookie_value() {
+    fn test_header_read_invalid_magic_cookie_value() {
         let mut input: &[u8] = &[
             0x42, 0xdf, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
@@ -842,17 +831,15 @@ mod tests {
             0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
             0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
-        let message = Message::read(&mut input);
+        let header = Header::read(&mut input);
         assert_eq!(
-            message,
-            Err(ReadError::Header(
-                HeaderReadError::InvalidMessageCookieValue(0x42dfad42)
-            ))
+            header,
+            Err(HeaderReadError::InvalidMessageCookieValue(0x42dfad42))
         );
     }
 
     #[test]
-    fn test_message_read_invalid_type_value() {
+    fn test_header_read_invalid_type_value() {
         let mut input: &[u8] = &[
             0x42, 0xde, 0xad, 0x42, // cookie,
             0x84, 0x1c, 0x0f, 0x00, // id
@@ -862,15 +849,12 @@ mod tests {
             0x01, 0x00, 0x00, 0x00, // object
             0xb2, 0x00, 0x00, 0x00, // action
         ];
-        let message = Message::read(&mut input);
-        assert_eq!(
-            message,
-            Err(ReadError::Header(HeaderReadError::InvalidTypeValue(0xaa)))
-        );
+        let header = Header::read(&mut input);
+        assert_eq!(header, Err(HeaderReadError::InvalidTypeValue(0xaa)));
     }
 
     #[test]
-    fn test_message_read_invalid_flags_value() {
+    fn test_header_read_invalid_flags_value() {
         let mut input: &[u8] = &[
             0x42, 0xde, 0xad, 0x42, // cookie,
             0x84, 0x1c, 0x0f, 0x00, // id
@@ -880,15 +864,12 @@ mod tests {
             0x01, 0x00, 0x00, 0x00, // object
             0xb2, 0x00, 0x00, 0x00, // action
         ];
-        let message = Message::read(&mut input);
-        assert_eq!(
-            message,
-            Err(ReadError::Header(HeaderReadError::InvalidFlagsValue(0x13)))
-        );
+        let header = Header::read(&mut input);
+        assert_eq!(header, Err(HeaderReadError::InvalidFlagsValue(0x13)));
     }
 
     #[test]
-    fn test_message_read_unsupported_version() {
+    fn test_header_read_unsupported_version() {
         let mut input: &[u8] = &[
             0x42, 0xde, 0xad, 0x42, // cookie,
             0x84, 0x1c, 0x0f, 0x00, // id
@@ -898,27 +879,20 @@ mod tests {
             0x01, 0x00, 0x00, 0x00, // object
             0xb2, 0x00, 0x00, 0x00, // action
         ];
-        let message = Message::read(&mut input);
-        assert_eq!(
-            message,
-            Err(ReadError::Header(HeaderReadError::UnsupportedVersion(
-                0x3412
-            )))
-        );
+        let header = Header::read(&mut input);
+        assert_eq!(header, Err(HeaderReadError::UnsupportedVersion(0x3412)));
     }
 
     #[test]
     fn test_message_read_not_enough_data() {
         fn check_header(mut input: &[u8], actual: usize) {
-            let message = Message::read(&mut input);
+            let header = Header::read(&mut input);
             assert_eq!(
-                message,
-                Err(ReadError::Header(HeaderReadError::NotEnoughData(
-                    NotEnoughDataError {
-                        expected: 28,
-                        actual
-                    }
-                )))
+                header,
+                Err(HeaderReadError::EndOfInput(EndOfInputError {
+                    expected: 28,
+                    actual
+                }))
             );
         }
 
@@ -1022,13 +996,14 @@ mod tests {
             0xb2, 0x00, 0x00, 0x00, // action
             0x01, 0x02, 0x03, // payload, 1 byte short
         ];
-        let message = Message::read(&mut input);
+        let header = Header::read(&mut input).unwrap();
+        let payload = Payload::read(header.payload_size(), &mut input);
         assert_eq!(
-            message,
-            Err(ReadError::Payload(PayloadReadError(NotEnoughDataError {
+            payload,
+            Err(PayloadReadError(EndOfInputError {
                 expected: 4,
                 actual: 3
-            })))
+            }))
         );
     }
 }

@@ -36,14 +36,16 @@ async fn main() -> Result<()> {
 
     let session = session.await?;
 
-    let my_service_info = session.call(
-        call::Params::builder()
-            .service(Service::from(1))
-            .object(Object::from(1))
-            .action(Action::from(100))
-            .argument("MyService")
-            .build(),
-    )?;
+    let my_service_info = session
+        .call(
+            call::Params::builder()
+                .service(Service::from(1))
+                .object(Object::from(1))
+                .action(Action::from(100))
+                .argument("MyService")
+                .build(),
+        )
+        .await?;
 
     match my_service_info.await? {
         call::Result::Ok::<ServiceInfo>(info) => {
@@ -53,14 +55,16 @@ async fn main() -> Result<()> {
         call::Result::Canceled => bail!("the call to ServiceDirectory.service has been canceled"),
     };
 
-    let services = session.call(
-        call::Params::builder()
-            .service(Service::from(1))
-            .object(Object::from(1))
-            .action(Action::from(101))
-            .argument(())
-            .build(),
-    )?;
+    let services = session
+        .call(
+            call::Params::builder()
+                .service(Service::from(1))
+                .object(Object::from(1))
+                .action(Action::from(101))
+                .argument(())
+                .build(),
+        )
+        .await?;
     let _services = match services.await? {
         call::Result::Ok::<Vec<ServiceInfo>>(services) => {
             println!("services: {services:?}");

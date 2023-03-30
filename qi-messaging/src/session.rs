@@ -2,7 +2,6 @@ use crate::{
     call, capabilities,
     channel::{Call, CallEndError, CallStartError, Channel},
     connection::Connection,
-    dispatch::Dispatch,
     server,
 };
 use std::future::Future;
@@ -15,11 +14,11 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn call<T, R>(&self, params: call::Params<T>) -> Result<Call<R>, CallStartError>
+    pub async fn call<T, R>(&self, params: call::Params<T>) -> Result<Call<R>, CallStartError>
     where
         T: serde::Serialize,
     {
-        self.channel.call(params)
+        self.channel.call(params).await
     }
 }
 
@@ -27,9 +26,8 @@ pub fn connect<IO>(io: IO) -> (impl Future<Output = Result<Session, Error>>, Con
 where
     IO: AsyncRead + AsyncWrite,
 {
-    let (dispatch, dispatch_client) = Dispatch::new(io);
-    let connection = Connection::new(dispatch);
-    let channel = Channel::new(dispatch_client);
+    let (connection, dispatch_orders) = Connection::new(io);
+    let channel = Channel::new(dispatch_orders);
 
     let session = async move {
         let mut capabilities = capabilities::local();
@@ -39,7 +37,7 @@ where
             .server_authenticate()
             .argument(&capabilities)
             .build();
-        let authenticate = channel.call(params)?;
+        let authenticate = channel.call(params).await?;
         let remote_capabilities = match authenticate.await? {
             call::Result::Ok(capabilities) => capabilities,
             call::Result::Err(_error) => todo!(),

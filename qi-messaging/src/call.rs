@@ -1,10 +1,8 @@
-use crate::message::{Action, Object, Service};
+use crate::message::{Action, Object, Recipient, Service};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Params<T = ()> {
-    pub service: Service,
-    pub object: Object,
-    pub action: Action,
+    pub recipient: Recipient,
     pub argument: T,
 }
 
@@ -16,18 +14,14 @@ impl<T> Params<T> {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ParamsBuilder<T = ()> {
-    service: Service,
-    object: Object,
-    action: Action,
+    recipient: Recipient,
     argument: std::marker::PhantomData<T>,
 }
 
 impl<T> Default for ParamsBuilder<T> {
     fn default() -> Self {
         Self {
-            service: Default::default(),
-            object: Default::default(),
-            action: Default::default(),
+            recipient: Default::default(),
             argument: Default::default(),
         }
     }
@@ -38,18 +32,23 @@ impl<T> ParamsBuilder<T> {
         Self::default()
     }
 
+    pub fn recipient(mut self, value: Recipient) -> Self {
+        self.recipient = value;
+        self
+    }
+
     pub fn service(mut self, value: Service) -> Self {
-        self.service = value;
+        self.recipient.service = value;
         self
     }
 
     pub fn object(mut self, value: Object) -> Self {
-        self.object = value;
+        self.recipient.object = value;
         self
     }
 
     pub fn action(mut self, value: Action) -> Self {
-        self.action = value;
+        self.recipient.action = value;
         self
     }
 
@@ -58,18 +57,14 @@ impl<T> ParamsBuilder<T> {
         T: Default,
     {
         Params {
-            service: self.service,
-            object: self.object,
-            action: self.action,
+            recipient: self.recipient,
             argument: T::default(),
         }
     }
 
     pub fn argument(self, argument: T) -> ParamsBuilderWithArg<T> {
         ParamsBuilderWithArg {
-            service: self.service,
-            object: self.object,
-            action: self.action,
+            recipient: self.recipient,
             argument,
         }
     }
@@ -77,25 +72,28 @@ impl<T> ParamsBuilder<T> {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ParamsBuilderWithArg<T = ()> {
-    service: Service,
-    object: Object,
-    action: Action,
+    recipient: Recipient,
     argument: T,
 }
 
 impl<T> ParamsBuilderWithArg<T> {
+    pub fn recipient(mut self, value: Recipient) -> Self {
+        self.recipient = value;
+        self
+    }
+
     pub fn service(mut self, value: Service) -> Self {
-        self.service = value;
+        self.recipient.service = value;
         self
     }
 
     pub fn object(mut self, value: Object) -> Self {
-        self.object = value;
+        self.recipient.object = value;
         self
     }
 
     pub fn action(mut self, value: Action) -> Self {
-        self.action = value;
+        self.recipient.action = value;
         self
     }
 
@@ -106,9 +104,7 @@ impl<T> ParamsBuilderWithArg<T> {
 
     pub fn build(self) -> Params<T> {
         Params {
-            service: self.service,
-            object: self.object,
-            action: self.action,
+            recipient: self.recipient,
             argument: self.argument,
         }
     }

@@ -1,6 +1,6 @@
 use crate::{
     format,
-    message::{self, Flags, Id, Message, Payload, Type},
+    message::{self, Flags, Id, Message, Payload, Recipient, Type},
     types::{self, Dynamic},
 };
 use derive_more::{From, Into};
@@ -31,9 +31,11 @@ impl AdvertiseCapabilities {
             id: self.id,
             ty: Type::Capabilities,
             flags: Flags::empty(),
-            service: SERVICE,
+            recipient: Recipient {
+                service: SERVICE,
+                ..Default::default()
+            },
             payload: Payload::new(to_bytes(&self.map)?),
-            ..Default::default()
         })
     }
 }
@@ -43,7 +45,7 @@ impl AdvertiseCapabilities {
 pub struct IntoMessageError(#[from] format::Error);
 
 #[derive(thiserror::Error, Debug)]
-pub enum FromMessageError {
+pub(crate) enum FromMessageError {
     #[error("message {0} has not the \"capabilities\" type")]
     BadType(Message),
 

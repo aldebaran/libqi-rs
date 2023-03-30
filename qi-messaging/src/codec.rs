@@ -1,69 +1,161 @@
-use crate::message::{self, Message};
-use std::io::Cursor;
+use crate::message::{self, EndOfInputError, HeaderReadError, HeaderWriteError, Message};
+use bytes::Buf;
+use std::error::Error;
+use tracing::{instrument, trace, warn};
 
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-pub struct MessageCodec;
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
+pub(crate) enum Decoder {
+    Header,
+    Payload(message::Header),
+}
 
-impl tokio_util::codec::Decoder for MessageCodec {
-    type Item = Message;
-    type Error = DecodeError;
+impl Decoder {
+    pub(crate) fn new() -> Self {
+        Self::Header
+    }
+}
 
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        use bytes::Buf;
-        let mut cursor = Cursor::new(src.as_ref());
+impl Default for Decoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-        use message::{HeaderReadError, NotEnoughDataError, PayloadReadError, ReadError};
-        match Message::read(&mut cursor) {
-            Err(err) => match err {
-                ReadError::Header(header_err) => match header_err {
-                    HeaderReadError::NotEnoughData(NotEnoughDataError { expected, actual }) => {
-                        src.reserve(expected - actual);
-                        Ok(None)
-                    }
-                    header_err => Err(DecodeError::from(header_err)),
-                },
-                ReadError::Payload(PayloadReadError(NotEnoughDataError { expected, actual })) => {
-                    src.reserve(expected - actual);
-                    Ok(None)
-                }
-            },
-            Ok(msg) => {
-                let pos = cursor.position() as usize;
-                src.advance(pos);
-                Ok(Some(msg))
-            }
+#[instrument(skip_all)]
+fn decode_header(src: &mut bytes::BytesMut) -> Option<message::Header> {
+    if src.len() < message::Header::SIZE {
+        src.reserve(message::Header::SIZE - src.len());
+        return None;
+    }
+
+    match message::Header::read(&mut src.as_ref()) {
+        Err(HeaderReadError::EndOfInput(err)) => unreachable!(
+            "logic error: the buffer of bytes should be large enough for a header, err={err}"
+        ),
+        Err(error @ HeaderReadError::InvalidMessageCookieValue(_)) => {
+            trace!(
+                error = &error as &dyn Error,
+                "message header decoding error, skipping magic cookie bytes"
+            );
+            src.advance(message::MagicCookie::SIZE);
+            None
+        }
+        Err(error) => {
+            trace!(
+                error = &error as &dyn Error,
+                "message header decoding error, skipping header bytes"
+            );
+            src.advance(message::Header::SIZE);
+            None
+        }
+        Ok(header) => {
+            src.advance(message::Header::SIZE);
+            Some(header)
         }
     }
 }
 
-impl tokio_util::codec::Encoder<Message> for MessageCodec {
-    type Error = EncodeError;
+#[instrument(skip_all)]
+fn decode_payload(size: usize, src: &mut bytes::BytesMut) -> Option<message::Payload> {
+    if src.len() < size {
+        src.reserve(size - src.len());
+        return None;
+    }
 
+    match message::Payload::read(size, &mut src.as_ref()) {
+        Err(message::PayloadReadError(EndOfInputError { .. })) => unreachable!("logic error: the buffer of bytes should be large enough for the payload of size {size}"),
+        Ok(payload) => {
+            src.advance(payload.size());
+            Some(payload)
+        },
+    }
+}
+
+impl tokio_util::codec::Decoder for Decoder {
+    type Item = Message;
+    type Error = std::io::Error;
+
+    #[instrument(name = "decode", skip_all)]
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let msg = loop {
+            match self {
+                Self::Header => {
+                    trace!("decoding header");
+                    match decode_header(src) {
+                        None => break None,
+                        Some(header) => *self = Self::Payload(header),
+                    }
+                }
+                Self::Payload(header) => {
+                    trace!(?header, "decoding payload");
+                    match decode_payload(header.payload_size(), src) {
+                        None => break None,
+                        Some(payload) => {
+                            let header = std::mem::take(header);
+                            *self = Self::Header;
+                            src.reserve(src.len());
+                            break Some(Message::new(header, payload));
+                        }
+                    }
+                }
+            }
+        };
+        Ok(msg)
+    }
+}
+
+#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
+pub(crate) struct Encoder;
+
+impl tokio_util::codec::Encoder<Message> for Encoder {
+    type Error = std::io::Error;
+
+    #[instrument(name = "encode", skip_all)]
     fn encode(&mut self, msg: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
         dst.reserve(msg.size());
-        msg.write(dst)?;
+        if let Err(error @ HeaderWriteError::PayloadSizeCannotBeRepresentedAsU32(_)) =
+            msg.write(dst)
+        {
+            warn!(
+                error = &error as &dyn Error,
+                "message encoding error, discarding message"
+            );
+        }
         Ok(())
     }
 }
 
-pub use message::HeaderReadError as MessageHeaderReadError;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[derive(thiserror::Error, Debug)]
-pub enum DecodeError {
-    #[error("error reading message header: {0}")]
-    MessageHeader(#[from] MessageHeaderReadError),
+    #[test]
+    fn test_decoder_not_enough_data_for_header() {
+        todo!()
+    }
 
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-}
+    #[test]
+    fn test_decoder_not_enough_data_for_payload() {
+        todo!()
+    }
 
-pub use message::HeaderWriteError as MessageHeaderWriteError;
+    #[test]
+    fn test_decoder_garbage() {
+        todo!()
+    }
 
-#[derive(thiserror::Error, Debug)]
-pub enum EncodeError {
-    #[error("error writing message header: {0}")]
-    MessageHeader(#[from] MessageHeaderWriteError),
+    #[test]
+    fn test_decoder_success() {
+        todo!()
+    }
 
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    #[test]
+    fn test_encoder_bad_payload_size() {
+        todo!()
+    }
+
+    #[test]
+    fn test_encoder_success() {
+        todo!()
+    }
 }
