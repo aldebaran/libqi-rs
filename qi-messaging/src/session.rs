@@ -1,8 +1,9 @@
 use crate::{
-    call, capabilities,
-    channel::{Call, CallEndError, CallStartError, Channel},
+    capabilities,
+    channel::{Call, CallEndError, Channel, RequestStartError},
     connection::Connection,
-    server,
+    dispatch::Dispatch,
+    server, CallResult, Params,
 };
 use std::future::Future;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -14,11 +15,25 @@ pub struct Session {
 }
 
 impl Session {
-    pub async fn call<T, R>(&self, params: call::Params<T>) -> Result<Call<R>, CallStartError>
+    pub async fn call<T, R>(&self, params: Params<T>) -> Result<Call<R>, RequestStartError>
     where
         T: serde::Serialize,
     {
         self.channel.call(params).await
+    }
+
+    pub async fn post<T>(&self, params: Params<T>) -> Result<(), RequestStartError>
+    where
+        T: serde::Serialize,
+    {
+        self.channel.post(params).await
+    }
+
+    pub async fn event<T>(&self, params: Params<T>) -> Result<(), RequestStartError>
+    where
+        T: serde::Serialize,
+    {
+        self.channel.event(params).await
     }
 }
 
@@ -26,22 +41,23 @@ pub fn connect<IO>(io: IO) -> (impl Future<Output = Result<Session, Error>>, Con
 where
     IO: AsyncRead + AsyncWrite,
 {
-    let (connection, dispatch_orders) = Connection::new(io);
-    let channel = Channel::new(dispatch_orders);
+    let (dispatch, orders) = Dispatch::new();
+    let connection = Connection::new(io, dispatch);
+    let channel = Channel::new(orders);
 
     let session = async move {
         let mut capabilities = capabilities::local();
 
         use server::ServerCall;
-        let params = call::Params::builder()
+        let params = Params::builder()
             .server_authenticate()
             .argument(&capabilities)
             .build();
         let authenticate = channel.call(params).await?;
         let remote_capabilities = match authenticate.await? {
-            call::Result::Ok(capabilities) => capabilities,
-            call::Result::Err(_error) => todo!(),
-            call::Result::Canceled => todo!(),
+            CallResult::Ok(capabilities) => capabilities,
+            CallResult::Err(_error) => todo!(),
+            CallResult::Canceled => todo!(),
         };
 
         capabilities
@@ -57,8 +73,8 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum Error {}
 
-impl From<CallStartError> for Error {
-    fn from(_: CallStartError) -> Self {
+impl From<RequestStartError> for Error {
+    fn from(_: RequestStartError) -> Self {
         todo!()
     }
 }

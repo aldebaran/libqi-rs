@@ -106,14 +106,6 @@ define_message_newtype!(pub Service(u32): read_u32_le -> ServiceReadError, put_u
 define_message_newtype!(pub Object(u32): read_u32_le -> ObjectReadError, put_u32_le);
 define_message_newtype!(pub Action(u32): read_u32_le -> ActionReadError, put_u32_le);
 
-impl Id {
-    pub fn increment(&mut self) -> Id {
-        let id = &mut self.0;
-        *id = id.wrapping_add(1);
-        Self(*id)
-    }
-}
-
 impl Version {
     const CURRENT: Self = Self(0);
 }

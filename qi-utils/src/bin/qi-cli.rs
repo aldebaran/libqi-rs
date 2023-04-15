@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use iri_string::types::UriString;
-use qi_messaging::{call, session, Action, Object, Service};
+use qi_messaging::{session, Action, CallResult, Object, Params, Service};
 use std::net::Ipv4Addr;
 use tokio::net::TcpStream;
 
@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
 
     let my_service_info = session
         .call(
-            call::Params::builder()
+            Params::builder()
                 .service(Service::from(1))
                 .object(Object::from(1))
                 .action(Action::from(100))
@@ -48,16 +48,16 @@ async fn main() -> Result<()> {
         .await?;
 
     match my_service_info.await? {
-        call::Result::Ok::<ServiceInfo>(info) => {
+        CallResult::Ok::<ServiceInfo>(info) => {
             println!("MyService: {info:?}");
         }
-        call::Result::Err(error) => bail!(error),
-        call::Result::Canceled => bail!("the call to ServiceDirectory.service has been canceled"),
+        CallResult::Err(error) => bail!(error),
+        CallResult::Canceled => bail!("the call to ServiceDirectory.service has been canceled"),
     };
 
     let services = session
         .call(
-            call::Params::builder()
+            Params::builder()
                 .service(Service::from(1))
                 .object(Object::from(1))
                 .action(Action::from(101))
@@ -66,12 +66,12 @@ async fn main() -> Result<()> {
         )
         .await?;
     let _services = match services.await? {
-        call::Result::Ok::<Vec<ServiceInfo>>(services) => {
+        CallResult::Ok::<Vec<ServiceInfo>>(services) => {
             println!("services: {services:?}");
             services
         }
-        call::Result::Err(error) => bail!(error),
-        call::Result::Canceled => bail!("the call to ServiceDirectory.services has been canceled"),
+        CallResult::Err(error) => bail!(error),
+        CallResult::Canceled => bail!("the call to ServiceDirectory.services has been canceled"),
     };
 
     Ok(())

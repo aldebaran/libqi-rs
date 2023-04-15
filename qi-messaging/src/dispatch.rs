@@ -1,95 +1,63 @@
-use crate::message::{Flags, Id, Message, Payload, Type};
-use futures::{ready, Sink, SinkExt, Stream, StreamExt};
+use crate::{
+    format,
+    message::{Flags, Id, Message, Payload, Recipient, Type},
+};
+use futures::{Sink, Stream};
 use std::{
-    cell::Cell,
     collections::hash_map::{Entry, HashMap},
-    future::Future,
     pin::Pin,
+    sync::{atomic::AtomicU32, Arc},
     task::{Context, Poll},
 };
 use sync::mpsc;
 pub use tokio::sync;
-use tracing::{instrument, trace, warn};
-
-use self::call::RequestResultSender;
+use tracing::trace;
 
 // Arbitrary value to handle backpressure in a request channel.
 const CHANNEL_SIZE: usize = 32;
 
-pub(crate) struct Dispatch<Si, St> {
-    sink: Pin<Box<Si>>,
-    stream: Pin<Box<St>>,
-    // TODO: clean shutdown: call close, handle messages in channel, then drop.
+pub(crate) struct Dispatch {
     orders: mpsc::Receiver<Order>,
-    buffered_message: Option<Message>,
-    local_pending_call_requests: HashMap<Id, call::PendingRequest>,
+    local_pending_call_requests: HashMap<(Id, Recipient), call::PendingRequest>,
     id_gen: IdGenerator,
 }
 
-impl<Si, St, InErr> Dispatch<Si, St>
-where
-    Si: Sink<Message>,
-    St: Stream<Item = Result<Message, InErr>>,
-{
-    pub(crate) fn new(sink: Si, stream: St) -> (Self, OrderSender) {
-        let (order_channel_tx, order_channel_rx) = mpsc::channel(CHANNEL_SIZE);
+impl Dispatch {
+    pub(crate) fn new() -> (Self, OrderSender) {
+        let (orders_tx, orders_rx) = mpsc::channel(CHANNEL_SIZE);
+        let id_gen = IdGenerator::default();
         (
             Self {
-                sink: Box::pin(sink),
-                stream: Box::pin(stream),
-                orders: order_channel_rx,
-                buffered_message: None,
+                orders: orders_rx,
                 local_pending_call_requests: HashMap::new(),
-                id_gen: IdGenerator::default(),
+                id_gen: id_gen.clone(),
             },
-            OrderSender(order_channel_tx),
+            OrderSender {
+                sender: orders_tx,
+                id_gen,
+            },
         )
     }
 
-    /// Pops every incoming request and send messages.
-    fn poll_orders_to_sink(&mut self, cx: &mut Context) -> Poll<Termination<InErr, Si::Error>> {
-        // Check if there was a buffered message from a previous call, and retry sending it.
-        if let Some(msg) = self.buffered_message.take() {
-            if let Err(term) = ready!(self.poll_send_msg(msg, cx)) {
-                return Poll::Ready(term);
-            }
-        }
-
-        let term = loop {
-            match self.orders.poll_recv(cx) {
-                Poll::Ready(Some(order)) => {
-                    if let Err(term) = ready!(self.poll_process_order(order, cx)) {
-                        break Some(term);
-                    }
-                }
-                Poll::Ready(None) => break Some(Termination::ClientDropped),
-                Poll::Pending => break None,
-            }
-        };
-        if let Some(term) = term {
-            return Poll::Ready(term);
-        }
-
-        match ready!(self.sink.poll_flush_unpin(cx)) {
-            Ok(()) => Poll::Pending,
-            Err(err) => Poll::Ready(Termination::OutputError(err)),
-        }
+    fn cleanup_pending_requests(&mut self) {
+        self.local_pending_call_requests
+            .retain(|_, call| !call.result.is_closed());
     }
 
-    /// Register an order and send the message for it.
-    /// Returns `Poll:Pending` if IO is not ready, `Poll::Ready(Ok(())` if the message
-    /// was sent successfully, or `Poll::Ready(Err(Termination))` if an error occurred.
-    fn poll_process_order(
-        &mut self,
-        order: Order,
-        cx: &mut Context,
-    ) -> Poll<Result<(), Termination<InErr, Si::Error>>> {
-        debug_assert!(self.buffered_message.is_none());
+    fn poll_order_message(&mut self, cx: &mut Context) -> Poll<Option<Message>> {
+        self.orders
+            .poll_recv(cx)
+            .map(|order| order.map(|order| self.order_to_message(order)))
+    }
+
+    fn order_to_message(&mut self, order: Order) -> Message {
         match order {
-            Order::CallRequest { request, result } => {
-                let id = self.id_gen.generate();
+            Order::CallRequest(request) => {
                 // Check if a request with the same ID already exists.
-                match self.local_pending_call_requests.entry(id) {
+                match self
+                    .local_pending_call_requests
+                    .entry((request.id, request.recipient))
+                {
                     Entry::Occupied(_) => {
                         panic!(
                             "logic error: a pending call request already exists with an id that was newly generated, this might be caused by inconsistent cleanup of old requests"
@@ -97,62 +65,47 @@ where
                     }
                     Entry::Vacant(entry) => {
                         // Send the request message on the channel.
-                        trace!("sending request id={id} {request:?}");
-                        let pending_call = call::PendingRequest { result };
+                        let pending_call = call::PendingRequest {
+                            result: request.result,
+                        };
                         entry.insert(pending_call);
-                        let msg = Message {
-                            id,
+                        Message {
+                            id: request.id,
                             ty: Type::Call,
                             flags: Flags::empty(),
                             recipient: request.recipient,
                             payload: Payload::new(request.payload),
-                        };
-                        self.poll_send_msg(msg, cx)
+                        }
                     }
                 }
             }
+            Order::CallCancel(cancel) => Message {
+                id: self.id_gen.generate(),
+                ty: Type::Cancel,
+                flags: Flags::empty(),
+                recipient: cancel.recipient,
+                payload: Payload::new(
+                    format::to_bytes(&cancel.id).expect("failed to serialize a message ID"),
+                ),
+            },
+            Order::Post(post) => Message {
+                id: self.id_gen.generate(),
+                ty: Type::Post,
+                flags: Flags::empty(),
+                recipient: post.recipient,
+                payload: Payload::new(post.payload),
+            },
+            Order::Event(event) => Message {
+                id: self.id_gen.generate(),
+                ty: Type::Event,
+                flags: Flags::empty(),
+                recipient: event.recipient,
+                payload: Payload::new(event.payload),
+            },
         }
     }
 
-    /// Sends a message.
-    /// Returns `Poll:Pending` if IO is not ready, `Poll::Ready(Ok(())` if the message
-    /// was sent successfully, or `Poll::Ready(Err(Termination))` if an error occurred.
-    fn poll_send_msg(
-        &mut self,
-        msg: Message,
-        cx: &mut Context,
-    ) -> Poll<Result<(), Termination<InErr, Si::Error>>> {
-        let sent = match self.sink.poll_ready_unpin(cx) {
-            Poll::Pending => {
-                self.buffered_message = Some(msg);
-                return Poll::Pending;
-            }
-            Poll::Ready(Err(err)) => return Poll::Ready(Err(Termination::OutputError(err))),
-            Poll::Ready(Ok(())) => {
-                trace!("sending message {msg}");
-                match self.sink.start_send_unpin(msg) {
-                    Err(err) => Err(Termination::OutputError(err)),
-                    Ok(()) => Ok(()),
-                }
-            }
-        };
-        Poll::Ready(sent)
-    }
-
-    /// Receives messages and resolves pending calls and notifications.
-    fn poll_stream_to_orders(&mut self, cx: &mut Context) -> Poll<Termination<InErr, Si::Error>> {
-        let term = loop {
-            match ready!(self.stream.poll_next_unpin(cx)) {
-                Some(Ok(msg)) => self.resolve_orders(msg),
-                Some(Err(err)) => break Termination::InputError(err),
-                None => break Termination::InputClosed,
-            }
-        };
-
-        Poll::Ready(term)
-    }
-
-    fn resolve_orders(&mut self, msg: Message) {
+    fn process_message(&mut self, msg: Message) {
         enum Class {
             CallResponse(call::Response),
         }
@@ -168,107 +121,217 @@ where
         };
         let id = msg.id;
         match class {
-            Class::CallResponse(resp) => {
-                match self.local_pending_call_requests.remove(&id) {
-                    Some(call) => call.send_result(Ok(resp)),
-                    None => trace!("no local call id={id} found for the response that was received, discarding response"),
+            Class::CallResponse(resp) => match self
+                .local_pending_call_requests
+                .remove(&(id, msg.recipient))
+            {
+                Some(call) => call.send_result(Ok(resp)),
+                None => {
+                    trace!(%id, "no local call found for the response that was received, discarding response")
                 }
-            }
+            },
         };
     }
 }
 
-impl<Si, St> std::fmt::Debug for Dispatch<Si, St> {
+impl std::fmt::Debug for Dispatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Debug")
     }
 }
 
-impl<Si, St, InErr> Future for Dispatch<Si, St>
-where
-    Si: Sink<Message>,
-    St: Stream<Item = Result<Message, InErr>>,
-{
-    type Output = Termination<InErr, Si::Error>;
+impl Stream for Dispatch {
+    type Item = Message;
 
-    #[instrument(name = "dispatch", skip_all)]
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Poll::Ready(term) = self.poll_orders_to_sink(cx) {
-            return Poll::Ready(term);
-        }
-        if let Poll::Ready(term) = self.poll_stream_to_orders(cx) {
-            return Poll::Ready(term);
-        }
-        Poll::Pending
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.cleanup_pending_requests();
+        self.poll_order_message(cx)
+    }
+}
+
+impl Sink<Message> for Dispatch {
+    type Error = Infallible;
+
+    fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        self.process_message(item);
+        Ok(())
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // TODO
+        Poll::Ready(Ok(()))
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
+pub(crate) enum Infallible {}
+
+#[derive(Clone, Debug)]
+pub(crate) struct OrderSender {
+    id_gen: IdGenerator,
+    sender: mpsc::Sender<Order>,
+}
+
+impl OrderSender {
+    pub(crate) async fn call_request<T>(
+        &self,
+        recipient: Recipient,
+        argument: T,
+    ) -> Result<(Id, call::RequestResultReceiver), OrderCallError>
+    where
+        T: serde::Serialize,
+    {
+        let id = self.id_gen.generate();
+        let (result_tx, result_rx) = call::result_channel();
+        self.sender
+            .send(Order::CallRequest(call::Request {
+                id,
+                recipient,
+                payload: format::to_bytes(&argument)?,
+                result: result_tx,
+            }))
+            .await?;
+        Ok((id, result_rx))
+    }
+
+    pub(crate) async fn call_cancel(
+        &self,
+        id: Id,
+        recipient: Recipient,
+    ) -> Result<(), OrderSendError> {
+        self.sender
+            .send(Order::CallCancel(call::Cancel { id, recipient }))
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn post<T>(
+        &self,
+        recipient: Recipient,
+        argument: T,
+    ) -> Result<(), OrderPostError>
+    where
+        T: serde::Serialize,
+    {
+        self.sender
+            .send(Order::Post(Post {
+                recipient,
+                payload: format::to_bytes(&argument)?,
+            }))
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn event<T>(
+        &self,
+        recipient: Recipient,
+        argument: T,
+    ) -> Result<(), OrderPostError>
+    where
+        T: serde::Serialize,
+    {
+        self.sender
+            .send(Order::Event(Event {
+                recipient,
+                payload: format::to_bytes(&argument)?,
+            }))
+            .await?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OrderCallError {
+    #[error("send error")]
+    Send,
+
+    #[error("failed to format call argument into a message payload")]
+    PayloadFormat(#[from] format::Error),
+}
+
+pub(crate) type OrderPostError = OrderCallError;
+
+impl From<mpsc::error::SendError<Order>> for OrderCallError {
+    fn from(err: mpsc::error::SendError<Order>) -> Self {
+        let mpsc::error::SendError(_order) = err;
+        Self::Send
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("send error")]
+pub(crate) struct OrderSendError;
+
+impl From<mpsc::error::SendError<Order>> for OrderSendError {
+    fn from(err: mpsc::error::SendError<Order>) -> Self {
+        let mpsc::error::SendError(_order) = err;
+        Self
     }
 }
 
 #[derive(Debug)]
-pub(crate) enum Termination<I, O> {
-    ClientDropped,
-    InputClosed,
-    InputError(I),
-    OutputError(O),
+enum Order {
+    CallRequest(call::Request),
+    CallCancel(call::Cancel),
+    Post(Post),
+    Event(Event),
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct OrderSender(mpsc::Sender<Order>);
-
-impl OrderSender {
-    pub(crate) async fn send_call_request(
-        &self,
-        request: call::Request,
-    ) -> Result<call::RequestResultReceiver, OrderSendError> {
-        let (result_tx, result_rx) = call::result_channel();
-        self.0
-            .send(Order::CallRequest {
-                request,
-                result: result_tx,
-            })
-            .await
-            .map(|()| result_rx)
-    }
+struct IdGenerator {
+    previous: Arc<AtomicU32>,
 }
-
-pub(crate) type OrderSendError = mpsc::error::SendError<Order>;
-
-#[derive(Debug)]
-pub(crate) enum Order {
-    CallRequest {
-        request: call::Request,
-        result: RequestResultSender,
-    },
-}
-
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-struct IdGenerator(Cell<Id>);
 
 impl IdGenerator {
     fn generate(&self) -> Id {
-        // TODO: use `Cell::update` when available.
-        let mut id = self.0.get();
-        id.increment();
-        self.0.set(id);
-        id
+        let val = self
+            .previous
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Id::new(val)
+    }
+}
+
+impl Default for IdGenerator {
+    fn default() -> Self {
+        Self {
+            previous: Arc::new(AtomicU32::new(1)),
+        }
     }
 }
 
 pub(crate) mod call {
-    use crate::message::Recipient;
+    use crate::message::{Id, Recipient};
     use tokio::sync::oneshot;
     use tracing::trace;
 
-    pub(crate) struct Request {
-        pub(crate) recipient: Recipient,
-        pub(crate) payload: Vec<u8>, // TODO: use types::Value ? it necessitates copying data which is
+    pub(super) struct Request {
+        pub(super) id: Id,
+        pub(super) recipient: Recipient,
+        pub(super) payload: Vec<u8>,
+        pub(super) result: RequestResultSender,
     }
 
     impl std::fmt::Debug for Request {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_struct("Request")
+                .field("id", &self.id)
                 .field("recipient", &self.recipient)
                 .finish_non_exhaustive()
         }
+    }
+
+    #[derive(Debug)]
+    pub(super) struct Cancel {
+        pub(super) id: Id,
+        pub(super) recipient: Recipient,
     }
 
     #[derive(Debug)]
@@ -301,7 +364,7 @@ pub(crate) mod call {
         }
     }
 
-    pub(super) fn result_channel() -> (oneshot::Sender<RequestResult>, RequestResultReceiver) {
+    pub(super) fn result_channel() -> (RequestResultSender, RequestResultReceiver) {
         oneshot::channel()
     }
 
@@ -311,15 +374,29 @@ pub(crate) mod call {
     pub(crate) type RequestResult = Result<Response, Error>;
     pub(super) type RequestResultSender = oneshot::Sender<RequestResult>;
     pub(crate) type RequestResultReceiver = oneshot::Receiver<RequestResult>;
+
     pub(crate) type RequestResultRecvError = oneshot::error::RecvError;
+}
+
+#[derive(Debug)]
+struct Post {
+    recipient: Recipient,
+    payload: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct Event {
+    recipient: Recipient,
+    payload: Vec<u8>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::message::{Action, Message, Object, Recipient, Service};
-    use futures::channel::mpsc;
-    use tokio::{spawn, sync::oneshot};
+    use assert_matches::assert_matches;
+    use futures::{poll, FutureExt, SinkExt, StreamExt};
+    use tokio::sync::oneshot;
 
     #[test]
     fn test_message_id_generator() {
@@ -329,50 +406,27 @@ mod tests {
         assert_eq!(gen.generate(), Id::new(3));
     }
 
-    #[test]
-    fn test_dispatch_receive_garbage_discarded() {
-        todo!()
-    }
+    const RECIPIENT: Recipient = Recipient {
+        service: Service::new(1),
+        object: Object::new(2),
+        action: Action::new(3),
+    };
 
-    #[tokio::test]
-    async fn test_dispatch_send_call_receive_response_ok() {
-        let (client_sink, mut server_stream) = mpsc::channel(1);
-        let (mut server_sink, client_stream) = mpsc::channel::<Result<Message, ()>>(1);
+    async fn send_call(
+        dispatch: &mut Dispatch,
+        client: &OrderSender,
+    ) -> (Id, call::RequestResultReceiver) {
+        let (id, mut resp_receiver) = client.call_request(RECIPIENT, "hello").await.unwrap();
 
-        let (dispatch, dispatch_client) = Dispatch::new(client_sink, client_stream);
-        let dispatch = spawn(dispatch);
-
-        let service = Service::new(1);
-        let object = Object::new(2);
-        let action = Action::new(3);
-        let payload = vec![1, 2, 3];
-
-        let mut resp_receiver = dispatch_client
-            .send_call_request(call::Request {
-                recipient: Recipient {
-                    service,
-                    object,
-                    action,
-                },
-                payload: payload.clone(),
-            })
-            .await
-            .unwrap();
-
-        // The server must have received the call.
-        let call_message = server_stream.next().await.unwrap();
+        // The message is available.
         assert_eq!(
-            call_message,
+            dispatch.next().await.unwrap(),
             Message {
                 id: Id::from(1),
                 ty: Type::Call,
                 flags: Flags::empty(),
-                recipient: Recipient {
-                    service,
-                    object,
-                    action
-                },
-                payload: vec![1, 2, 3].into()
+                recipient: RECIPIENT,
+                payload: vec![5, 0, 0, 0, b'h', b'e', b'l', b'l', b'o'].into(),
             }
         );
 
@@ -382,52 +436,193 @@ mod tests {
             Err(oneshot::error::TryRecvError::Empty)
         );
 
-        // The server sends the reply.
-        server_sink
-            .send(Ok(Message {
-                id: Id::from(1),
+        (id, resp_receiver)
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_drop_dispatch_causes_stream_end() {
+        let (mut dispatch, client) = Dispatch::new();
+        drop(client);
+        assert_eq!(dispatch.next().await, None);
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_receive_garbage_discarded() {
+        let (mut dispatch, _client) = Dispatch::new();
+
+        // Unwanted messages are discarded by the dispatch.
+        dispatch
+            .send(Message {
+                id: Id::from(321),
+                ty: Type::Call,
+                flags: Flags::empty(),
+                recipient: RECIPIENT,
+                payload: vec![1, 2, 3].into(),
+            })
+            .await
+            .unwrap();
+        dispatch
+            .send(Message {
+                id: Id::from(3829),
                 ty: Type::Reply,
                 flags: Flags::empty(),
-                recipient: Recipient {
-                    service,
-                    object,
-                    action,
-                },
+                recipient: RECIPIENT,
+                payload: vec![1, 2, 3].into(),
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_send_call_receive_response_ok() {
+        let (mut dispatch, client) = Dispatch::new();
+
+        let (id, result) = send_call(&mut dispatch, &client).await;
+
+        dispatch
+            .send(Message {
+                id,
+                ty: Type::Reply,
+                flags: Flags::empty(),
+                recipient: RECIPIENT,
                 payload: vec![4, 5, 6].into(),
-            }))
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            result.await.unwrap(),
+            Ok(call::Response::Reply(vec![4, 5, 6]))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_send_call_receive_response_error() {
+        let (mut dispatch, client) = Dispatch::new();
+
+        let (id, result) = send_call(&mut dispatch, &client).await;
+
+        dispatch
+            .send(Message {
+                id,
+                ty: Type::Error,
+                flags: Flags::empty(),
+                recipient: RECIPIENT,
+                payload: vec![4, 5, 6].into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            result.await.unwrap(),
+            Ok(call::Response::Error(vec![4, 5, 6]))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_send_call_receive_response_canceled() {
+        let (mut dispatch, client) = Dispatch::new();
+
+        let (id, result) = send_call(&mut dispatch, &client).await;
+
+        dispatch
+            .send(Message {
+                id,
+                ty: Type::Canceled,
+                flags: Flags::empty(),
+                recipient: RECIPIENT,
+                payload: vec![4, 5, 6].into(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(result.await.unwrap(), Ok(call::Response::Canceled));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_send_call_receive_response_bad_recipient() {
+        let (mut dispatch, client) = Dispatch::new();
+
+        let (id, result) = send_call(&mut dispatch, &client).await;
+
+        let recipient = Recipient {
+            service: Service::from(100),
+            object: Object::from(99),
+            action: Action::from(98),
+        };
+        assert_ne!(recipient, RECIPIENT);
+
+        dispatch
+            .send(Message {
+                id,
+                ty: Type::Reply,
+                flags: Flags::empty(),
+                recipient,
+                payload: vec![4, 5, 6].into(),
+            })
             .await
             .unwrap();
 
-        // The response arrives.
-        let resp = resp_receiver.await.unwrap();
-        assert_eq!(resp, Ok(call::Response::Reply(vec![4, 5, 6])));
-
-        drop(dispatch_client);
-        dispatch.await.unwrap();
+        assert_matches!(poll!(result.boxed()), Poll::Pending);
     }
 
-    #[test]
-    fn test_dispatch_send_call_receive_response_error() {
-        todo!()
+    #[tokio::test]
+    async fn test_dispatch_send_call_drop_result_response_discarded() {
+        let (mut dispatch, client) = Dispatch::new();
+        let (id, result) = send_call(&mut dispatch, &client).await;
+        drop(result);
+        dispatch
+            .send(Message {
+                id,
+                ty: Type::Reply,
+                flags: Flags::empty(),
+                recipient: RECIPIENT,
+                payload: vec![4, 5, 6].into(),
+            })
+            .await
+            .unwrap();
     }
 
-    #[test]
-    fn test_dispatch_send_call_receive_response_canceled() {
-        todo!()
+    #[tokio::test]
+    async fn test_dispatch_send_call_drop_dispatch_causes_error() {
+        let (mut dispatch, client) = Dispatch::new();
+        let (_id, result) = send_call(&mut dispatch, &client).await;
+        drop(dispatch);
+        assert!(result.await.is_err());
     }
 
-    #[test]
-    fn test_dispatch_send_call_receive_response_bad_recipient() {
-        todo!()
+    #[tokio::test]
+    async fn test_dispatch_call_cancel() {
+        let (mut dispatch, client) = Dispatch::new();
+
+        client.call_cancel(Id::from(32), RECIPIENT).await.unwrap();
+
+        let msg = dispatch.next().await.unwrap();
+        assert_eq!(
+            msg,
+            Message {
+                id: Id::from(1),
+                ty: Type::Cancel,
+                flags: Flags::empty(),
+                recipient: RECIPIENT,
+                payload: vec![32, 0, 0, 0].into(), // serialized ID of the original message
+            }
+        );
     }
 
-    #[test]
-    fn test_dispatch_send_call_cancel() {
-        todo!()
-    }
+    #[tokio::test]
+    async fn test_dispatch_post() {
+        let (mut dispatch, client) = Dispatch::new();
 
-    #[test]
-    fn test_dispatch_send_call_drop_dispatch_causes_error() {
-        todo!()
+        client.post(RECIPIENT, "hello").await.unwrap();
+
+        let msg = dispatch.next().await.unwrap();
+        assert_eq!(
+            msg,
+            Message {
+                id: Id::from(1),
+                ty: Type::Post,
+                flags: Flags::empty(),
+                recipient: RECIPIENT,
+                payload: vec![5, 0, 0, 0, b'h', b'e', b'l', b'l', b'o'].into(),
+            }
+        );
     }
 }
