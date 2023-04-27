@@ -19,9 +19,9 @@
 //! ║ │            version            │     type      │    flags      │ ║
 //! ║ ├───────────────────────────────┴───────────────┴───────────────┤ ║
 //! ║ │                            service                            │ ║
-//! ║ ├───────────────────────────────────────────────────────────────┤ ║
+//! ║ ├ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ┤ ║
 //! ║ │                            object                             │ ║
-//! ║ ├───────────────────────────────────────────────────────────────┤ ║
+//! ║ ├ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ┤ ║
 //! ║ │                            action                             │ ║
 //! ╠═╧═══════════════════════════════════════════════════════════════╧═╣
 //! ║                             PAYLOAD                               ║
@@ -35,128 +35,43 @@
 //!  - version: 2 bytes unsigned integer, little endian
 //!  - type: 1 byte unsigned integer
 //!  - flags: 1 byte unsigned integer
-//!  - service: 4 bytes unsigned integer, little endian
-//!  - object: 4 bytes unsigned integer, little endian
-//!  - action: 4 bytes unsigned integer, little endian
+//!  - subject, 3 x 4 bytes unsigned integer, all little endian
+//!    - service
+//!    - object
+//!    - action
 //!
 //!  The total header size is therefore 28 bytes.
 
-use bytes::{Buf, BufMut};
+use crate::{capabilities, format, types::Dynamic};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use tracing::{instrument, warn};
 
-macro_rules! define_message_newtype {
-    ($vis:vis $name:ident($t:ty): $read:tt -> $readerr:ident, $write:tt) => {
-        #[derive(
-            Default,
-            Debug,
-            Hash,
-            PartialEq,
-            Eq,
-            PartialOrd,
-            Ord,
-            Clone,
-            Copy,
-            derive_more::From,
-            derive_more::Into,
-            derive_more::Display,
-            serde::Serialize,
-            serde::Deserialize,
-        )]
-        #[serde(transparent)]
-        $vis struct $name($t);
+macro_rules! impl_u32_le_field {
+    ($($name:ident),+) => {
+        $(
+            impl $name {
+                const SIZE: usize = std::mem::size_of::<u32>();
 
-        impl $name {
-            const SIZE: usize = std::mem::size_of::<$t>();
+                pub const fn new(value: u32) -> Self {
+                    Self(value)
+                }
 
-            #[allow(dead_code)]
-            $vis const fn new(val: $t) -> Self {
-                Self(val)
+                fn read<B>(buf: &mut B) -> Self
+                where
+                    B: Buf,
+                {
+                    Self(buf.get_u32_le())
+                }
+
+                fn write<B>(self, buf: &mut B)
+                where
+                    B: BufMut,
+                {
+                    buf.put_u32_le(self.0)
+                }
             }
-
-            #[allow(dead_code)]
-            $vis const fn from(val: $t) -> Self {
-                Self(val)
-            }
-
-            fn read<B>(buf: &mut B) -> Result<Self, $readerr>
-            where
-                B: Buf,
-            {
-                Ok(Self($read(buf)?))
-            }
-
-            fn write<B>(self, buf: &mut B)
-            where
-                B: BufMut,
-            {
-                buf.$write(self.0)
-            }
-        }
-
-        #[derive(
-            Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error,
-        )]
-        #[error(transparent)]
-        struct $readerr(#[from] EndOfInputError);
-    };
-}
-
-define_message_newtype!(pub(crate) Id(u32): read_u32_le -> IdReadError, put_u32_le);
-define_message_newtype!(Version(u16): read_u16_le -> VersionReadError, put_u16_le);
-define_message_newtype!(pub Service(u32): read_u32_le -> ServiceReadError, put_u32_le);
-define_message_newtype!(pub Object(u32): read_u32_le -> ObjectReadError, put_u32_le);
-define_message_newtype!(pub Action(u32): read_u32_le -> ActionReadError, put_u32_le);
-
-impl Version {
-    const CURRENT: Self = Self(0);
-}
-
-#[derive(
-    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
-)]
-#[display(fmt = "action:{action}@object:{object}@service:{service}")]
-pub struct Recipient {
-    pub service: Service,
-    pub object: Object,
-    pub action: Action,
-}
-
-#[derive(
-    Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::Display,
-)]
-#[display(fmt = "{:#x}", "Self::VALUE")]
-pub(crate) struct MagicCookie;
-
-impl MagicCookie {
-    pub(crate) const SIZE: usize = std::mem::size_of::<u32>();
-    const VALUE: u32 = 0x42dead42;
-
-    fn read<B>(buf: &mut B) -> Result<Self, MagicCookieReadError>
-    where
-        B: Buf,
-    {
-        let value = read_u32_be(buf)?;
-        if value == Self::VALUE {
-            Ok(MagicCookie)
-        } else {
-            Err(MagicCookieReadError::InvalidValue(value))
-        }
+        )+
     }
-
-    fn write<B>(self, buf: &mut B)
-    where
-        B: BufMut,
-    {
-        buf.put_u32(Self::VALUE)
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-enum MagicCookieReadError {
-    #[error("invalid message magic cookie value {0:x}")]
-    InvalidValue(u32),
-
-    #[error(transparent)]
-    EndOfInput(#[from] EndOfInputError),
 }
 
 #[derive(
@@ -172,31 +87,224 @@ enum MagicCookieReadError {
     derive_more::From,
     derive_more::Into,
     derive_more::Display,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[serde(transparent)]
+pub(crate) struct Id(pub u32);
+
+#[derive(
+    Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::Display,
+)]
+struct Version(u16);
+
+impl Version {
+    const SIZE: usize = std::mem::size_of::<u16>();
+    const CURRENT: Self = Self(0);
+
+    fn read<B>(buf: &mut B) -> Self
+    where
+        B: Buf,
+    {
+        Self(buf.get_u16_le())
+    }
+
+    fn write<B>(self, buf: &mut B)
+    where
+        B: BufMut,
+    {
+        buf.put_u16_le(self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display)]
+pub enum Subject {
+    Server(ServerSubject),
+    Service(ServiceSubject),
+}
+
+impl Default for Subject {
+    fn default() -> Self {
+        Self::Server(ServerSubject::default())
+    }
+}
+
+impl Subject {
+    const SIZE: usize = 3 * std::mem::size_of::<u32>();
+
+    pub const fn new(service: Service, object: Object, action: Action) -> Self {
+        match (service, object) {
+            (ServerSubject::SERVICE, ServerSubject::OBJECT) => Self::Server(ServerSubject(action)),
+            _ => Self::Service(ServiceSubject(service, object, action)),
+        }
+    }
+
+    pub const fn server(action: Action) -> Self {
+        Self::Server(ServerSubject(action))
+    }
+
+    fn read<B>(buf: &mut B) -> Self
+    where
+        B: Buf,
+    {
+        let service = Service::read(buf);
+        let object = Object::read(buf);
+        let action = Action::read(buf);
+        Self::new(service, object, action)
+    }
+
+    fn write<B>(self, buf: &mut B)
+    where
+        B: BufMut,
+    {
+        self.service().write(buf);
+        self.object().write(buf);
+        self.action().write(buf);
+    }
+
+    pub const fn service(&self) -> Service {
+        match self {
+            Subject::Server(s) => s.service(),
+            Subject::Service(s) => s.service(),
+        }
+    }
+
+    pub const fn object(&self) -> Object {
+        match self {
+            Subject::Server(s) => s.object(),
+            Subject::Service(s) => s.object(),
+        }
+    }
+
+    pub const fn action(&self) -> Action {
+        match self {
+            Subject::Server(s) => s.action(),
+            Subject::Service(s) => s.action(),
+        }
+    }
+}
+
+#[derive(
+    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
+)]
+#[display(fmt = "server({_0})")]
+pub struct ServerSubject(Action);
+
+impl ServerSubject {
+    const SERVICE: Service = Service(0);
+    const OBJECT: Object = Object(0);
+
+    pub const fn service(&self) -> Service {
+        Self::SERVICE
+    }
+
+    pub const fn object(&self) -> Object {
+        Self::OBJECT
+    }
+
+    pub const fn action(&self) -> Action {
+        self.0
+    }
+}
+
+#[derive(
+    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
+)]
+#[display(fmt = "({_0}, {_1}, {_2})")]
+pub struct ServiceSubject(Service, Object, Action);
+
+impl ServiceSubject {
+    pub const fn service(&self) -> Service {
+        self.0
+    }
+
+    pub const fn object(&self) -> Object {
+        self.1
+    }
+
+    pub const fn action(&self) -> Action {
+        self.2
+    }
+}
+
+#[derive(
+    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
+)]
+pub struct Service(u32);
+
+#[derive(
+    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
+)]
+pub struct Object(u32);
+
+#[derive(
+    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
+)]
+pub struct Action(u32);
+
+impl Action {}
+
+impl_u32_le_field!(Id, Service, Object, Action);
+
+#[derive(
+    Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::UpperHex,
+)]
+#[upper_hex(fmt = "{:#X}", "Self::VALUE")]
+struct MagicCookie;
+
+impl MagicCookie {
+    const SIZE: usize = std::mem::size_of::<u32>();
+    const VALUE: u32 = 0x42dead42;
+
+    fn read<B>(buf: &mut B) -> Result<Self, InvalidMagicCookieValueError>
+    where
+        B: Buf,
+    {
+        let value = buf.get_u32();
+        if value == Self::VALUE {
+            Ok(MagicCookie)
+        } else {
+            Err(InvalidMagicCookieValueError(value))
+        }
+    }
+
+    fn write<B>(self, buf: &mut B)
+    where
+        B: BufMut,
+    {
+        buf.put_u32(Self::VALUE)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
+#[error("invalid message magic cookie value {0:x}")]
+pub(crate) struct InvalidMagicCookieValueError(u32);
+
+#[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 struct PayloadSize(usize);
 
 impl PayloadSize {
     const SIZE: usize = std::mem::size_of::<u32>();
 
-    fn read<B>(buf: &mut B) -> Result<Self, PayloadSizeReadError>
+    fn read<B>(buf: &mut B) -> Result<Self, PayloadCannotBeRepresentedAsUSizeError>
     where
         B: Buf,
     {
-        let size = read_u32_le(buf)?;
+        let size = buf.get_u32_le();
         if size > (usize::MAX as u32) {
-            return Err(PayloadSizeReadError::CannotBeRepresentedAsUSize(size));
+            return Err(PayloadCannotBeRepresentedAsUSizeError(size));
         }
         let size = size as usize;
         Ok(Self(size))
     }
 
-    fn write<B>(self, buf: &mut B) -> Result<(), PayloadSizeWriteError>
+    fn write<B>(self, buf: &mut B) -> Result<(), PayloadCannotBeRepresentedAsU32Error>
     where
         B: BufMut,
     {
         let size = self.0;
         if size > (u32::MAX as usize) {
-            return Err(PayloadSizeWriteError::CannotBeRepresentedAsU32(size));
+            return Err(PayloadCannotBeRepresentedAsU32Error(size));
         }
         let size = size as u32;
         buf.put_u32_le(size);
@@ -205,25 +313,18 @@ impl PayloadSize {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-enum PayloadSizeReadError {
-    #[error(
-        "message payload size {0} cannot be represented as an usize (the maximum for this system is {})",
-        usize::MAX
-    )]
-    CannotBeRepresentedAsUSize(u32),
-
-    #[error(transparent)]
-    EndOfInput(#[from] EndOfInputError),
-}
+#[error(
+    "message payload size {0} cannot be represented as an usize (the maximum for this system is {})",
+    usize::MAX
+)]
+pub(crate) struct PayloadCannotBeRepresentedAsUSizeError(u32);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-enum PayloadSizeWriteError {
-    #[error(
-        "message payload size {0} cannot be represented as an u32 (the maximum for this system is {})",
-        u32::MAX
-    )]
-    CannotBeRepresentedAsU32(usize),
-}
+#[error(
+    "message payload size {0} cannot be represented as an u32 (the maximum for this system is {})",
+    u32::MAX
+)]
+pub(crate) struct PayloadCannotBeRepresentedAsU32Error(usize);
 
 #[derive(
     Clone,
@@ -239,7 +340,7 @@ enum PayloadSizeWriteError {
     num_derive::ToPrimitive,
 )]
 #[repr(u8)]
-pub(crate) enum Type {
+pub(crate) enum Kind {
     #[display(fmt = "call")]
     Call = 1,
     #[display(fmt = "reply")]
@@ -258,16 +359,14 @@ pub(crate) enum Type {
     Canceled = 8,
 }
 
-impl Type {
+impl Kind {
     const SIZE: usize = std::mem::size_of::<u8>();
 
-    fn read<B>(buf: &mut B) -> Result<Self, TypeReadError>
+    fn read<B>(buf: &mut B) -> Result<Self, InvalidKindValueError>
     where
         B: Buf,
     {
-        let ty = read_u8(buf)?;
-        let ty = Type::try_from(ty).map_err(|err| TypeReadError::InvalidValue(err.0))?;
-        Ok(ty)
+        buf.get_u8().try_into()
     }
 
     fn write<B>(self, buf: &mut B)
@@ -278,40 +377,31 @@ impl Type {
     }
 }
 
-impl Default for Type {
+impl Default for Kind {
     fn default() -> Self {
         Self::Call
     }
 }
 
-impl From<Type> for u8 {
-    fn from(ty: Type) -> u8 {
+impl From<Kind> for u8 {
+    fn from(kind: Kind) -> u8 {
         use num_traits::ToPrimitive;
-        ty.to_u8().unwrap()
+        kind.to_u8().unwrap()
     }
 }
 
-impl std::convert::TryFrom<u8> for Type {
-    type Error = InvalidTypeValueError;
+impl std::convert::TryFrom<u8> for Kind {
+    type Error = InvalidKindValueError;
 
-    fn try_from(value: u8) -> Result<Self, InvalidTypeValueError> {
+    fn try_from(value: u8) -> Result<Self, InvalidKindValueError> {
         use num_traits::FromPrimitive;
-        Self::from_u8(value).ok_or(InvalidTypeValueError(value))
+        Self::from_u8(value).ok_or(InvalidKindValueError(value))
     }
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, thiserror::Error)]
-#[error("invalid message type value {0}")]
-pub(crate) struct InvalidTypeValueError(u8);
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-enum TypeReadError {
-    #[error("{}", InvalidTypeValueError(*.0))]
-    InvalidValue(u8),
-
-    #[error(transparent)]
-    EndOfInput(#[from] EndOfInputError),
-}
+#[error("invalid message kind value {0}")]
+pub(crate) struct InvalidKindValueError(u8);
 
 bitflags::bitflags! {
     #[derive(Default, derive_more::Display)]
@@ -325,12 +415,20 @@ bitflags::bitflags! {
 impl Flags {
     const SIZE: usize = std::mem::size_of::<u8>();
 
-    fn read<B>(buf: &mut B) -> Result<Self, FlagsReadError>
+    fn set_dynamic_payload(&mut self, value: bool) {
+        self.set(Self::DYNAMIC_PAYLOAD, value);
+    }
+
+    fn set_return_type(&mut self, value: bool) {
+        self.set(Self::RETURN_TYPE, value);
+    }
+
+    fn read<B>(buf: &mut B) -> Result<Self, InvalidFlagsValueError>
     where
         B: Buf,
     {
-        let byte = read_u8(buf)?;
-        let flags = Self::try_from(byte).map_err(|err| FlagsReadError::InvalidValue(err.0))?;
+        let byte = buf.get_u8();
+        let flags = Self::try_from(byte)?;
         Ok(flags)
     }
 
@@ -352,26 +450,15 @@ impl std::convert::TryFrom<u8> for Flags {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error("invalid message flags value {0}")]
-pub(crate) struct InvalidFlagsValueError(u8);
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-enum FlagsReadError {
-    #[error("{}", InvalidFlagsValueError(*.0))]
-    InvalidValue(u8),
-
-    #[error(transparent)]
-    EndOfInput(#[from] EndOfInputError),
-}
+pub struct InvalidFlagsValueError(u8);
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub(crate) struct Header {
+struct Header {
     id: Id,
-    ty: Type,
-    payload_size: PayloadSize,
+    kind: Kind,
+    payload_size: usize,
     flags: Flags,
-    service: Service,
-    object: Object,
-    action: Action,
+    subject: Subject,
 }
 
 impl Header {
@@ -380,40 +467,34 @@ impl Header {
     const PAYLOAD_SIZE_OFFSET: usize = Self::ID_OFFSET + Id::SIZE;
     const VERSION_OFFSET: usize = Self::PAYLOAD_SIZE_OFFSET + PayloadSize::SIZE;
     const TYPE_OFFSET: usize = Self::VERSION_OFFSET + Version::SIZE;
-    const FLAGS_OFFSET: usize = Self::TYPE_OFFSET + Type::SIZE;
-    const SERVICE_OFFSET: usize = Self::FLAGS_OFFSET + Flags::SIZE;
-    const OBJECT_OFFSET: usize = Self::SERVICE_OFFSET + Service::SIZE;
-    const ACTION_OFFSET: usize = Self::OBJECT_OFFSET + Object::SIZE;
-    pub(crate) const SIZE: usize = Self::ACTION_OFFSET + Action::SIZE;
+    const FLAGS_OFFSET: usize = Self::TYPE_OFFSET + Kind::SIZE;
+    const SUBJECT_OFFSET: usize = Self::FLAGS_OFFSET + Flags::SIZE;
+    const SIZE: usize = Self::SUBJECT_OFFSET + Subject::SIZE;
 
-    pub(crate) fn read<B>(buf: &mut B) -> Result<Self, HeaderReadError>
+    fn read<B>(buf: &mut B) -> Result<Self, ReadHeaderError>
     where
         B: Buf,
     {
         MagicCookie::read(buf)?;
-        let id = Id::read(buf)?;
-        let payload_size = PayloadSize::read(buf)?;
-        let version = Version::read(buf)?;
+        let id = Id::read(buf);
+        let payload_size = PayloadSize::read(buf)?.0;
+        let version = Version::read(buf);
         if version != Version::CURRENT {
-            return Err(HeaderReadError::UnsupportedVersion(version.into()));
+            return Err(ReadHeaderError::UnsupportedVersion(version.0));
         }
-        let ty = Type::read(buf)?;
+        let ty = Kind::read(buf)?;
         let flags = Flags::read(buf)?;
-        let service = Service::read(buf)?;
-        let object = Object::read(buf)?;
-        let action = Action::read(buf)?;
+        let subject = Subject::read(buf);
         Ok(Self {
             id,
-            ty,
+            kind: ty,
             payload_size,
             flags,
-            service,
-            object,
-            action,
+            subject,
         })
     }
 
-    pub(crate) fn write<B>(self, buf: &mut B) -> Result<(), HeaderWriteError>
+    fn write<B>(self, buf: &mut B) -> Result<(), WriteHeaderError>
     where
         B: BufMut,
     {
@@ -421,322 +502,389 @@ impl Header {
         let mut hbuf_ref = hbuf.as_mut();
         MagicCookie.write(&mut hbuf_ref);
         self.id.write(&mut hbuf_ref);
-        self.payload_size.write(&mut hbuf_ref)?;
+        PayloadSize(self.payload_size).write(&mut hbuf_ref)?;
         Version::CURRENT.write(&mut hbuf_ref);
-        self.ty.write(&mut hbuf_ref);
+        self.kind.write(&mut hbuf_ref);
         self.flags.write(&mut hbuf_ref);
-        self.service.write(&mut hbuf_ref);
-        self.object.write(&mut hbuf_ref);
-        self.action.write(&mut hbuf_ref);
+        self.subject.write(&mut hbuf_ref);
         buf.put(hbuf.as_ref());
         Ok(())
-    }
-
-    pub(crate) fn payload_size(&self) -> usize {
-        self.payload_size.0
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub(crate) enum HeaderReadError {
+pub(crate) enum ReadHeaderError {
     #[error(transparent)]
-    EndOfInput(#[from] EndOfInputError),
+    MagicCookie(#[from] InvalidMagicCookieValueError),
 
-    #[error("{}", MagicCookieReadError::InvalidValue(*.0))]
-    InvalidMessageCookieValue(u32),
-
-    #[error("{}", PayloadSizeReadError::CannotBeRepresentedAsUSize(*.0))]
-    PayloadSizeCannotBeRepresentedAsUSize(u32),
+    #[error(transparent)]
+    PayloadSize(#[from] PayloadCannotBeRepresentedAsUSizeError),
 
     #[error("unsupported message version {0}")]
     UnsupportedVersion(u16),
 
-    #[error("{}", TypeReadError::InvalidValue(*.0))]
-    InvalidTypeValue(u8),
+    #[error(transparent)]
+    Kind(#[from] InvalidKindValueError),
 
-    #[error("{}", FlagsReadError::InvalidValue(*.0))]
-    InvalidFlagsValue(u8),
-}
-
-impl From<MagicCookieReadError> for HeaderReadError {
-    fn from(e: MagicCookieReadError) -> Self {
-        match e {
-            MagicCookieReadError::InvalidValue(v) => Self::InvalidMessageCookieValue(v),
-            MagicCookieReadError::EndOfInput(EndOfInputError { actual, .. }) => {
-                Self::EndOfInput(EndOfInputError {
-                    expected: Header::SIZE,
-                    actual,
-                })
-            }
-        }
-    }
-}
-
-impl From<IdReadError> for HeaderReadError {
-    fn from(e: IdReadError) -> Self {
-        let IdReadError(EndOfInputError { actual, .. }) = e;
-        Self::EndOfInput(EndOfInputError {
-            expected: Header::SIZE,
-            actual: Header::ID_OFFSET + actual,
-        })
-    }
-}
-
-impl From<PayloadSizeReadError> for HeaderReadError {
-    fn from(e: PayloadSizeReadError) -> Self {
-        match e {
-            PayloadSizeReadError::CannotBeRepresentedAsUSize(s) => {
-                Self::PayloadSizeCannotBeRepresentedAsUSize(s)
-            }
-            PayloadSizeReadError::EndOfInput(EndOfInputError { actual, .. }) => {
-                Self::EndOfInput(EndOfInputError {
-                    expected: Header::SIZE,
-                    actual: Header::PAYLOAD_SIZE_OFFSET + actual,
-                })
-            }
-        }
-    }
-}
-
-impl From<VersionReadError> for HeaderReadError {
-    fn from(e: VersionReadError) -> Self {
-        let VersionReadError(EndOfInputError { actual, .. }) = e;
-        Self::EndOfInput(EndOfInputError {
-            expected: Header::SIZE,
-            actual: Header::VERSION_OFFSET + actual,
-        })
-    }
-}
-
-impl From<TypeReadError> for HeaderReadError {
-    fn from(e: TypeReadError) -> Self {
-        match e {
-            TypeReadError::InvalidValue(v) => Self::InvalidTypeValue(v),
-            TypeReadError::EndOfInput(EndOfInputError { actual, .. }) => {
-                Self::EndOfInput(EndOfInputError {
-                    expected: Header::SIZE,
-                    actual: Header::TYPE_OFFSET + actual,
-                })
-            }
-        }
-    }
-}
-
-impl From<FlagsReadError> for HeaderReadError {
-    fn from(e: FlagsReadError) -> Self {
-        match e {
-            FlagsReadError::InvalidValue(v) => Self::InvalidFlagsValue(v),
-            FlagsReadError::EndOfInput(EndOfInputError { actual, .. }) => {
-                Self::EndOfInput(EndOfInputError {
-                    expected: Header::SIZE,
-                    actual: Header::FLAGS_OFFSET + actual,
-                })
-            }
-        }
-    }
-}
-
-impl From<ServiceReadError> for HeaderReadError {
-    fn from(e: ServiceReadError) -> Self {
-        let ServiceReadError(EndOfInputError { actual, .. }) = e;
-        Self::EndOfInput(EndOfInputError {
-            expected: Header::SIZE,
-            actual: Header::SERVICE_OFFSET + actual,
-        })
-    }
-}
-
-impl From<ObjectReadError> for HeaderReadError {
-    fn from(e: ObjectReadError) -> Self {
-        let ObjectReadError(EndOfInputError { actual, .. }) = e;
-        Self::EndOfInput(EndOfInputError {
-            expected: Header::SIZE,
-            actual: Header::OBJECT_OFFSET + actual,
-        })
-    }
-}
-
-impl From<ActionReadError> for HeaderReadError {
-    fn from(e: ActionReadError) -> Self {
-        let ActionReadError(EndOfInputError { actual, .. }) = e;
-        Self::EndOfInput(EndOfInputError {
-            expected: Header::SIZE,
-            actual: Header::ACTION_OFFSET + actual,
-        })
-    }
+    #[error(transparent)]
+    Flags(#[from] InvalidFlagsValueError),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub(crate) enum HeaderWriteError {
-    #[error("{}", PayloadSizeWriteError::CannotBeRepresentedAsU32(*.0))]
-    PayloadSizeCannotBeRepresentedAsU32(usize),
+pub(crate) enum WriteHeaderError {
+    #[error(transparent)]
+    PayloadSize(#[from] PayloadCannotBeRepresentedAsU32Error),
 }
-
-impl From<PayloadSizeWriteError> for HeaderWriteError {
-    fn from(e: PayloadSizeWriteError) -> Self {
-        match e {
-            PayloadSizeWriteError::CannotBeRepresentedAsU32(v) => {
-                Self::PayloadSizeCannotBeRepresentedAsU32(v)
-            }
-        }
-    }
-}
-
-#[derive(
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Debug,
-    Hash,
-    derive_more::From,
-    derive_more::Into,
-)]
-pub(crate) struct Payload(Vec<u8>);
-
-impl Payload {
-    pub(crate) fn new(bytes: Vec<u8>) -> Self {
-        Self(bytes)
-    }
-
-    pub(crate) fn read<B>(size: usize, buf: &mut B) -> Result<Self, PayloadReadError>
-    where
-        B: Buf,
-    {
-        let data_len = buf.remaining();
-        if data_len < size {
-            return Err(PayloadReadError(EndOfInputError {
-                expected: size,
-                actual: data_len,
-            }));
-        }
-        let mut payload = vec![0; size];
-        buf.copy_to_slice(payload.as_mut_slice());
-        Ok(Self(payload))
-    }
-
-    fn write<B>(&self, buf: &mut B)
-    where
-        B: BufMut,
-    {
-        buf.put_slice(&self.0);
-    }
-
-    pub(crate) fn size(&self) -> usize {
-        self.0.len()
-    }
-}
-
-impl AsRef<[u8]> for Payload {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-#[error(transparent)]
-pub(crate) struct PayloadReadError(#[from] pub(crate) EndOfInputError);
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, derive_more::Display)]
-#[display(fmt = "message(id={id}, type={ty}, flags={flags}, recipient={recipient})")]
+#[display(fmt = "message(id={id}, {kind}, subject={subject}, flags={flags})")]
 pub(crate) struct Message {
-    pub(crate) id: Id,
-    pub(crate) ty: Type,
-    pub(crate) flags: Flags,
-    pub(crate) recipient: Recipient,
-    pub(crate) payload: Payload,
+    id: Id,
+    kind: Kind,
+    subject: Subject,
+    flags: Flags,
+    payload: Bytes,
 }
 
 impl Message {
-    pub(crate) fn new(header: Header, payload: Payload) -> Self {
+    fn new(header: Header, payload: Bytes) -> Self {
         Self {
             id: header.id,
-            ty: header.ty,
+            kind: header.kind,
+            subject: header.subject,
             flags: header.flags,
-            recipient: Recipient {
-                service: header.service,
-                object: header.object,
-                action: header.action,
-            },
             payload,
         }
     }
 
-    pub(crate) fn write<B>(self, buf: &mut B) -> Result<(), HeaderWriteError>
+    pub fn builder() -> Builder {
+        Builder::new()
+    }
+
+    /// Builds a "call" message.
+    ///
+    /// This sets the kind, the id and the subject of the message.
+    pub fn call(id: Id, subject: Subject) -> Builder {
+        Builder::new()
+            .set_id(id)
+            .set_kind(Kind::Call)
+            .set_subject(subject)
+    }
+
+    /// Builds a "reply" message.
+    ///
+    /// This sets the kind, the id and the subject of the message.
+    pub fn reply(id: Id, subject: Subject) -> Builder {
+        Builder::new()
+            .set_id(id)
+            .set_kind(Kind::Reply)
+            .set_subject(subject)
+    }
+
+    /// Builds a "error" message.
+    ///
+    /// This sets the kind, the id, the subject and the payload of the message.
+    pub fn error(id: Id, subject: Subject, description: &str) -> Result<Builder, format::Error> {
+        Builder::new()
+            .set_id(id)
+            .set_kind(Kind::Error)
+            .set_subject(subject)
+            .set_error_description(description)
+    }
+
+    /// Builds a "post" message.
+    ///
+    /// This sets the kind, the id and the subject of the message.
+    pub fn post(id: Id, subject: Subject) -> Builder {
+        Builder::new()
+            .set_id(id)
+            .set_kind(Kind::Post)
+            .set_subject(subject)
+    }
+
+    /// Builds a "event" message.
+    ///
+    /// This sets the kind, the id and the subject of the message.
+    pub fn event(id: Id, subject: Subject) -> Builder {
+        Builder::new()
+            .set_id(id)
+            .set_kind(Kind::Event)
+            .set_subject(subject)
+    }
+
+    /// Builds a "capabilities" message.
+    ///
+    /// This sets the kind, the id, the subject and the payload of the message.
+    pub fn capabilities(id: Id, map: &capabilities::Map) -> Result<Builder, format::Error> {
+        Builder::new()
+            .set_id(id)
+            .set_kind(Kind::Capabilities)
+            .set_server_subject(None)
+            .set_value(&map)
+    }
+
+    /// Builds a "cancel" message.
+    ///
+    /// This sets the kind, the id, the subject and the payload of the message.
+    pub fn cancel(id: Id, subject: Subject, call_id: Id) -> Builder {
+        Builder::new()
+            .set_id(id)
+            .set_kind(Kind::Cancel)
+            .set_subject(subject)
+            .set_value(&call_id)
+            .expect("failed to serialize a message ID in the format")
+    }
+
+    /// Builds a "canceled" message.
+    ///
+    /// This sets the kind, the id and the subject of the message.
+    pub fn canceled(id: Id, subject: Subject) -> Builder {
+        Builder::new()
+            .set_id(id)
+            .set_subject(subject)
+            .set_kind(Kind::Canceled)
+    }
+
+    fn write<B>(self, buf: &mut B) -> Result<(), WriteHeaderError>
     where
         B: BufMut,
     {
         Header {
             id: self.id,
-            ty: self.ty,
-            payload_size: PayloadSize(self.payload.size()),
+            kind: self.kind,
+            payload_size: self.payload.len(),
             flags: self.flags,
-            service: self.recipient.service,
-            object: self.recipient.object,
-            action: self.recipient.action,
+            subject: self.subject,
         }
         .write(buf)?;
-        self.payload.write(buf);
+        buf.put(self.payload);
         Ok(())
     }
 
-    pub(crate) fn size(&self) -> usize {
-        Header::SIZE + self.payload.size()
+    pub fn id(&self) -> Id {
+        self.id
+    }
+
+    pub fn kind(&self) -> Kind {
+        self.kind
+    }
+
+    pub fn flags(&self) -> Flags {
+        self.flags
+    }
+
+    pub fn subject(&self) -> Subject {
+        self.subject
+    }
+
+    pub fn payload(&self) -> Bytes {
+        self.payload.clone()
+    }
+
+    pub fn into_payload(self) -> Bytes {
+        self.payload
+    }
+
+    pub fn size(&self) -> usize {
+        Header::SIZE + self.payload.len()
+    }
+
+    pub fn value<T>(&self) -> Result<T, format::Error>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        format::from_bytes(&self.payload)
+    }
+
+    pub fn error_description(&self) -> Result<String, GetErrorDescriptionError> {
+        let dynamic: Dynamic = self.value()?;
+        match dynamic {
+            Dynamic::String(s) => Ok(s),
+            d => Err(GetErrorDescriptionError::DynamicValueIsNotAString(d)),
+        }
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-#[error("end of input: not enough data to read value, expected {expected} bytes but only got {actual} bytes")]
-pub(crate) struct EndOfInputError {
-    pub(crate) expected: usize,
-    pub(crate) actual: usize,
+#[derive(Debug, thiserror::Error)]
+pub enum GetErrorDescriptionError {
+    #[error("dynamic value {0} of error description is not a string")]
+    DynamicValueIsNotAString(Dynamic),
+
+    #[error(transparent)]
+    Format(#[from] format::Error),
 }
 
-fn read<B, F, T>(buf: &mut B, read_fn: F) -> Result<T, EndOfInputError>
-where
-    B: Buf,
-    F: FnOnce(&mut B) -> T,
-{
-    let value_size = std::mem::size_of::<T>();
-    let data_len = buf.remaining();
-    if data_len < value_size {
-        return Err(EndOfInputError {
-            expected: value_size,
-            actual: data_len,
-        });
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub(crate) struct Builder(Message);
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self::new()
     }
-    let value = read_fn(buf);
-    Ok(value)
 }
 
-fn read_u8<B>(buf: &mut B) -> Result<u8, EndOfInputError>
-where
-    B: Buf,
-{
-    read(buf, Buf::get_u8)
+impl Builder {
+    pub fn new() -> Self {
+        Self(Message::default())
+    }
+
+    pub fn set_id(mut self, value: Id) -> Self {
+        self.0.id = value;
+        self
+    }
+
+    pub(crate) fn set_kind(mut self, value: Kind) -> Self {
+        self.0.kind = value;
+        self
+    }
+
+    pub(crate) fn set_flags(mut self, value: Flags) -> Self {
+        self.0.flags = value;
+        self
+    }
+
+    pub fn set_subject(mut self, value: Subject) -> Self {
+        self.0.subject = value;
+        self
+    }
+
+    pub fn set_server_subject(self, action: Option<Action>) -> Self {
+        self.set_subject(Subject::server(action.unwrap_or_default()))
+    }
+
+    pub fn set_payload(mut self, value: Bytes) -> Self {
+        self.0.payload = value;
+        self
+    }
+
+    /// Sets the serialized representation of the value in the format as the payload of the message.
+    /// It checks if the "dynamic payload" flag is set on the message to know how to serialize the value.
+    /// If the flag is set after calling this value, the value will not be serialized coherently with the flag.
+    pub fn set_value<T>(mut self, value: &T) -> Result<Self, format::Error>
+    where
+        T: serde::Serialize,
+    {
+        if self.0.flags.contains(Flags::DYNAMIC_PAYLOAD) {
+            todo!("serialize a value as a dynamic")
+        } else {
+            let mut writer = BytesMut::new().writer();
+            format::to_writer(&mut writer, &value)?;
+            self.0.payload = writer.into_inner().freeze();
+        };
+        Ok(self)
+    }
+
+    pub fn set_error_description(self, description: &str) -> Result<Self, format::Error> {
+        self.set_value(&Dynamic::from(description))
+    }
+
+    pub fn build(self) -> Message {
+        self.0
+    }
 }
 
-fn read_u16_le<B>(buf: &mut B) -> Result<u16, EndOfInputError>
-where
-    B: Buf,
-{
-    read(buf, Buf::get_u16_le)
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
+pub(crate) struct Encoder;
+
+impl tokio_util::codec::Encoder<Message> for Encoder {
+    type Error = EncodeError;
+
+    #[instrument(name = "encode", skip_all, err)]
+    fn encode(&mut self, msg: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
+        dst.reserve(msg.size());
+        msg.write(dst)?;
+        Ok(())
+    }
 }
 
-fn read_u32_be<B>(buf: &mut B) -> Result<u32, EndOfInputError>
-where
-    B: Buf,
-{
-    read(buf, Buf::get_u32)
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum EncodeError {
+    #[error("write header error")]
+    WriteHeader(#[from] WriteHeaderError),
+
+    #[error(transparent)]
+    IO(#[from] std::io::Error),
 }
 
-fn read_u32_le<B>(buf: &mut B) -> Result<u32, EndOfInputError>
-where
-    B: Buf,
-{
-    read(buf, Buf::get_u32_le)
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
+pub(crate) struct Decoder {
+    state: DecoderState,
+}
+
+impl Decoder {
+    pub(crate) fn new() -> Self {
+        Self {
+            state: DecoderState::Header,
+        }
+    }
+}
+
+impl Default for Decoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl tokio_util::codec::Decoder for Decoder {
+    type Item = Message;
+    type Error = DecodeError;
+
+    #[instrument(name = "decode", skip_all, err)]
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
+        let msg = loop {
+            match self.state {
+                DecoderState::Header => match decode_header(src)? {
+                    None => break None,
+                    Some(header) => self.state = DecoderState::Payload(header),
+                },
+                DecoderState::Payload(header) => match decode_payload(header.payload_size, src) {
+                    None => break None,
+                    Some(payload) => {
+                        self.state = DecoderState::Header;
+                        src.reserve(src.len());
+                        break Some(Message::new(header, payload));
+                    }
+                },
+            }
+        };
+        Ok(msg)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum DecodeError {
+    #[error("read header error")]
+    ReadHeader(#[from] ReadHeaderError),
+
+    #[error(transparent)]
+    IO(#[from] std::io::Error),
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
+enum DecoderState {
+    Header,
+    Payload(Header),
+}
+
+#[instrument(skip_all)]
+fn decode_header(src: &mut bytes::BytesMut) -> Result<Option<Header>, DecodeError> {
+    if src.len() < Header::SIZE {
+        src.reserve(Header::SIZE - src.len());
+        return Ok(None);
+    }
+
+    let header = Header::read(&mut src.as_ref())?;
+    src.advance(Header::SIZE);
+    Ok(Some(header))
+}
+
+#[instrument(skip_all)]
+fn decode_payload(size: usize, src: &mut BytesMut) -> Option<Bytes> {
+    if src.len() < size {
+        src.reserve(size - src.len());
+        return None;
+    }
+    Some(src.copy_to_bytes(size))
 }
 
 #[cfg(test)]
@@ -750,35 +898,20 @@ mod tests {
     }
 
     #[test]
-    fn test_message_read() {
+    fn test_header_read() {
         let mut input: &[u8] = &[
             0x42, 0xde, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
-            // payload
-            0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72,
-            0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
-            0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
         ];
-        let header = Header::read(&mut input).unwrap();
-        let payload = Payload::read(header.payload_size(), &mut input).unwrap();
-        let message = Message::new(header, payload);
         assert_eq!(
-            message,
-            Message {
-                id: Id::new(990340),
-                ty: Type::Error,
+            Header::read(&mut input),
+            Ok(Header {
+                id: Id(990340),
+                kind: Kind::Error,
+                payload_size: 35,
+                subject: Subject::Service(ServiceSubject(Service(47), Object(1), Action(178))),
                 flags: Flags::empty(),
-                recipient: Recipient {
-                    service: Service::new(47),
-                    object: Object::new(1),
-                    action: Action::new(178),
-                },
-                payload: Payload::new(vec![
-                    0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20,
-                    0x72, 0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20,
-                    0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64
-                ]),
-            }
+            })
         );
     }
 
@@ -787,14 +920,10 @@ mod tests {
         use crate::message::*;
         let msg = Message {
             id: Id(329),
-            ty: Type::Capabilities,
+            kind: Kind::Capabilities,
+            subject: Subject::Service(ServiceSubject(Service(1), Object(1), Action(104))),
             flags: Flags::RETURN_TYPE,
-            recipient: Recipient {
-                service: Service(1),
-                object: Object(1),
-                action: Action(104),
-            },
-            payload: Payload(vec![0x17, 0x2b, 0xe6, 0x01, 0x5f]),
+            payload: Bytes::from_static(&[0x17, 0x2b, 0xe6, 0x01, 0x5f]),
         };
         let mut buf = Vec::new();
         msg.write(&mut buf).unwrap();
@@ -806,9 +935,8 @@ mod tests {
                 0x49, 0x01, 0x00, 0x00, // id
                 0x05, 0x00, 0x00, 0x00, // size
                 0x00, 0x00, 0x06, 0x02, // version, type, flags
-                0x01, 0x00, 0x00, 0x00, // service
-                0x01, 0x00, 0x00, 0x00, // object
-                0x68, 0x00, 0x00, 0x00, // action
+                0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00,
+                0x00, // subject,
                 0x17, 0x2b, 0xe6, 0x01, 0x5f, // payload
             ]
         );
@@ -826,7 +954,9 @@ mod tests {
         let header = Header::read(&mut input);
         assert_eq!(
             header,
-            Err(HeaderReadError::InvalidMessageCookieValue(0x42dfad42))
+            Err(ReadHeaderError::MagicCookie(InvalidMagicCookieValueError(
+                0x42dfad42
+            )))
         );
     }
 
@@ -837,12 +967,13 @@ mod tests {
             0x84, 0x1c, 0x0f, 0x00, // id
             0x23, 0x00, 0x00, 0x00, // size
             0x00, 0x00, 0xaa, 0x00, // version, type, flags
-            0x2f, 0x00, 0x00, 0x00, // service
-            0x01, 0x00, 0x00, 0x00, // object
-            0xb2, 0x00, 0x00, 0x00, // action
+            0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00, // subject
         ];
         let header = Header::read(&mut input);
-        assert_eq!(header, Err(HeaderReadError::InvalidTypeValue(0xaa)));
+        assert_eq!(
+            header,
+            Err(ReadHeaderError::Kind(InvalidKindValueError(0xaa)))
+        );
     }
 
     #[test]
@@ -852,12 +983,13 @@ mod tests {
             0x84, 0x1c, 0x0f, 0x00, // id
             0x23, 0x00, 0x00, 0x00, // size
             0x00, 0x00, 0x03, 0x13, // version, type, flags
-            0x2f, 0x00, 0x00, 0x00, // service
-            0x01, 0x00, 0x00, 0x00, // object
-            0xb2, 0x00, 0x00, 0x00, // action
+            0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00, // subject
         ];
         let header = Header::read(&mut input);
-        assert_eq!(header, Err(HeaderReadError::InvalidFlagsValue(0x13)));
+        assert_eq!(
+            header,
+            Err(ReadHeaderError::Flags(InvalidFlagsValueError(0x13)))
+        );
     }
 
     #[test]
@@ -867,135 +999,39 @@ mod tests {
             0x84, 0x1c, 0x0f, 0x00, // id
             0x23, 0x00, 0x00, 0x00, // size
             0x12, 0x34, 0x03, 0x00, // version, type, flags
-            0x2f, 0x00, 0x00, 0x00, // service
-            0x01, 0x00, 0x00, 0x00, // object
-            0xb2, 0x00, 0x00, 0x00, // action
+            0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00, // subject
         ];
         let header = Header::read(&mut input);
-        assert_eq!(header, Err(HeaderReadError::UnsupportedVersion(0x3412)));
+        assert_eq!(header, Err(ReadHeaderError::UnsupportedVersion(0x3412)));
     }
 
     #[test]
-    fn test_message_read_not_enough_data() {
-        fn check_header(mut input: &[u8], actual: usize) {
-            let header = Header::read(&mut input);
-            assert_eq!(
-                header,
-                Err(HeaderReadError::EndOfInput(EndOfInputError {
-                    expected: 28,
-                    actual
-                }))
-            );
-        }
+    fn test_decoder_not_enough_data_for_header() {
+        todo!()
+    }
 
-        check_header(
-            &[
-                0x42, 0xde, 0xad, // cookie, 1 byte short
-            ],
-            3,
-        );
+    #[test]
+    fn test_decoder_not_enough_data_for_payload() {
+        todo!()
+    }
 
-        check_header(
-            &[
-                0x42, 0xde, 0xad, 0x42, // cookie,
-                0x84, 0x1c, 0x0f, // id, 1 byte short
-            ],
-            7,
-        );
+    #[test]
+    fn test_decoder_garbage() {
+        todo!()
+    }
 
-        check_header(
-            &[
-                0x42, 0xde, 0xad, 0x42, // cookie,
-                0x84, 0x1c, 0x0f, 0x00, // id
-                0x23, 0x00, 0x00, // size, 1 byte short
-            ],
-            11,
-        );
+    #[test]
+    fn test_decoder_success() {
+        todo!()
+    }
 
-        check_header(
-            &[
-                0x42, 0xde, 0xad, 0x42, // cookie,
-                0x84, 0x1c, 0x0f, 0x00, // id
-                0x23, 0x00, 0x00, 0x00, // size
-                0x00, // version 1 byte short
-            ],
-            13,
-        );
+    #[test]
+    fn test_encoder_bad_payload_size() {
+        todo!()
+    }
 
-        check_header(
-            &[
-                0x42, 0xde, 0xad, 0x42, // cookie,
-                0x84, 0x1c, 0x0f, 0x00, // id
-                0x23, 0x00, 0x00, 0x00, // size
-                0x00, 0x00, // version, type 1 byte short
-            ],
-            14,
-        );
-
-        check_header(
-            &[
-                0x42, 0xde, 0xad, 0x42, // cookie,
-                0x84, 0x1c, 0x0f, 0x00, // id
-                0x23, 0x00, 0x00, 0x00, // size
-                0x00, 0x00, 0x03, // version, type, flags 1 byte short
-            ],
-            15,
-        );
-
-        check_header(
-            &[
-                0x42, 0xde, 0xad, 0x42, // cookie,
-                0x84, 0x1c, 0x0f, 0x00, // id
-                0x23, 0x00, 0x00, 0x00, // size
-                0x00, 0x00, 0x03, 0x00, // version, type, flags
-                0x2f, 0x00, 0x00, // service, 1 byte short
-            ],
-            19,
-        );
-
-        check_header(
-            &[
-                0x42, 0xde, 0xad, 0x42, // cookie,
-                0x84, 0x1c, 0x0f, 0x00, // id
-                0x23, 0x00, 0x00, 0x00, // size
-                0x00, 0x00, 0x03, 0x00, // version, type, flags
-                0x2f, 0x00, 0x00, 0x00, // service
-                0x01, 0x00, 0x00, // object, 1 byte short
-            ],
-            23,
-        );
-
-        check_header(
-            &[
-                0x42, 0xde, 0xad, 0x42, // cookie,
-                0x84, 0x1c, 0x0f, 0x00, // id
-                0x23, 0x00, 0x00, 0x00, // size
-                0x00, 0x00, 0x03, 0x00, // version, type, flags
-                0x2f, 0x00, 0x00, 0x00, // service
-                0x01, 0x00, 0x00, 0x00, // object
-                0xb2, 0x00, 0x00, // action, 1 byte short
-            ],
-            27,
-        );
-
-        let mut input: &[u8] = &[
-            0x42, 0xde, 0xad, 0x42, // cookie,
-            0x84, 0x1c, 0x0f, 0x00, // id
-            0x04, 0x00, 0x00, 0x00, // size
-            0x00, 0x00, 0x03, 0x00, // version, type, flags
-            0x2f, 0x00, 0x00, 0x00, // service
-            0x01, 0x00, 0x00, 0x00, // object
-            0xb2, 0x00, 0x00, 0x00, // action
-            0x01, 0x02, 0x03, // payload, 1 byte short
-        ];
-        let header = Header::read(&mut input).unwrap();
-        let payload = Payload::read(header.payload_size(), &mut input);
-        assert_eq!(
-            payload,
-            Err(PayloadReadError(EndOfInputError {
-                expected: 4,
-                actual: 3
-            }))
-        );
+    #[test]
+    fn test_encoder_success() {
+        todo!()
     }
 }

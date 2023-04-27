@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn test_write_string() {
         let mut buf = Vec::new();
-        write_str(&mut buf, &"abc").unwrap();
+        write_str(&mut buf, "abc").unwrap();
         assert_eq!(buf, [3, 0, 0, 0, 97, 98, 99]);
     }
 

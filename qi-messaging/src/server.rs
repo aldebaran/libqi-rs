@@ -1,34 +1,46 @@
 use crate::{
-    message::{Action, Object, Service},
-    ParamsBuilder, ParamsBuilderWithArg,
+    capabilities, format,
+    message::{self, Action, Message},
 };
+use sealed::sealed;
 
-const SERVICE: Service = Service::new(0);
-const OBJECT: Object = Object::new(0);
-const AUTHENTICATE_ACTION: Action = Action::new(8);
+const AUTHENTICATE_SUBJECT: message::Subject = message::Subject::server(Action::new(8));
 
-pub trait ServerCall {
-    fn to_server(self) -> Self;
-
-    fn server_authenticate(self) -> Self;
+#[sealed]
+pub(crate) trait MessageBuilderExt {
+    fn server_authenticate(
+        self,
+        id: message::Id,
+        capabilities: &capabilities::Map,
+    ) -> Result<Self, format::Error>
+    where
+        Self: Sized;
 }
 
-impl<T> ServerCall for ParamsBuilder<T> {
-    fn to_server(self) -> Self {
-        self.service(SERVICE).object(OBJECT)
-    }
-
-    fn server_authenticate(self) -> Self {
-        self.to_server().action(AUTHENTICATE_ACTION)
+#[sealed]
+impl MessageBuilderExt for message::Builder {
+    fn server_authenticate(
+        self,
+        id: message::Id,
+        capabilities: &capabilities::Map,
+    ) -> Result<Self, format::Error> {
+        self.set_id(id)
+            .set_kind(message::Kind::Call)
+            .set_subject(AUTHENTICATE_SUBJECT)
+            .set_value(&capabilities)
     }
 }
 
-impl<T> ServerCall for ParamsBuilderWithArg<T> {
-    fn to_server(self) -> Self {
-        self.service(SERVICE).object(OBJECT)
-    }
+#[sealed]
+pub(crate) trait MessageExt {
+    /// Returns true if the message is a messaging server authentication message.
+    /// No check is done on the type of the message.
+    fn is_server_authenticate(&self) -> bool;
+}
 
-    fn server_authenticate(self) -> Self {
-        self.to_server().action(AUTHENTICATE_ACTION)
+#[sealed]
+impl MessageExt for Message {
+    fn is_server_authenticate(&self) -> bool {
+        self.subject() == AUTHENTICATE_SUBJECT
     }
 }

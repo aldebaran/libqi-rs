@@ -1,71 +1,6 @@
-use crate::{
-    format,
-    message::{self, Flags, Id, Message, Payload, Recipient, Type},
-    types::{self, Dynamic},
-};
+use crate::types::{self, Dynamic};
 use derive_more::{From, Into};
 use std::cmp::Ordering;
-
-const SERVICE: message::Service = message::Service::new(0);
-
-#[derive(Default, Clone, PartialEq, Eq, Debug)]
-pub(crate) struct AdvertiseCapabilities {
-    id: Id,
-    map: Map,
-}
-
-impl AdvertiseCapabilities {
-    pub fn from_message(msg: Message) -> Result<Self, FromMessageError> {
-        if msg.ty != Type::Capabilities {
-            return Err(FromMessageError::BadType(msg));
-        }
-        Ok(Self {
-            id: msg.id,
-            map: format::from_bytes(msg.payload.as_ref())?,
-        })
-    }
-
-    pub fn into_message(self) -> Result<Message, IntoMessageError> {
-        use format::to_bytes;
-        Ok(Message {
-            id: self.id,
-            ty: Type::Capabilities,
-            flags: Flags::empty(),
-            recipient: Recipient {
-                service: SERVICE,
-                ..Default::default()
-            },
-            payload: Payload::new(to_bytes(&self.map)?),
-        })
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-#[error("payload format error: {0}")]
-pub struct IntoMessageError(#[from] format::Error);
-
-#[derive(thiserror::Error, Debug)]
-pub(crate) enum FromMessageError {
-    #[error("message {0} has not the \"capabilities\" type")]
-    BadType(Message),
-
-    #[error("payload format error: {0}")]
-    PayloadFormatError(#[from] format::Error),
-}
-
-impl TryFrom<AdvertiseCapabilities> for Message {
-    type Error = IntoMessageError;
-    fn try_from(c: AdvertiseCapabilities) -> Result<Self, Self::Error> {
-        c.into_message()
-    }
-}
-
-impl TryFrom<Message> for AdvertiseCapabilities {
-    type Error = FromMessageError;
-    fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        Self::from_message(msg)
-    }
-}
 
 type MapImpl = types::Map<String, Dynamic>;
 
@@ -105,7 +40,7 @@ impl Map {
         matches!(self.get_capability(key), Some(Dynamic::Bool(true)))
     }
 
-    pub fn resolve_minimums_against<F>(&mut self, other: &Self, mut default: F)
+    pub fn resolve_minimums_against<F>(&mut self, other: &Self, mut reset_default: F)
     where
         F: FnMut(&mut Dynamic),
     {
@@ -123,7 +58,7 @@ impl Map {
                     // The value does not exist in this one but exists in the other, set them to
                     // the default.
                     let mut value = other_value.clone();
-                    default(&mut value);
+                    reset_default(&mut value);
                     entry.insert(value);
                 }
             }
@@ -139,7 +74,7 @@ impl Map {
                     None => Some(value),
                 })
         {
-            default(value);
+            reset_default(value);
         }
     }
 }
@@ -165,7 +100,18 @@ where
     }
 }
 
-pub fn default_capability(value: &mut Dynamic) {
+impl<K, V> std::iter::Extend<(K, V)> for Map
+where
+    K: Into<String>,
+    V: Into<Dynamic>,
+{
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+        self.0
+            .extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
+    }
+}
+
+pub fn reset_to_default(value: &mut Dynamic) {
     match value {
         Dynamic::Unit => {}
         Dynamic::Bool(v) => *v = Default::default(),
@@ -181,26 +127,25 @@ pub fn default_capability(value: &mut Dynamic) {
     }
 }
 
-#[derive(derive_new::new, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub(crate) struct Common {
-    #[new(value = "true")]
+#[derive(Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct General {
     pub client_server_socket: bool,
-    #[new(value = "true")]
     pub message_flags: bool,
-    #[new(value = "true")]
     pub remote_cancelable_calls: bool,
-    #[new(value = "true")]
     pub object_ptr_uid: bool,
-    #[new(value = "true")]
     pub relative_endpoint_uri: bool,
 }
 
-impl Common {
-    pub const CLIENT_SERVER_SOCKET: &'static str = "ClientServerSocket";
-    pub const MESSAGE_FLAGS: &'static str = "MessageFlags";
-    pub const REMOTE_CANCELABLE_CALLS: &'static str = "RemoteCancelableCalls";
-    pub const OBJECT_PTR_UID: &'static str = "ObjectPtrUID";
-    pub const RELATIVE_ENDPOINT_URI: &'static str = "RelativeEndpointURI";
+impl General {
+    const CLIENT_SERVER_SOCKET: &'static str = "ClientServerSocket";
+    const MESSAGE_FLAGS: &'static str = "MessageFlags";
+    const REMOTE_CANCELABLE_CALLS: &'static str = "RemoteCancelableCalls";
+    const OBJECT_PTR_UID: &'static str = "ObjectPtrUID";
+    const RELATIVE_ENDPOINT_URI: &'static str = "RelativeEndpointURI";
+
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn from_map(map: Map) -> Self {
         Self {
@@ -222,27 +167,28 @@ impl Common {
         ])
     }
 }
-
-impl Default for Common {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl From<Map> for Common {
+impl From<Map> for General {
     fn from(map: Map) -> Self {
         Self::from_map(map)
     }
 }
 
-impl From<Common> for Map {
-    fn from(common: Common) -> Self {
+impl From<General> for Map {
+    fn from(common: General) -> Self {
         common.into_map()
     }
 }
 
+const LOCAL_GENERAL_CAPABILITIES: General = General {
+    client_server_socket: true,
+    message_flags: true,
+    remote_cancelable_calls: true,
+    object_ptr_uid: true,
+    relative_endpoint_uri: true,
+};
+
 pub fn local() -> Map {
-    Common::new().into_map()
+    LOCAL_GENERAL_CAPABILITIES.into_map()
 }
 
 #[cfg(test)]
@@ -268,7 +214,7 @@ mod tests {
             ("G", true),
             ("H", false),
         ]);
-        m.resolve_minimums_against(&m2, default_capability);
+        m.resolve_minimums_against(&m2, reset_to_default);
         assert_matches!(m.get_capability("A"), Some(Dynamic::Bool(true)));
         assert_matches!(m.get_capability("B"), Some(Dynamic::Bool(false)));
         assert_matches!(m.get_capability("C"), Some(Dynamic::Bool(false)));

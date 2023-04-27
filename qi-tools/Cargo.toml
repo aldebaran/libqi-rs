@@ -1,11 +1,11 @@
 [package]
-name = "qi-utils"
+name = "qi-tools"
 description = ""
 license-file = "LICENSE.txt"
 repository = "https://github.com/nyibbang/libqi-rs"
 version = "0.1.0-dev"
 edition = "2021"
-rust-version = "1.59"
+rust-version = "1.63"
 
 [dependencies]
 anyhow = "1.0.69"

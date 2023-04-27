@@ -1,86 +1,67 @@
 use crate::{
     capabilities,
-    channel::{Call, CallEndError, Channel, RequestStartError},
-    connection::Connection,
-    dispatch::Dispatch,
-    server, CallResult, Params,
+    channel::Channel,
+    service::{client::Client, Request, Service},
 };
-use std::future::Future;
-use tokio::io::{AsyncRead, AsyncWrite};
+use futures::{future::LocalBoxFuture, FutureExt};
+use std::{
+    fmt::Debug,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 #[derive(Debug)]
-pub struct Session {
-    channel: Channel,
+pub struct Session<S> {
+    channel: Channel<Client<Error>, S>,
     capabilities: capabilities::Map,
 }
 
 impl Session {
-    pub async fn call<T, R>(&self, params: Params<T>) -> Result<Call<R>, RequestStartError>
-    where
-        T: serde::Serialize,
-    {
-        self.channel.call(params).await
-    }
-
-    pub async fn post<T>(&self, params: Params<T>) -> Result<(), RequestStartError>
-    where
-        T: serde::Serialize,
-    {
-        self.channel.post(params).await
-    }
-
-    pub async fn event<T>(&self, params: Params<T>) -> Result<(), RequestStartError>
-    where
-        T: serde::Serialize,
-    {
-        self.channel.event(params).await
+    pub fn capabilities(&self) -> &capabilities::Map {
+        &self.capabilities
     }
 }
 
-pub fn connect<IO>(io: IO) -> (impl Future<Output = Result<Session, Error>>, Connection<IO>)
+impl<C, S> tower::Service<Request> for Session<S>
 where
-    IO: AsyncRead + AsyncWrite,
+    C: Service,
 {
-    let (dispatch, orders) = Dispatch::new();
-    let connection = Connection::new(io, dispatch);
-    let channel = Channel::new(orders);
+    type Response = C::Response;
+    type Error = Error<C::Error>;
+    type Future = C::Future;
 
-    let session = async move {
-        let mut capabilities = capabilities::local();
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.channel.poll_ready(cx).map_err(Into::into)
+    }
 
-        use server::ServerCall;
-        let params = Params::builder()
-            .server_authenticate()
-            .argument(&capabilities)
-            .build();
-        let authenticate = channel.call(params).await?;
-        let remote_capabilities = match authenticate.await? {
-            CallResult::Ok(capabilities) => capabilities,
-            CallResult::Err(_error) => todo!(),
-            CallResult::Canceled => todo!(),
-        };
-
-        capabilities
-            .resolve_minimums_against(&remote_capabilities, capabilities::default_capability);
-        Ok(Session {
-            channel,
-            capabilities,
-        })
-    };
-    (session, connection)
+    fn call(&mut self, req: Request) -> Self::Future {
+        self.channel.call(req)
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {}
+#[error(transparent)]
+pub struct Error<E>(#[from] E);
 
-impl From<RequestStartError> for Error {
-    fn from(_: RequestStartError) -> Self {
-        todo!()
+pub struct Run<'a, E> {
+    inner: LocalBoxFuture<'a, Result<(), RunError<E>>>,
+}
+
+impl<'a, E> Debug for Run<'a, E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Run").field("inner", &"dyn Future").finish()
     }
 }
 
-impl From<CallEndError> for Error {
-    fn from(_: CallEndError) -> Self {
-        todo!()
+impl<'a, E> Future for Run<'a, E> {
+    type Output = Result<(), RunError<E>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.inner.poll_unpin(cx)
     }
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct RunError<E>(#[from] E);

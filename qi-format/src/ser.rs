@@ -19,19 +19,6 @@ where
     Ok(buf)
 }
 
-pub trait Serialize {
-    fn serialize_to_bytes(&self) -> Result<Vec<u8>>;
-}
-
-impl<T> Serialize for T
-where
-    T: serde::Serialize,
-{
-    fn serialize_to_bytes(&self) -> Result<Vec<u8>> {
-        to_bytes(self)
-    }
-}
-
 #[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct Serializer<W> {
     writer: W,
