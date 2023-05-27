@@ -131,17 +131,12 @@ where
             }
             response = responses_stream.next(), if !responses_stream_terminated => {
                 match response.transpose()? {
-                    Some(response) => match response.as_call_response() {
-                        Some(call_response) => {
-                            debug!(response = ?response, "received a call response from the server");
-                            if let Some(response_sender) = ongoing_call_requests.remove(&call_response.id()) {
-                                if let Err(response) = response_sender.send(response) {
-                                    debug!(response = ?response, "the client for a call request response has dropped, discarding response");
-                                }
+                    Some(response) => if let Some(call_response) = response.as_call_response() {
+                        debug!(response = ?response, "received a call response from the server");
+                        if let Some(response_sender) = ongoing_call_requests.remove(&call_response.id()) {
+                            if let Err(response) = response_sender.send(response) {
+                                debug!(response = ?response, "the client for a call request response has dropped, discarding response");
                             }
-                        }
-                        None => {
-                            // No response to send back.
                         }
                     }
                     None => {
@@ -155,57 +150,10 @@ where
                 break Ok(());
             }
         }
+
         // Cleanup ongoing call requests for which the client has dropped the channel.
+        ongoing_call_requests.retain(|_id, response_sender| !response_sender.is_closed())
     }
-
-    // let send_request_messages = requests_stream
-    //     .then(|(request, response_sender)| {
-    //         let call_requests = call_requests.clone();
-    //         async move {
-    //             if let Request::Call { id, .. } = request {
-    //                 trace!(%id, "registering a running call waiting for a result from the server");
-    //                 call_requests.add(id, response_sender).await;
-    //             } else {
-    //                 // Other types of requests immediately get their response.
-    //                 if response_sender.send(Ok(None)).is_err() {
-    //                     trace!(id = %request.id(), "the client for a call request response has dropped, discarding response");
-    //                 }
-    //             }
-    //             request.into_message()
-    //         }
-    //     })
-    //     .map(Ok)
-    //     .forward(requests_sink);
-
-    // let receive_responses = responses_stream
-    //     .try_filter_map(|message| {
-    //         let id = message.id();
-    //         let item = match try_response_from_message(message) {
-    //             Ok(Some(response)) => Some((id, Ok(response))),
-    //             // Messages that are not call responses are ignored.
-    //             Ok(None) => None,
-    //             // Remote potentially sent a bad message result, sent the error back to the caller.
-    //             Err(err) => Some((id, Err(Error::MalformedCallResponse(err)))),
-    //         };
-    //         ok(item)
-    //     })
-    //     .try_for_each(|(id, call_response)| {
-    //         trace!(%id, ?call_response, "received a call result from the server");
-    //         let call_requests = call_requests.clone();
-    //         async move {
-    //             call_requests.terminate(id.into(), call_response).await;
-    //             Ok(())
-    //         }
-    //     });
-
-    // select! {
-    //     result = send_request_messages => {
-    //         trace!(?result, "messages sink is closed, terminating dispatch");
-    //     },
-    //     result = receive_responses => {
-    //         trace!(?result, "messages stream is finished, terminating dispatch");
-    //     }
-    // }
 }
 
 fn dispatch_messages<St, Si>(
