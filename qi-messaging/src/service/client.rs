@@ -188,21 +188,3 @@ enum DispatchError {
     #[error("error converting a message into a response")]
     MessageIntoResponse(#[source] message::GetErrorDescriptionError),
 }
-
-// #[derive(Clone, Debug)]
-// struct IdIter {
-//     current: Arc<AtomicU32>,
-// }
-
-// impl IdIter {
-//     fn new() -> Self {
-//         Self {
-//             current: Arc::new(AtomicU32::new(1)),
-//         }
-//     }
-
-//     fn make_next(&self) -> message::Id {
-//         let mut this = self;
-//         this.next().unwrap()
-//     }
-// }
