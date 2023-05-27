@@ -1,8 +1,10 @@
-use super::{try_response_from_message, CallResponse, Request, RequestId, Response};
-use crate::message::{self, Message};
+use crate::{
+    message::{self, Message},
+    request::{Request, Response},
+};
 use futures::{
     future::{err, ok, BoxFuture},
-    FutureExt, Sink, SinkExt, StreamExt, TryFutureExt, TryStream, TryStreamExt,
+    FutureExt, Sink, SinkExt, StreamExt, TryStream, TryStreamExt,
 };
 use std::{
     collections::HashMap,
@@ -95,7 +97,7 @@ pub(crate) enum Error {
     MalformedCallResponse(#[from] message::GetErrorDescriptionError),
 }
 
-// #[instrument(level = "debug", skip_all, err)]
+#[instrument(level = "debug", skip_all, err)]
 async fn dispatch<St, Si>(
     mut request_receiver: mpsc::Receiver<(Request, ResponseSender)>,
     requests_sink: Si,
@@ -121,7 +123,7 @@ where
                     ongoing_call_requests.insert(id, response_sender);
                 } else {
                     // Other types of requests immediately get their response.
-                    if response_sender.send(None).is_err() {
+                    if response_sender.send(Response::none()).is_err() {
                         debug!(id = %request.id(), "the client for a call request response has dropped, discarding response");
                     }
                 }
@@ -129,16 +131,18 @@ where
             }
             response = responses_stream.next(), if !responses_stream_terminated => {
                 match response.transpose()? {
-                    Some(Some(call_response)) => {
-                        debug!(response = ?call_response, "received a call response from the server");
-                        if let Some(response_sender) = ongoing_call_requests.remove(&call_response.id) {
-                            if let Err(Some(call_response)) = response_sender.send(Some(call_response)) {
-                                debug!(response = ?call_response, "the client for a call request response has dropped, discarding response");
+                    Some(response) => match response.as_call_response() {
+                        Some(call_response) => {
+                            debug!(response = ?response, "received a call response from the server");
+                            if let Some(response_sender) = ongoing_call_requests.remove(&call_response.id()) {
+                                if let Err(response) = response_sender.send(response) {
+                                    debug!(response = ?response, "the client for a call request response has dropped, discarding response");
+                                }
                             }
                         }
-                    }
-                    Some(None) => {
-                        // No response to send back.
+                        None => {
+                            // No response to send back.
+                        }
                     }
                     None => {
                         debug!("responses stream is terminated");
@@ -215,10 +219,10 @@ where
     St: TryStream<Ok = Message>,
     St::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
 {
-    let requests_sink =
-        messages_sink.with(|request: Request| ok::<_, Si::Error>(request.into_message()));
+    let requests_sink = messages_sink.with(|request: Request| ok::<_, Si::Error>(request.into()));
     let responses_stream = messages_stream.map_err(Into::into).and_then(|message| {
-        let response = try_response_from_message(message)
+        let response = message
+            .try_into()
             .map_err(|err| DispatchError::MessageIntoResponse(err).into());
         ready(response)
     });

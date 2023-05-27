@@ -7,6 +7,7 @@ pub mod capabilities;
 // mod channel;
 // pub mod client;
 mod message;
+pub(crate) mod request;
 pub mod server;
 pub mod service;
 // pub mod session;

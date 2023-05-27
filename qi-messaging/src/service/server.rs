@@ -1,7 +1,10 @@
 use std::future::ready;
 
-use super::{Request, Response};
-use crate::{format, message::Message};
+use crate::{
+    format,
+    message::Message,
+    request::{Request, Response},
+};
 use futures::{
     stream::{self, FusedStream, FuturesUnordered},
     Sink, SinkExt, StreamExt, TryStream, TryStreamExt,
@@ -81,7 +84,8 @@ where
     let requests_stream = messages_stream
         .map_err(Into::into)
         .try_filter_map(|message| {
-            let request = Request::try_from_message(message)
+            let request = message
+                .try_into()
                 .map_err(|err| Error::MessageIntoRequest(err).into());
             ready(request)
         });
@@ -89,11 +93,10 @@ where
     let responses_sink = messages_sink
         .sink_err_into()
         .with_flat_map(|response: Response| {
-            let message = response.map(|response| {
-                response
-                    .try_into_message()
-                    .map_err(|err| Error::ResponseIntoMessage(err).into())
-            });
+            let message = response
+                .try_into_message()
+                .map_err(|err| Error::ResponseIntoMessage(err).into())
+                .transpose();
             stream::iter(message)
         });
 
@@ -121,10 +124,7 @@ pub(crate) enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        message,
-        service::{CallResponse, RequestId},
-    };
+    use crate::{message, request::RequestId};
     use assert_matches::assert_matches;
     use bytes::Bytes;
     use futures::{
@@ -163,7 +163,7 @@ mod tests {
                     let barrier = self.request_barriers[&id].clone();
                     async move {
                         barrier.wait().await;
-                        Ok(Some(CallResponse::reply(id, subject, Bytes::new())))
+                        Ok(Response::reply(id, subject, Bytes::new()))
                     }
                     .boxed()
                 }
@@ -173,7 +173,7 @@ mod tests {
                     let barrier = self.request_barriers[&id].clone();
                     async move {
                         barrier.wait().await;
-                        Ok(None)
+                        Ok(Response::none())
                     }
                     .boxed()
                 }
@@ -191,9 +191,9 @@ mod tests {
         let barrier_3 = Arc::new(Barrier::new(2));
         let service = Service {
             request_barriers: [
-                (RequestId(1), barrier_1.clone()),
-                (RequestId(2), barrier_2.clone()),
-                (RequestId(3), barrier_3.clone()),
+                (RequestId::from(1), barrier_1.clone()),
+                (RequestId::from(2), barrier_2.clone()),
+                (RequestId::from(3), barrier_3.clone()),
             ]
             .into_iter()
             .collect(),
@@ -212,21 +212,21 @@ mod tests {
         );
         requests_tx
             .send(Request::Call {
-                id: RequestId(1),
+                id: RequestId::from(1),
                 subject,
                 payload: Bytes::new(),
             })
             .await?;
         requests_tx
             .send(Request::Call {
-                id: RequestId(2),
+                id: RequestId::from(2),
                 subject,
                 payload: Bytes::new(),
             })
             .await?;
         requests_tx
             .send(Request::Call {
-                id: RequestId(3),
+                id: RequestId::from(3),
                 subject,
                 payload: Bytes::new(),
             })
@@ -240,17 +240,17 @@ mod tests {
         // Unblock request no.3, its response is received.
         assert_matches!(poll_immediate(barrier_3.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Some(CallResponse::reply(RequestId(3), subject, Bytes::new())));
+        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(3), subject, Bytes::new()));
 
         // Unblock request no.1, its response is received.
         assert_matches!(poll_immediate(barrier_1.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Some(CallResponse::reply(RequestId(1), subject, Bytes::new())));
+        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(1), subject, Bytes::new()));
 
         // Unblock request no.2, its response is received.
         assert_matches!(poll_immediate(barrier_2.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Some(CallResponse::reply(RequestId(2), subject, Bytes::new())));
+        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(2), subject, Bytes::new()));
 
         // Terminate the server by closing the messages stream.
         drop(requests_tx);
