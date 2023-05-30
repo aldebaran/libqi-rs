@@ -50,7 +50,7 @@ impl Map {
         matches!(self.get_capability(key), Some(Dynamic::Bool(true)))
     }
 
-    pub fn resolve_minimums_against<F>(&mut self, other: &Self, mut reset_default: F)
+    pub(crate) fn resolve_minimums_against<F>(&mut self, other: &Self, mut reset_default: F)
     where
         F: FnMut(&mut Dynamic),
     {
@@ -87,6 +87,44 @@ impl Map {
             reset_default(value);
         }
     }
+
+    /// Checks that the capabilities have the required values that are only supported by this implementation.
+    ///
+    /// This implementation does not yet handle all the possible effects of each capability cases. This function
+    /// ensures that the capabilities have the only values that are handle at the moment.
+    pub(crate) fn check_required(&self) -> Result<&Self, ExpectedKeyValueError<bool>> {
+        let base = Base::from_map(self);
+
+        // TODO: Implement capabilities so that this function always succeeds, so that we may remove it.
+        if !base.client_server_socket {
+            return Err(ExpectedKeyValueError(
+                Base::CLIENT_SERVER_SOCKET.into(),
+                true,
+            ));
+        }
+        if base.meta_object_cache {
+            return Err(ExpectedKeyValueError(Base::META_OBJECT_CACHE.into(), false));
+        }
+        if !base.message_flags {
+            return Err(ExpectedKeyValueError(Base::MESSAGE_FLAGS.into(), true));
+        }
+        if !base.remote_cancelable_calls {
+            return Err(ExpectedKeyValueError(
+                Base::REMOTE_CANCELABLE_CALLS.into(),
+                true,
+            ));
+        }
+        if !base.object_ptr_uid {
+            return Err(ExpectedKeyValueError(Base::OBJECT_PTR_UID.into(), true));
+        }
+        if !base.relative_endpoint_uri {
+            return Err(ExpectedKeyValueError(
+                Base::RELATIVE_ENDPOINT_URI.into(),
+                true,
+            ));
+        }
+        Ok(self)
+    }
 }
 
 impl<'a> std::iter::IntoIterator for &'a Map {
@@ -121,6 +159,10 @@ where
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("expected key {0} to have value {1}")]
+pub(crate) struct ExpectedKeyValueError<T>(String, T);
+
 pub fn reset_to_default(value: &mut Dynamic) {
     match value {
         Dynamic::Unit => {}
@@ -138,28 +180,27 @@ pub fn reset_to_default(value: &mut Dynamic) {
 }
 
 #[derive(Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct General {
+pub(crate) struct Base {
     pub client_server_socket: bool,
+    pub meta_object_cache: bool,
     pub message_flags: bool,
     pub remote_cancelable_calls: bool,
     pub object_ptr_uid: bool,
     pub relative_endpoint_uri: bool,
 }
 
-impl General {
+impl Base {
     const CLIENT_SERVER_SOCKET: &'static str = "ClientServerSocket";
+    const META_OBJECT_CACHE: &'static str = "MetaObjectCache";
     const MESSAGE_FLAGS: &'static str = "MessageFlags";
     const REMOTE_CANCELABLE_CALLS: &'static str = "RemoteCancelableCalls";
     const OBJECT_PTR_UID: &'static str = "ObjectPtrUID";
     const RELATIVE_ENDPOINT_URI: &'static str = "RelativeEndpointURI";
 
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn from_map(map: Map) -> Self {
+    pub fn from_map(map: &Map) -> Self {
         Self {
             client_server_socket: map.has_flag_capability(Self::CLIENT_SERVER_SOCKET),
+            meta_object_cache: map.has_flag_capability(Self::META_OBJECT_CACHE),
             message_flags: map.has_flag_capability(Self::MESSAGE_FLAGS),
             remote_cancelable_calls: map.has_flag_capability(Self::REMOTE_CANCELABLE_CALLS),
             object_ptr_uid: map.has_flag_capability(Self::OBJECT_PTR_UID),
@@ -167,9 +208,10 @@ impl General {
         }
     }
 
-    pub fn into_map(self) -> Map {
+    pub fn to_map(self) -> Map {
         Map::from_iter([
             (Self::CLIENT_SERVER_SOCKET, self.client_server_socket),
+            (Self::META_OBJECT_CACHE, self.meta_object_cache),
             (Self::MESSAGE_FLAGS, self.message_flags),
             (Self::REMOTE_CANCELABLE_CALLS, self.remote_cancelable_calls),
             (Self::OBJECT_PTR_UID, self.object_ptr_uid),
@@ -177,28 +219,29 @@ impl General {
         ])
     }
 }
-impl From<Map> for General {
-    fn from(map: Map) -> Self {
+impl From<&Map> for Base {
+    fn from(map: &Map) -> Self {
         Self::from_map(map)
     }
 }
 
-impl From<General> for Map {
-    fn from(common: General) -> Self {
-        common.into_map()
+impl From<&Base> for Map {
+    fn from(common: &Base) -> Self {
+        common.to_map()
     }
 }
 
-const LOCAL_GENERAL_CAPABILITIES: General = General {
+const LOCAL_BASE_CAPABILITIES: Base = Base {
     client_server_socket: true,
+    meta_object_cache: false, // Unsupported feature
     message_flags: true,
     remote_cancelable_calls: true,
     object_ptr_uid: true,
     relative_endpoint_uri: true,
 };
 
-pub fn local() -> Map {
-    LOCAL_GENERAL_CAPABILITIES.into_map()
+pub(crate) fn local() -> Map {
+    LOCAL_BASE_CAPABILITIES.to_map()
 }
 
 #[cfg(test)]
