@@ -1,10 +1,10 @@
 use crate::{
-    format,
+    capabilities, format,
     message::{self, Message, Subject},
 };
 use bytes::Bytes;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Request {
     Call {
         id: RequestId,
@@ -26,6 +26,10 @@ pub enum Request {
         subject: Subject,
         call_id: RequestId,
     },
+    Capabilities {
+        id: RequestId,
+        capabilities: capabilities::Map,
+    },
 }
 
 impl Request {
@@ -35,11 +39,12 @@ impl Request {
             Request::Post { id, .. } => id,
             Request::Event { id, .. } => id,
             Request::Cancel { id, .. } => id,
+            Request::Capabilities { id, .. } => id,
         }
     }
 
-    pub(crate) fn into_message(self) -> Message {
-        match self {
+    pub(crate) fn try_into_message(self) -> Result<Message, format::Error> {
+        let message = match self {
             Self::Call {
                 id,
                 subject,
@@ -66,7 +71,11 @@ impl Request {
                 subject,
                 call_id,
             } => Message::cancel(id.into(), subject, call_id.into()).build(),
-        }
+            Request::Capabilities { id, capabilities } => {
+                Message::capabilities(id.into(), &capabilities)?.build()
+            }
+        };
+        Ok(message)
     }
 
     pub(crate) fn try_from_message(
@@ -99,9 +108,11 @@ impl Request {
     }
 }
 
-impl From<Request> for Message {
-    fn from(request: Request) -> Self {
-        request.into_message()
+impl TryFrom<Request> for Message {
+    type Error = format::Error;
+
+    fn try_from(request: Request) -> Result<Self, Self::Error> {
+        request.try_into_message()
     }
 }
 

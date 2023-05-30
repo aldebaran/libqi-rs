@@ -6,7 +6,7 @@ use derive_more::{From, Index, Into, IntoIterator};
 /// This type guarantees the unicity of keys. When an insertion is done, if the key already exists
 /// in the map, its value is overwritten with the inserted one.
 #[derive(
-    Default, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Index, IntoIterator, Debug,
+    Default, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Index, IntoIterator, Debug, Hash,
 )]
 pub struct Map<K, V>(Vec<(K, V)>);
 

@@ -109,9 +109,8 @@ mod tests {
                     }
                     .boxed()
                 }
-                Request::Cancel { id, .. }
-                | Request::Post { id, .. }
-                | Request::Event { id, .. } => {
+                _ => {
+                    let id = req.id();
                     let barrier = self.request_barriers[&id].clone();
                     async move {
                         barrier.wait().await;

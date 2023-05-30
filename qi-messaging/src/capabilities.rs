@@ -5,7 +5,17 @@ use std::cmp::Ordering;
 type MapImpl = types::Map<String, Dynamic>;
 
 #[derive(
-    Default, Clone, PartialEq, Eq, Debug, From, Into, serde::Serialize, serde::Deserialize,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    From,
+    Into,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 pub struct Map(MapImpl);
 

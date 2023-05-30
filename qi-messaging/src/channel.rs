@@ -78,7 +78,8 @@ impl Channel {
                         }
                     }
                     Some(request) = client_requests_rx.recv() => {
-                        sink.send(request.into()).await?;
+                        let message = request.try_into().map_err(DispatchError::RequestIntoMessage)?;
+                        sink.send(message).await?;
                     }
                     Some(response) = server_responses_rx.recv() => {
                         if let Some(message) = response.try_into().map_err(DispatchError::ResponseIntoMessage)? {
@@ -139,6 +140,9 @@ pub(crate) enum DispatchError {
 
     #[error("error converting a message into a request")]
     MessageIntoResponse(#[source] message::GetErrorDescriptionError),
+
+    #[error("error converting a request into a message")]
+    RequestIntoMessage(#[source] format::Error),
 
     #[error("error converting a response into a message")]
     ResponseIntoMessage(#[source] format::Error),
