@@ -1,13 +1,7 @@
-use std::future::ready;
-
-use crate::{
-    format,
-    message::Message,
-    request::{Request, Response},
-};
+use crate::request::{Request, Response};
 use futures::{
-    stream::{self, FusedStream, FuturesUnordered},
-    Sink, SinkExt, StreamExt, TryStream, TryStreamExt,
+    stream::{FusedStream, FuturesUnordered},
+    Sink, SinkExt, Stream, StreamExt,
 };
 use tokio::{pin, select};
 use tower::{Service, ServiceExt};
@@ -20,14 +14,12 @@ pub(crate) async fn serve<St, Si, Svc>(
     service: Svc,
 ) -> Result<(), Error>
 where
-    St: TryStream<Ok = Request>,
-    St::Error: Into<Box<dyn std::error::Error>>,
+    St: Stream<Item = Request>,
     Si: Sink<Response>,
     Si::Error: Into<Box<dyn std::error::Error>>,
     Svc: tower::Service<Request, Response = Response>,
     Svc::Error: Into<Box<dyn std::error::Error>>,
 {
-    let requests_stream = requests_stream.map_err(|err| Error::Stream(err.into()));
     let mut requests_stream_terminated = false;
     let responses_sink = responses_sink.sink_map_err(|err| Error::Sink(err.into()));
     let mut service = service.map_err(|err| Error::Service(err.into()));
@@ -35,22 +27,16 @@ where
     pin!(requests_stream, responses_sink);
 
     loop {
-        debug!(
-            responses_futures_is_terminated = responses_futures.is_terminated(),
-            responses_futures_len = responses_futures.len(),
-            "begin loop"
-        );
         select! {
             request = requests_stream.next(), if !requests_stream_terminated => {
                 match request {
                     Some(request) => {
-                        let request = request?;
                         debug!(?request, "received a new request, calling service");
                         let response_future = service.ready().await?.call(request).instrument(debug_span!("service_call"));
                         responses_futures.push(response_future);
                     }
                     None => {
-                        debug!("requests stream is terminated");
+                        debug!("request stream is terminated");
                         requests_stream_terminated = true;
                     }
                 }
@@ -68,57 +54,13 @@ where
     }
 }
 
-pub(crate) async fn serve_from_messages<St, Si, Svc>(
-    messages_stream: St,
-    messages_sink: Si,
-    service: Svc,
-) -> Result<(), Error>
-where
-    St: TryStream<Ok = Message>,
-    St::Error: Into<Box<dyn std::error::Error>>,
-    Si: Sink<Message>,
-    Si::Error: Into<Box<dyn std::error::Error>>,
-    Svc: tower::Service<Request, Response = Response>,
-    Svc::Error: Into<Box<dyn std::error::Error>>,
-{
-    let requests_stream = messages_stream
-        .map_err(Into::into)
-        .try_filter_map(|message| {
-            let request = message
-                .try_into()
-                .map_err(|err| Error::MessageIntoRequest(err).into());
-            ready(request)
-        });
-
-    let responses_sink = messages_sink
-        .sink_err_into()
-        .with_flat_map(|response: Response| {
-            let message = response
-                .try_into_message()
-                .map_err(|err| Error::ResponseIntoMessage(err).into())
-                .transpose();
-            stream::iter(message)
-        });
-
-    serve(requests_stream, responses_sink, service).await
-}
-
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
-    #[error("input stream error")]
-    Stream(#[source] Box<dyn std::error::Error>),
-
     #[error("output sink error")]
     Sink(#[source] Box<dyn std::error::Error>),
 
     #[error("service error")]
     Service(#[source] Box<dyn std::error::Error>),
-
-    #[error("error converting a response into a message")]
-    ResponseIntoMessage(#[source] format::Error),
-
-    #[error("error converting a message into a request")]
-    MessageIntoRequest(#[source] format::Error),
 }
 
 #[cfg(test)]
@@ -199,7 +141,7 @@ mod tests {
             .collect(),
         };
 
-        let requests_stream = ReceiverStream::new(requests_rx).map(Ok::<_, String>);
+        let requests_stream = ReceiverStream::new(requests_rx);
         let responses_sink = PollSender::new(responses_tx);
         let serve = serve(requests_stream, responses_sink, service);
         pin!(serve);

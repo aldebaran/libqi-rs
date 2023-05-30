@@ -4,7 +4,7 @@
 #![doc = include_str!("../README.md")]
 
 pub mod capabilities;
-// mod channel;
+mod channel;
 mod message;
 pub(crate) mod request;
 pub mod server;

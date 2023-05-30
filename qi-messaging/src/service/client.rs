@@ -1,62 +1,47 @@
 use crate::{
-    message::{self, Message},
+    message::{self},
     request::{Request, Response},
 };
 use futures::{
-    future::{err, ok, BoxFuture},
-    FutureExt, Sink, SinkExt, StreamExt, TryStream, TryStreamExt,
+    future::{err, BoxFuture},
+    FutureExt, Sink, SinkExt, Stream, StreamExt,
 };
 use std::{
     collections::HashMap,
     fmt::Debug,
-    future::{ready, Future},
+    future::Future,
     task::{Context, Poll},
 };
 use tokio::{
-    pin, select, spawn,
+    pin, select,
     sync::{mpsc, oneshot},
-    task::JoinHandle,
 };
 use tokio_util::sync::PollSender;
 use tower::Service;
-use tracing::{debug, info, instrument};
+use tracing::{debug, instrument};
 
 type ResponseSender = oneshot::Sender<Response>;
 
 #[derive(Debug)]
 pub(crate) struct Client {
     dispatch_sender: PollSender<(Request, ResponseSender)>,
-    #[allow(unused)]
-    dispatch_task: JoinHandle<()>,
 }
 
 impl Client {
-    pub(crate) fn with_messages_stream_and_sink<Si, St>(
-        messages_stream: St,
-        messages_sink: Si,
-    ) -> Self
+    pub(crate) fn new<Si, St>(
+        responses_stream: St,
+        requests_sink: Si,
+    ) -> (Self, impl Future<Output = Result<(), DispatchError>>)
     where
-        Si: Sink<Message> + Send + 'static,
-        Si::Error: Into<Box<dyn std::error::Error + Sync + Send>> + Send,
-        St: TryStream<Ok = Message> + Send + 'static,
-        St::Error: Into<Box<dyn std::error::Error + Sync + Send>> + Send,
+        Si: Sink<Request> + Send + 'static,
+        Si::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
+        St: Stream<Item = Response> + Send + 'static,
     {
         const DISPATCH_CHANNEL_SIZE: usize = 1;
         let (dispatch_sender, dispatch_receiver) = mpsc::channel(DISPATCH_CHANNEL_SIZE);
         let dispatch_sender = PollSender::new(dispatch_sender);
-        let dispatch = dispatch_messages(dispatch_receiver, messages_sink, messages_stream);
-        let dispatch = async {
-            if let Err(err) = dispatch.await {
-                info!(
-                    error = &err as &dyn std::error::Error,
-                    "dispatch has ended with an error"
-                )
-            }
-        };
-        Self {
-            dispatch_sender,
-            dispatch_task: spawn(dispatch),
-        }
+        let dispatch = dispatch(dispatch_receiver, requests_sink, responses_stream);
+        (Self { dispatch_sender }, dispatch)
     }
 }
 
@@ -92,9 +77,6 @@ pub(crate) enum Error {
 
     #[error("the dispatch task to remote has canceled the request")]
     DispatchCanceled,
-
-    #[error("the remote party responded to the call with an malformed error")]
-    MalformedCallResponse(#[from] message::GetErrorDescriptionError),
 }
 
 #[instrument(level = "debug", skip_all, err)]
@@ -106,11 +88,9 @@ async fn dispatch<St, Si>(
 where
     Si: Sink<Request>,
     Si::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
-    St: TryStream<Ok = Response>,
-    St::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
+    St: Stream<Item = Response>,
 {
     let mut ongoing_call_requests = HashMap::new();
-    let responses_stream = responses_stream.map_err(|err| DispatchError::Stream(err.into()));
     let mut responses_stream_terminated = false;
     let requests_sink = requests_sink.sink_map_err(|err| DispatchError::Sink(err.into()));
     pin!(responses_stream, requests_sink);
@@ -130,7 +110,7 @@ where
                 requests_sink.send(request).await?;
             }
             response = responses_stream.next(), if !responses_stream_terminated => {
-                match response.transpose()? {
+                match response {
                     Some(response) => if let Some(call_response) = response.as_call_response() {
                         debug!(response = ?response, "received a call response from the server");
                         if let Some(response_sender) = ongoing_call_requests.remove(&call_response.id()) {
@@ -140,7 +120,7 @@ where
                         }
                     }
                     None => {
-                        debug!("responses stream is terminated");
+                        debug!("response stream is terminated");
                         responses_stream_terminated = true;
                     },
                 }
@@ -156,34 +136,10 @@ where
     }
 }
 
-fn dispatch_messages<St, Si>(
-    request_receiver: mpsc::Receiver<(Request, ResponseSender)>,
-    messages_sink: Si,
-    messages_stream: St,
-) -> impl Future<Output = Result<(), DispatchError>>
-where
-    Si: Sink<Message>,
-    Si::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
-    St: TryStream<Ok = Message>,
-    St::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
-{
-    let requests_sink = messages_sink.with(|request: Request| ok::<_, Si::Error>(request.into()));
-    let responses_stream = messages_stream.map_err(Into::into).and_then(|message| {
-        let response = message
-            .try_into()
-            .map_err(|err| DispatchError::MessageIntoResponse(err).into());
-        ready(response)
-    });
-    dispatch(request_receiver, requests_sink, responses_stream)
-}
-
 #[derive(Debug, thiserror::Error)]
-enum DispatchError {
+pub(crate) enum DispatchError {
     #[error("sink error")]
     Sink(#[source] Box<dyn std::error::Error + Sync + Send>),
-
-    #[error("stream error")]
-    Stream(#[source] Box<dyn std::error::Error + Sync + Send>),
 
     #[error("error converting a message into a response")]
     MessageIntoResponse(#[source] message::GetErrorDescriptionError),

@@ -69,29 +69,31 @@ impl Request {
         }
     }
 
-    pub(crate) fn try_from_message(message: Message) -> Result<Option<Self>, format::Error> {
+    pub(crate) fn try_from_message(
+        message: Message,
+    ) -> Result<Result<Self, Message>, format::Error> {
         let request = match message.kind() {
-            message::Kind::Call => Some(Self::Call {
+            message::Kind::Call => Ok(Self::Call {
                 id: message.id().into(),
                 subject: message.subject(),
                 payload: message.into_payload(),
             }),
-            message::Kind::Post => Some(Self::Post {
+            message::Kind::Post => Ok(Self::Post {
                 id: message.id().into(),
                 subject: message.subject(),
                 payload: message.into_payload(),
             }),
-            message::Kind::Event => Some(Self::Event {
+            message::Kind::Event => Ok(Self::Event {
                 id: message.id().into(),
                 subject: message.subject(),
                 payload: message.into_payload(),
             }),
-            message::Kind::Cancel => Some(Self::Cancel {
+            message::Kind::Cancel => Ok(Self::Cancel {
                 id: message.id().into(),
                 subject: message.subject(),
                 call_id: message.value()?,
             }),
-            _ => None,
+            _ => Err(message),
         };
         Ok(request)
     }
@@ -103,7 +105,7 @@ impl From<Request> for Message {
     }
 }
 
-impl TryFrom<Message> for Option<Request> {
+impl TryFrom<Message> for Result<Request, Message> {
     type Error = format::Error;
 
     fn try_from(message: Message) -> Result<Self, Self::Error> {
@@ -186,8 +188,9 @@ impl Response {
 
     pub(crate) fn try_from_message(
         message: Message,
-    ) -> Result<Response, message::GetErrorDescriptionError> {
-        CallResponse::try_from_message(message).map(Self)
+    ) -> Result<Result<Response, Message>, message::GetErrorDescriptionError> {
+        CallResponse::try_from_message(message)
+            .map(|response| response.map(|response| Self(Some(response))))
     }
 
     pub(crate) fn try_into_message(self) -> Result<Option<Message>, format::Error> {
@@ -195,7 +198,7 @@ impl Response {
     }
 }
 
-impl TryFrom<Message> for Response {
+impl TryFrom<Message> for Result<Response, Message> {
     type Error = message::GetErrorDescriptionError;
 
     fn try_from(message: Message) -> Result<Self, Self::Error> {
@@ -269,7 +272,7 @@ impl CallResponse {
 
     fn try_from_message(
         message: Message,
-    ) -> Result<Option<Self>, message::GetErrorDescriptionError> {
+    ) -> Result<Result<Self, Message>, message::GetErrorDescriptionError> {
         use message::Kind;
         let response = Self {
             id: message.id().into(),
@@ -278,10 +281,10 @@ impl CallResponse {
                 Kind::Reply => CallResponseKind::Reply(message.into_payload()),
                 Kind::Error => CallResponseKind::Error(message.error_description()?),
                 Kind::Canceled => CallResponseKind::Canceled,
-                _ => return Ok(None),
+                _ => return Ok(Err(message)),
             },
         };
-        Ok(Some(response))
+        Ok(Ok(response))
     }
 }
 
