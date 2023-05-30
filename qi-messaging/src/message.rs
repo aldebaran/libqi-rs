@@ -119,13 +119,13 @@ impl Version {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display)]
 pub enum Subject {
-    Server(ServerSubject),
+    Control(ControlSubject),
     Service(ServiceSubject),
 }
 
 impl Default for Subject {
     fn default() -> Self {
-        Self::Server(ServerSubject::default())
+        Self::Control(ControlSubject::default())
     }
 }
 
@@ -134,13 +134,15 @@ impl Subject {
 
     pub const fn new(service: Service, object: Object, action: Action) -> Self {
         match (service, object) {
-            (ServerSubject::SERVICE, ServerSubject::OBJECT) => Self::Server(ServerSubject(action)),
+            (ControlSubject::SERVICE, ControlSubject::OBJECT) => {
+                Self::Control(ControlSubject(action))
+            }
             _ => Self::Service(ServiceSubject(service, object, action)),
         }
     }
 
-    pub const fn server(action: Action) -> Self {
-        Self::Server(ServerSubject(action))
+    pub const fn control(action: Action) -> Self {
+        Self::Control(ControlSubject(action))
     }
 
     fn read<B>(buf: &mut B) -> Self
@@ -164,21 +166,21 @@ impl Subject {
 
     pub const fn service(&self) -> Service {
         match self {
-            Subject::Server(s) => s.service(),
+            Subject::Control(s) => s.service(),
             Subject::Service(s) => s.service(),
         }
     }
 
     pub const fn object(&self) -> Object {
         match self {
-            Subject::Server(s) => s.object(),
+            Subject::Control(s) => s.object(),
             Subject::Service(s) => s.object(),
         }
     }
 
     pub const fn action(&self) -> Action {
         match self {
-            Subject::Server(s) => s.action(),
+            Subject::Control(s) => s.action(),
             Subject::Service(s) => s.action(),
         }
     }
@@ -187,10 +189,10 @@ impl Subject {
 #[derive(
     Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
 )]
-#[display(fmt = "server({_0})")]
-pub struct ServerSubject(Action);
+#[display(fmt = "control({_0})")]
+pub struct ControlSubject(Action);
 
-impl ServerSubject {
+impl ControlSubject {
     const SERVICE: Service = Service(0);
     const OBJECT: Object = Object(0);
 
@@ -619,7 +621,7 @@ impl Message {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Capabilities)
-            .set_server_subject(None)
+            .set_control_subject(None)
             .set_value(&map)
     }
 
@@ -748,8 +750,8 @@ impl Builder {
         self
     }
 
-    pub fn set_server_subject(self, action: Option<Action>) -> Self {
-        self.set_subject(Subject::server(action.unwrap_or_default()))
+    pub fn set_control_subject(self, action: Option<Action>) -> Self {
+        self.set_subject(Subject::control(action.unwrap_or_default()))
     }
 
     pub fn set_payload(mut self, value: Bytes) -> Self {

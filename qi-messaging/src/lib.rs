@@ -5,10 +5,11 @@
 
 pub mod capabilities;
 mod channel;
+mod client;
+mod control;
 mod message;
-pub(crate) mod request;
-pub mod server;
-pub mod service;
+pub mod request;
+mod server;
 // pub mod session;
 
 pub use qi_format as format;

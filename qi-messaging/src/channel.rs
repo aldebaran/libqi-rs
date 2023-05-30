@@ -1,10 +1,10 @@
 use crate::{
-    format,
+    client, format,
     message::{self, DecodeError, Decoder, EncodeError, Encoder},
     request::{Request, Response},
-    service::{client, server},
+    server,
 };
-use futures::{future::BoxFuture, SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use std::future::Future;
 use tokio::{
     io::{split, AsyncRead, AsyncWrite},
@@ -16,7 +16,7 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite},
     sync::PollSender,
 };
-use tower::{BoxError, Service};
+use tower::Service;
 use tracing::{debug, debug_span};
 
 #[derive(Debug)]
