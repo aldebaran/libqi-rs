@@ -52,10 +52,6 @@ macro_rules! impl_u32_le_field {
             impl $name {
                 const SIZE: usize = std::mem::size_of::<u32>();
 
-                pub const fn new(value: u32) -> Self {
-                    Self(value)
-                }
-
                 fn read<B>(buf: &mut B) -> Self
                 where
                     B: Buf,
@@ -130,7 +126,7 @@ impl Default for Subject {
 }
 
 impl Subject {
-    const SIZE: usize = 3 * std::mem::size_of::<u32>();
+    const SIZE: usize = Service::SIZE + Object::SIZE + Action::SIZE;
 
     pub const fn new(service: Service, object: Object, action: Action) -> Self {
         match (service, object) {
@@ -244,7 +240,11 @@ pub struct Object(u32);
 )]
 pub struct Action(u32);
 
-impl Action {}
+impl Action {
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+}
 
 impl_u32_le_field!(Id, Service, Object, Action);
 
@@ -417,14 +417,6 @@ bitflags::bitflags! {
 impl Flags {
     const SIZE: usize = std::mem::size_of::<u8>();
 
-    fn set_dynamic_payload(&mut self, value: bool) {
-        self.set(Self::DYNAMIC_PAYLOAD, value);
-    }
-
-    fn set_return_type(&mut self, value: bool) {
-        self.set(Self::RETURN_TYPE, value);
-    }
-
     fn read<B>(buf: &mut B) -> Result<Self, InvalidFlagsValueError>
     where
         B: Buf,
@@ -559,10 +551,6 @@ impl Message {
         }
     }
 
-    pub fn builder() -> Builder {
-        Builder::new()
-    }
-
     /// Builds a "call" message.
     ///
     /// This sets the kind, the id and the subject of the message.
@@ -671,16 +659,8 @@ impl Message {
         self.kind
     }
 
-    pub fn flags(&self) -> Flags {
-        self.flags
-    }
-
     pub fn subject(&self) -> Subject {
         self.subject
-    }
-
-    pub fn payload(&self) -> Bytes {
-        self.payload.clone()
     }
 
     pub fn into_payload(self) -> Bytes {
@@ -737,11 +717,6 @@ impl Builder {
 
     pub(crate) fn set_kind(mut self, value: Kind) -> Self {
         self.0.kind = value;
-        self
-    }
-
-    pub(crate) fn set_flags(mut self, value: Flags) -> Self {
-        self.0.flags = value;
         self
     }
 
