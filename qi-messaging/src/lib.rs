@@ -7,10 +7,10 @@ pub mod capabilities;
 mod channel;
 mod client;
 mod control;
+pub mod format;
 mod message;
 pub mod request;
 mod server;
-// pub mod session;
+pub mod session;
 
-pub use qi_format as format;
 pub use qi_types as types;

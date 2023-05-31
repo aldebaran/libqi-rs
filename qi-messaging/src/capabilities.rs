@@ -50,7 +50,11 @@ impl Map {
         matches!(self.get_capability(key), Some(Dynamic::Bool(true)))
     }
 
-    pub(crate) fn resolve_minimums_against<F>(&mut self, other: &Self, mut reset_default: F)
+    pub(crate) fn resolve_minimums_against<F>(
+        &mut self,
+        other: &Self,
+        mut reset_default: F,
+    ) -> &mut Self
     where
         F: FnMut(&mut Dynamic),
     {
@@ -86,6 +90,8 @@ impl Map {
         {
             reset_default(value);
         }
+
+        self
     }
 
     /// Checks that the capabilities have the required values that are only supported by this implementation.

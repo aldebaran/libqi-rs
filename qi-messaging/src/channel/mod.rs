@@ -1,11 +1,18 @@
+pub mod request;
+
+pub(crate) use crate::request::Response;
 use crate::{
     client, format,
     message::{self, DecodeError, Decoder, EncodeError, Encoder},
-    request::{Request, Response},
+    request::{Request as MessagingRequest, RequestId},
     server,
 };
 use futures::{SinkExt, StreamExt};
-use std::future::Future;
+pub(crate) use request::Request;
+use std::{
+    sync::atomic::AtomicU32,
+    task::{Context, Poll},
+};
 use tokio::{
     io::{split, AsyncRead, AsyncWrite},
     pin, select,
@@ -14,7 +21,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::{
     codec::{FramedRead, FramedWrite},
-    sync::PollSender,
+    sync::{PollSendError, PollSender},
 };
 use tower::Service;
 use tracing::{debug, debug_span};
@@ -22,17 +29,20 @@ use tracing::{debug, debug_span};
 #[derive(Debug)]
 pub(crate) struct Channel {
     client: client::Client,
+    current_id: AtomicU32,
 }
 
 impl Channel {
     pub(crate) fn new<IO, Svc>(
         io: IO,
         service: Svc,
-    ) -> (Self, impl Future<Output = Result<(), DispatchError>>)
+    ) -> (
+        Self,
+        impl std::future::Future<Output = Result<(), DispatchError<Svc::Error>>>,
+    )
     where
         IO: AsyncWrite + AsyncRead,
-        Svc: Service<Request, Response = Response>,
-        Svc::Error: Into<Box<dyn std::error::Error>>,
+        Svc: Service<MessagingRequest, Response = Response>,
     {
         let (input, output) = split(io);
         let mut stream = FramedRead::new(input, Decoder::new());
@@ -62,10 +72,11 @@ impl Channel {
                 select! {
                     message = stream.next(), if !stream_is_terminated => {
                         match message.transpose()? {
-                            Some(message) => match Request::try_from_message(message).map_err(DispatchError::MessageIntoRequest)? {
+                            Some(message) => match MessagingRequest::try_from_message(message).map_err(DispatchError::MessageIntoRequest)? {
                                 Ok(request) => {
                                     // Ignore the result of send, it occurs when the server dropped the request stream, which should mean that the server task has terminated.
-                                    let _ = server_requests_tx.send(request).await; }
+                                    let _ = server_requests_tx.send(request).await;
+                                }
                                 Err(message) => if let Ok(response) = Response::try_from_message(message).map_err(DispatchError::MessageIntoResponse)? {
                                     // Ignore the result of send, it occurs when the client dispatch dropped the response stream, which should mean that the client dispatch task has terminated.
                                     let _ = client_responses_tx.send(response).await;
@@ -87,7 +98,7 @@ impl Channel {
                         }
                     }
                     res = &mut client_dispatch => {
-                        res?;
+                        res.map_err(DispatchError::ClientDispatch)?;
                         debug!("client dispatch has terminated with success");
                         break Ok(());
                     }
@@ -100,29 +111,57 @@ impl Channel {
             }
         };
 
-        (Self { client }, dispatch)
+        (
+            Self {
+                client,
+                current_id: AtomicU32::new(1),
+            },
+            dispatch,
+        )
+    }
+
+    fn make_request_id(&self) -> RequestId {
+        let value = self
+            .current_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        RequestId::from(value)
     }
 }
 
-impl Service<Request> for Channel {
+impl Service<MessagingRequest> for Channel {
     type Response = Response;
-    type Error = <client::Client as Service<Request>>::Error;
-    type Future = <client::Client as Service<Request>>::Future;
+    type Error = Error;
+    type Future = Future;
 
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.client.poll_ready(cx)
     }
 
-    fn call(&mut self, request: Request) -> Self::Future {
+    fn call(&mut self, request: MessagingRequest) -> Self::Future {
         self.client.call(request)
     }
 }
 
+pub(crate) type Error = <client::Client as Service<MessagingRequest>>::Error;
+pub(crate) type Future = <client::Client as Service<MessagingRequest>>::Future;
+
+impl Service<Request> for Channel {
+    type Response = Response;
+    type Error = <Self as Service<MessagingRequest>>::Error;
+    type Future = <Self as Service<MessagingRequest>>::Future;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Service::<MessagingRequest>::poll_ready(self, cx)
+    }
+
+    fn call(&mut self, request: Request) -> Self::Future {
+        let request = request.into_messaging_request(self.make_request_id());
+        Service::<MessagingRequest>::call(self, request)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum DispatchError {
+pub(crate) enum DispatchError<SvcErr> {
     #[error("messaging decoding error")]
     Decode(#[from] DecodeError),
 
@@ -130,10 +169,10 @@ pub(crate) enum DispatchError {
     Encode(#[from] EncodeError),
 
     #[error("client dispatch error")]
-    ClientDispatch(#[from] client::DispatchError),
+    ClientDispatch(#[source] PollSendError<MessagingRequest>),
 
     #[error("server error")]
-    Server(#[from] server::Error),
+    Server(#[from] server::Error<PollSendError<Response>, SvcErr>),
 
     #[error("error converting a message into a request")]
     MessageIntoRequest(#[source] format::Error),

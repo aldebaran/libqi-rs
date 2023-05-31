@@ -1,15 +1,8 @@
-use crate::{
-    message::{self},
-    request::{Request, Response},
-};
-use futures::{
-    future::{err, BoxFuture},
-    FutureExt, Sink, SinkExt, Stream, StreamExt,
-};
+use crate::request::{Request, Response};
+use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use std::{
     collections::HashMap,
     fmt::Debug,
-    future::Future,
     task::{Context, Poll},
 };
 use tokio::{
@@ -31,11 +24,14 @@ impl Client {
     pub(crate) fn new<Si, St>(
         responses_stream: St,
         requests_sink: Si,
-    ) -> (Self, impl Future<Output = Result<(), DispatchError>>)
+    ) -> (
+        Self,
+        impl std::future::Future<Output = Result<(), Si::Error>>,
+    )
     where
-        Si: Sink<Request> + Send + 'static,
-        Si::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
-        St: Stream<Item = Response> + Send + 'static,
+        Si: Sink<Request>,
+        Si::Error: std::error::Error,
+        St: Stream<Item = Response>,
     {
         const DISPATCH_CHANNEL_SIZE: usize = 1;
         let (dispatch_sender, dispatch_receiver) = mpsc::channel(DISPATCH_CHANNEL_SIZE);
@@ -48,7 +44,7 @@ impl Client {
 impl Service<Request> for Client {
     type Response = Response;
     type Error = Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Error>>;
+    type Future = Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.dispatch_sender
@@ -58,15 +54,31 @@ impl Service<Request> for Client {
 
     fn call(&mut self, request: Request) -> Self::Future {
         let (response_sender, response_receiver) = oneshot::channel();
-        if let Err(_err) = self.dispatch_sender.send_item((request, response_sender)) {
-            return err(Error::DispatchIsTerminated).boxed();
+        match self.dispatch_sender.send_item((request, response_sender)) {
+            Ok(()) => Future::WaitingForResponse { response_receiver },
+            Err(_err) => Future::DispatchIsTerminated,
         }
-        async move {
-            response_receiver
-                .await
-                .map_err(|_err| Error::DispatchCanceled)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum Future {
+    DispatchIsTerminated,
+    WaitingForResponse {
+        response_receiver: oneshot::Receiver<Response>,
+    },
+}
+
+impl std::future::Future for Future {
+    type Output = Result<Response, Error>;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.get_mut() {
+            Self::DispatchIsTerminated => Poll::Ready(Err(Error::DispatchIsTerminated)),
+            Self::WaitingForResponse { response_receiver } => response_receiver
+                .poll_unpin(cx)
+                .map_err(|_err| Error::DispatchCanceled),
         }
-        .boxed()
     }
 }
 
@@ -84,15 +96,15 @@ async fn dispatch<St, Si>(
     mut request_receiver: mpsc::Receiver<(Request, ResponseSender)>,
     requests_sink: Si,
     responses_stream: St,
-) -> Result<(), DispatchError>
+) -> Result<(), Si::Error>
 where
     Si: Sink<Request>,
-    Si::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
+    Si::Error: std::error::Error,
     St: Stream<Item = Response>,
 {
     let mut ongoing_call_requests = HashMap::new();
     let mut responses_stream_terminated = false;
-    let requests_sink = requests_sink.sink_map_err(|err| DispatchError::Sink(err.into()));
+    let requests_sink = requests_sink;
     pin!(responses_stream, requests_sink);
 
     loop {
@@ -134,13 +146,4 @@ where
         // Cleanup ongoing call requests for which the client has dropped the channel.
         ongoing_call_requests.retain(|_id, response_sender| !response_sender.is_closed())
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum DispatchError {
-    #[error("sink error")]
-    Sink(#[source] Box<dyn std::error::Error + Sync + Send>),
-
-    #[error("error converting a message into a response")]
-    MessageIntoResponse(#[source] message::GetErrorDescriptionError),
 }

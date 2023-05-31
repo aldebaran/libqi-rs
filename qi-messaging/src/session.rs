@@ -1,67 +1,87 @@
 use crate::{
     capabilities,
-    channel::Channel,
-    service::{client::Client, Request, Service},
+    channel::{self, Channel, Request, Response},
+    control,
+    request::Request as MessagingRequest,
 };
-use futures::{future::LocalBoxFuture, FutureExt};
+use futures::FutureExt;
 use std::{
     fmt::Debug,
-    future::Future,
-    pin::Pin,
     task::{Context, Poll},
 };
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    spawn,
+};
+use tower::Service;
+use tracing::info;
 
 #[derive(Debug)]
-pub struct Session<S> {
-    channel: Channel<Client<Error>, S>,
+pub struct Session {
+    channel: Channel,
     capabilities: capabilities::Map,
 }
 
 impl Session {
+    pub async fn new<IO, Svc>(io: IO, service: Svc) -> Result<Session, Error>
+    where
+        IO: AsyncWrite + AsyncRead + Send + 'static,
+        Svc: Service<MessagingRequest, Response = Response> + Send + 'static,
+        Svc::Future: Send,
+        Svc::Error: std::error::Error + Send,
+    {
+        use crate::control::ServiceExt;
+        let (mut channel, dispatch) = Channel::new(io, service);
+        let capabilities = channel.authenticate().await?;
+        spawn(async {
+            if let Err(err) = dispatch.await {
+                info!(
+                    error = &err as &dyn std::error::Error,
+                    "session dispatch has returned an error"
+                );
+            }
+        });
+        Ok(Self {
+            channel,
+            capabilities,
+        })
+    }
+
     pub fn capabilities(&self) -> &capabilities::Map {
         &self.capabilities
     }
 }
 
-impl<C, S> tower::Service<Request> for Session<S>
-where
-    C: Service,
-{
-    type Response = C::Response;
-    type Error = Error<C::Error>;
-    type Future = C::Future;
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+pub struct Error(#[from] control::AuthenticateError);
+
+impl Service<Request> for Session {
+    type Response = Response;
+    type Error = ServiceError;
+    type Future = ServiceFuture;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.channel.poll_ready(cx).map_err(Into::into)
+        <Channel as Service<Request>>::poll_ready(&mut self.channel, cx).map_err(ServiceError)
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        self.channel.call(req)
+        ServiceFuture(self.channel.call(req))
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
-pub struct Error<E>(#[from] E);
+pub struct ServiceError(channel::Error);
 
-pub struct Run<'a, E> {
-    inner: LocalBoxFuture<'a, Result<(), RunError<E>>>,
-}
+#[derive(Debug)]
+#[must_use = "futures do nothing until polled"]
+pub struct ServiceFuture(channel::Future);
 
-impl<'a, E> Debug for Run<'a, E> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Run").field("inner", &"dyn Future").finish()
+impl std::future::Future for ServiceFuture {
+    type Output = Result<Response, ServiceError>;
+
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.0.poll_unpin(cx).map_err(ServiceError)
     }
 }
-
-impl<'a, E> Future for Run<'a, E> {
-    type Output = Result<(), RunError<E>>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.inner.poll_unpin(cx)
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct RunError<E>(#[from] E);

@@ -769,9 +769,7 @@ impl Builder {
         if self.0.flags.contains(Flags::DYNAMIC_PAYLOAD) {
             todo!("serialize a value as a dynamic")
         } else {
-            let mut writer = BytesMut::new().writer();
-            format::to_writer(&mut writer, &value)?;
-            self.0.payload = writer.into_inner().freeze();
+            self.0.payload = format::to_bytes(value)?;
         };
         Ok(self)
     }

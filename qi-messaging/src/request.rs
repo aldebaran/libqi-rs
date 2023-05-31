@@ -33,6 +33,42 @@ pub enum Request {
 }
 
 impl Request {
+    pub fn call<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+    where
+        T: serde::Serialize,
+    {
+        let payload = format::to_bytes(value)?;
+        Ok(Self::Call {
+            id,
+            subject,
+            payload,
+        })
+    }
+
+    pub fn post<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+    where
+        T: serde::Serialize,
+    {
+        let payload = format::to_bytes(value)?;
+        Ok(Self::Post {
+            id,
+            subject,
+            payload,
+        })
+    }
+
+    pub fn event<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+    where
+        T: serde::Serialize,
+    {
+        let payload = format::to_bytes(value)?;
+        Ok(Self::Event {
+            id,
+            subject,
+            payload,
+        })
+    }
+
     pub fn id(&self) -> RequestId {
         match *self {
             Request::Call { id, .. } => id,
@@ -177,8 +213,11 @@ impl Response {
         Self(None)
     }
 
-    pub fn reply(id: RequestId, subject: Subject, payload: Bytes) -> Self {
-        Self(Some(CallResponse::reply(id, subject, payload)))
+    pub fn reply<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+    where
+        T: serde::Serialize,
+    {
+        Ok(Self(Some(CallResponse::reply(id, subject, value)?)))
     }
 
     pub fn error(id: RequestId, subject: Subject, description: impl Into<String>) -> Self {
@@ -207,6 +246,21 @@ impl Response {
     pub(crate) fn try_into_message(self) -> Result<Option<Message>, format::Error> {
         self.0.map(|r| r.try_into_message()).transpose()
     }
+
+    pub fn into_call_result<T>(self) -> Result<T, CallError>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let call_response = self.0.ok_or(CallError::Empty)?;
+        match call_response.kind {
+            CallResponseKind::Reply(payload) => {
+                let value = format::from_bytes(&payload).map_err(CallError::ReplyPayloadFormat)?;
+                Ok(value)
+            }
+            CallResponseKind::Error(description) => Err(CallError::Error(description.into())),
+            CallResponseKind::Canceled => Err(CallError::Canceled),
+        }
+    }
 }
 
 impl TryFrom<Message> for Result<Response, Message> {
@@ -233,12 +287,16 @@ pub struct CallResponse {
 }
 
 impl CallResponse {
-    pub fn reply(id: RequestId, subject: Subject, payload: Bytes) -> Self {
-        Self {
+    pub fn reply<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+    where
+        T: serde::Serialize,
+    {
+        let payload = format::to_bytes(value)?;
+        Ok(Self {
             id,
             subject,
             kind: CallResponseKind::Reply(payload),
-        }
+        })
     }
 
     pub fn error(id: RequestId, subject: Subject, description: impl Into<String>) -> Self {
@@ -274,8 +332,8 @@ impl CallResponse {
             CallResponseKind::Reply(payload) => Message::reply(self.id.into(), self.subject)
                 .set_payload(payload)
                 .build(),
-            CallResponseKind::Error(descr) => {
-                Message::error(self.id.into(), self.subject, &descr)?.build()
+            CallResponseKind::Error(description) => {
+                Message::error(self.id.into(), self.subject, &description)?.build()
             }
             CallResponseKind::Canceled => Message::canceled(self.id.into(), self.subject).build(),
         })
@@ -303,5 +361,20 @@ impl CallResponse {
 pub enum CallResponseKind {
     Reply(Bytes),
     Error(String),
+    Canceled,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CallError {
+    #[error("the call request did not get a response")]
+    Empty,
+
+    #[error("error deserializing the value from the reply payload")]
+    ReplyPayloadFormat(#[from] format::Error),
+
+    #[error("the call request resulted in an error")]
+    Error(Box<dyn std::error::Error>),
+
+    #[error("the call request has been canceled")]
     Canceled,
 }

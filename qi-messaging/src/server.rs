@@ -12,17 +12,15 @@ pub(crate) async fn serve<St, Si, Svc>(
     requests_stream: St,
     responses_sink: Si,
     service: Svc,
-) -> Result<(), Error>
+) -> Result<(), Error<Si::Error, Svc::Error>>
 where
     St: Stream<Item = Request>,
     Si: Sink<Response>,
-    Si::Error: Into<Box<dyn std::error::Error>>,
     Svc: tower::Service<Request, Response = Response>,
-    Svc::Error: Into<Box<dyn std::error::Error>>,
 {
     let mut requests_stream_terminated = false;
-    let responses_sink = responses_sink.sink_map_err(|err| Error::Sink(err.into()));
-    let mut service = service.map_err(|err| Error::Service(err.into()));
+    let responses_sink = responses_sink.sink_map_err(Error::Sink);
+    let mut service = service.map_err(Error::Service);
     let mut responses_futures = FuturesUnordered::new();
     pin!(requests_stream, responses_sink);
 
@@ -55,12 +53,12 @@ where
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum Error {
+pub(crate) enum Error<SiErr, SvcErr> {
     #[error("output sink error")]
-    Sink(#[source] Box<dyn std::error::Error>),
+    Sink(#[source] SiErr),
 
     #[error("service error")]
-    Service(#[source] Box<dyn std::error::Error>),
+    Service(#[source] SvcErr),
 }
 
 #[cfg(test)]
@@ -105,7 +103,7 @@ mod tests {
                     let barrier = self.request_barriers[&id].clone();
                     async move {
                         barrier.wait().await;
-                        Ok(Response::reply(id, subject, Bytes::new()))
+                        Ok(Response::reply(id, subject, &()).unwrap())
                     }
                     .boxed()
                 }
@@ -181,17 +179,17 @@ mod tests {
         // Unblock request no.3, its response is received.
         assert_matches!(poll_immediate(barrier_3.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(3), subject, Bytes::new()));
+        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(3), subject, &()).unwrap());
 
         // Unblock request no.1, its response is received.
         assert_matches!(poll_immediate(barrier_1.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(1), subject, Bytes::new()));
+        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(1), subject, &()).unwrap());
 
         // Unblock request no.2, its response is received.
         assert_matches!(poll_immediate(barrier_2.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(2), subject, Bytes::new()));
+        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(2), subject, &()).unwrap());
 
         // Terminate the server by closing the messages stream.
         drop(requests_tx);
