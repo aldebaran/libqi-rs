@@ -8,7 +8,7 @@ use tower::{Service, ServiceExt};
 use tracing::{debug, debug_span, instrument, Instrument};
 
 #[instrument(level = "debug", skip_all, err)]
-pub(crate) async fn serve<St, Si, Svc>(
+pub async fn serve<St, Si, Svc>(
     requests_stream: St,
     responses_sink: Si,
     service: Svc,
@@ -53,7 +53,7 @@ where
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum Error<SiErr, SvcErr> {
+pub enum Error<SiErr, SvcErr> {
     #[error("output sink error")]
     Sink(#[source] SiErr),
 

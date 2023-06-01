@@ -42,15 +42,21 @@
 //!
 //!  The total header size is therefore 28 bytes.
 
-use crate::{capabilities, format, types::Dynamic};
+use crate::{capabilities, format};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use tracing::{instrument, warn};
+use qi_types::Dynamic;
+use tracing::instrument;
 
 macro_rules! impl_u32_le_field {
     ($($name:ident),+) => {
         $(
             impl $name {
                 const SIZE: usize = std::mem::size_of::<u32>();
+
+                #[allow(unused)]
+                pub const fn new(value: u32) -> Self {
+                    Self(value)
+                }
 
                 fn read<B>(buf: &mut B) -> Self
                 where
@@ -87,7 +93,7 @@ macro_rules! impl_u32_le_field {
     serde::Deserialize,
 )]
 #[serde(transparent)]
-pub(crate) struct Id(pub u32);
+pub struct Id(pub u32);
 
 #[derive(
     Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::Display,
@@ -205,6 +211,8 @@ impl ControlSubject {
     }
 }
 
+pub const CAPABILITIES_SUBJECT: Subject = Subject::control(Action(0));
+
 #[derive(
     Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
 )]
@@ -240,12 +248,6 @@ pub struct Object(u32);
 )]
 pub struct Action(u32);
 
-impl Action {
-    pub const fn new(value: u32) -> Self {
-        Self(value)
-    }
-}
-
 impl_u32_le_field!(Id, Service, Object, Action);
 
 #[derive(
@@ -280,7 +282,7 @@ impl MagicCookie {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error("invalid message magic cookie value {0:x}")]
-pub(crate) struct InvalidMagicCookieValueError(u32);
+pub struct InvalidMagicCookieValueError(u32);
 
 #[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 struct PayloadSize(usize);
@@ -319,14 +321,14 @@ impl PayloadSize {
     "message payload size {0} cannot be represented as an usize (the maximum for this system is {})",
     usize::MAX
 )]
-pub(crate) struct PayloadCannotBeRepresentedAsUSizeError(u32);
+pub struct PayloadCannotBeRepresentedAsUSizeError(u32);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error(
     "message payload size {0} cannot be represented as an u32 (the maximum for this system is {})",
     u32::MAX
 )]
-pub(crate) struct PayloadCannotBeRepresentedAsU32Error(usize);
+pub struct PayloadCannotBeRepresentedAsU32Error(usize);
 
 #[derive(
     Clone,
@@ -342,7 +344,7 @@ pub(crate) struct PayloadCannotBeRepresentedAsU32Error(usize);
     num_derive::ToPrimitive,
 )]
 #[repr(u8)]
-pub(crate) enum Kind {
+pub enum Kind {
     #[display(fmt = "call")]
     Call = 1,
     #[display(fmt = "reply")]
@@ -403,12 +405,12 @@ impl std::convert::TryFrom<u8> for Kind {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, thiserror::Error)]
 #[error("invalid message kind value {0}")]
-pub(crate) struct InvalidKindValueError(u8);
+pub struct InvalidKindValueError(u8);
 
 bitflags::bitflags! {
     #[derive(Default, derive_more::Display)]
     #[display(fmt = "{:b}", "self.bits()")]
-    pub(crate) struct Flags: u8 {
+    pub struct Flags: u8 {
         const DYNAMIC_PAYLOAD = 0b00000001;
         const RETURN_TYPE = 0b00000010;
     }
@@ -507,7 +509,7 @@ impl Header {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub(crate) enum ReadHeaderError {
+pub enum ReadHeaderError {
     #[error(transparent)]
     MagicCookie(#[from] InvalidMagicCookieValueError),
 
@@ -525,14 +527,14 @@ pub(crate) enum ReadHeaderError {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub(crate) enum WriteHeaderError {
+pub enum WriteHeaderError {
     #[error(transparent)]
     PayloadSize(#[from] PayloadCannotBeRepresentedAsU32Error),
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, derive_more::Display)]
 #[display(fmt = "message(id={id}, {kind}, subject={subject}, flags={flags})")]
-pub(crate) struct Message {
+pub struct Message {
     id: Id,
     kind: Kind,
     subject: Subject,
@@ -609,7 +611,7 @@ impl Message {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Capabilities)
-            .set_control_subject(None)
+            .set_subject(CAPABILITIES_SUBJECT)
             .set_value(&map)
     }
 
@@ -697,7 +699,7 @@ pub enum GetErrorDescriptionError {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub(crate) struct Builder(Message);
+pub struct Builder(Message);
 
 impl Default for Builder {
     fn default() -> Self {
@@ -710,23 +712,19 @@ impl Builder {
         Self(Message::default())
     }
 
-    pub fn set_id(mut self, value: Id) -> Self {
+    fn set_id(mut self, value: Id) -> Self {
         self.0.id = value;
         self
     }
 
-    pub(crate) fn set_kind(mut self, value: Kind) -> Self {
+    fn set_kind(mut self, value: Kind) -> Self {
         self.0.kind = value;
         self
     }
 
-    pub fn set_subject(mut self, value: Subject) -> Self {
+    fn set_subject(mut self, value: Subject) -> Self {
         self.0.subject = value;
         self
-    }
-
-    pub fn set_control_subject(self, action: Option<Action>) -> Self {
-        self.set_subject(Subject::control(action.unwrap_or_default()))
     }
 
     pub fn set_payload(mut self, value: Bytes) -> Self {
@@ -759,7 +757,7 @@ impl Builder {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-pub(crate) struct Encoder;
+pub struct Encoder;
 
 impl tokio_util::codec::Encoder<Message> for Encoder {
     type Error = EncodeError;
@@ -773,7 +771,7 @@ impl tokio_util::codec::Encoder<Message> for Encoder {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum EncodeError {
+pub enum EncodeError {
     #[error("write header error")]
     WriteHeader(#[from] WriteHeaderError),
 
@@ -782,12 +780,12 @@ pub(crate) enum EncodeError {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-pub(crate) struct Decoder {
+pub struct Decoder {
     state: DecoderState,
 }
 
 impl Decoder {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             state: DecoderState::Header,
         }
@@ -804,7 +802,7 @@ impl tokio_util::codec::Decoder for Decoder {
     type Item = Message;
     type Error = DecodeError;
 
-    #[instrument(name = "decode", skip_all, err)]
+    #[instrument(name = "decode", skip_all, err, level = "debug")]
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let msg = loop {
             match self.state {
@@ -827,7 +825,7 @@ impl tokio_util::codec::Decoder for Decoder {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum DecodeError {
+pub enum DecodeError {
     #[error("read header error")]
     ReadHeader(#[from] ReadHeaderError),
 
@@ -841,7 +839,7 @@ enum DecoderState {
     Payload(Header),
 }
 
-#[instrument(skip_all)]
+#[instrument(skip_all, level = "debug")]
 fn decode_header(src: &mut bytes::BytesMut) -> Result<Option<Header>, DecodeError> {
     if src.len() < Header::SIZE {
         src.reserve(Header::SIZE - src.len());
@@ -853,7 +851,7 @@ fn decode_header(src: &mut bytes::BytesMut) -> Result<Option<Header>, DecodeErro
     Ok(Some(header))
 }
 
-#[instrument(skip_all)]
+#[instrument(skip_all, level = "debug")]
 fn decode_payload(size: usize, src: &mut BytesMut) -> Option<Bytes> {
     if src.len() < size {
         src.reserve(size - src.len());

@@ -1,11 +1,17 @@
+pub use crate::request::Response;
 use crate::{
     capabilities, format,
-    message::Subject,
-    request::{self, RequestId},
+    message::{self, Subject},
+    request::{Request as MessagingRequest, RequestId},
 };
 use bytes::Bytes;
+use pin_project_lite::pin_project;
+use std::{
+    pin::Pin,
+    task::{Context, Poll},
+};
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Debug)]
 pub enum Request {
     Call {
         subject: Subject,
@@ -51,29 +57,84 @@ impl Request {
         Ok(Self::Event { subject, payload })
     }
 
-    pub fn into_messaging_request(self, id: RequestId) -> request::Request {
+    pub fn subject(&self) -> Subject {
         match self {
-            Self::Call { subject, payload } => request::Request::Call {
+            Self::Call { subject, .. }
+            | Self::Post { subject, .. }
+            | Self::Event { subject, .. }
+            | Self::Cancel { subject, .. } => *subject,
+            Self::Capabilities(_) => message::CAPABILITIES_SUBJECT,
+        }
+    }
+
+    pub fn into_messaging_request(self, id: RequestId) -> MessagingRequest {
+        match self {
+            Self::Call { subject, payload } => MessagingRequest::Call {
                 id,
                 subject,
                 payload,
             },
-            Self::Post { subject, payload } => request::Request::Post {
+            Self::Post { subject, payload } => MessagingRequest::Post {
                 id,
                 subject,
                 payload,
             },
-            Self::Event { subject, payload } => request::Request::Event {
+            Self::Event { subject, payload } => MessagingRequest::Event {
                 id,
                 subject,
                 payload,
             },
-            Self::Cancel { subject, call_id } => request::Request::Cancel {
+            Self::Cancel { subject, call_id } => MessagingRequest::Cancel {
                 id,
                 subject,
                 call_id,
             },
-            Self::Capabilities(capabilities) => request::Request::Capabilities { id, capabilities },
+            Self::Capabilities(capabilities) => MessagingRequest::Capabilities { id, capabilities },
         }
+    }
+}
+
+impl From<MessagingRequest> for Request {
+    fn from(request: MessagingRequest) -> Self {
+        match request {
+            MessagingRequest::Call {
+                subject, payload, ..
+            } => Self::Call { subject, payload },
+            MessagingRequest::Post {
+                subject, payload, ..
+            } => Self::Post { subject, payload },
+            MessagingRequest::Event {
+                subject, payload, ..
+            } => Self::Event { subject, payload },
+            MessagingRequest::Cancel {
+                subject, call_id, ..
+            } => Self::Cancel { subject, call_id },
+            MessagingRequest::Capabilities { capabilities, .. } => Self::Capabilities(capabilities),
+        }
+    }
+}
+
+pin_project! {
+    #[derive(derive_new::new, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+    pub struct ResponseFuture<F> {
+        request_id: RequestId,
+        #[pin]
+        inner: F,
+    }
+}
+
+impl<F> ResponseFuture<F> {
+    pub fn request_id(&self) -> RequestId {
+        self.request_id
+    }
+}
+
+impl<F> std::future::Future for ResponseFuture<F>
+where
+    F: std::future::Future,
+{
+    type Output = F::Output;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().inner.poll(cx)
     }
 }

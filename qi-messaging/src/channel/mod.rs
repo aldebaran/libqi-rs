@@ -1,6 +1,5 @@
-pub mod request;
+mod request;
 
-pub(crate) use crate::request::Response;
 use crate::{
     client, format,
     message::{self, DecodeError, Decoder, EncodeError, Encoder},
@@ -8,7 +7,7 @@ use crate::{
     server,
 };
 use futures::{SinkExt, StreamExt};
-pub(crate) use request::Request;
+pub use request::{Request, Response, ResponseFuture};
 use std::{
     sync::atomic::AtomicU32,
     task::{Context, Poll},
@@ -23,17 +22,17 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite},
     sync::{PollSendError, PollSender},
 };
-use tower::Service;
+use tower::{Service, ServiceExt};
 use tracing::{debug, debug_span};
 
 #[derive(Debug)]
-pub(crate) struct Channel {
+pub struct Channel {
     client: client::Client,
     current_id: AtomicU32,
 }
 
 impl Channel {
-    pub(crate) fn new<IO, Svc>(
+    pub fn new<IO, Svc>(
         io: IO,
         service: Svc,
     ) -> (
@@ -42,11 +41,12 @@ impl Channel {
     )
     where
         IO: AsyncWrite + AsyncRead,
-        Svc: Service<MessagingRequest, Response = Response>,
+        Svc: Service<Request, Response = Response>,
     {
         let (input, output) = split(io);
         let mut stream = FramedRead::new(input, Decoder::new());
         let mut sink = FramedWrite::new(output, Encoder);
+        let service = service.map_request(Into::into);
 
         const DISPATCH_CHANNEL_SIZE: usize = 1;
         let (client_responses_tx, client_responses_rx) = mpsc::channel(DISPATCH_CHANNEL_SIZE);
@@ -128,7 +128,7 @@ impl Channel {
     }
 }
 
-impl Service<MessagingRequest> for Channel {
+impl Service<Request> for Channel {
     type Response = Response;
     type Error = Error;
     type Future = Future;
@@ -137,31 +137,18 @@ impl Service<MessagingRequest> for Channel {
         self.client.poll_ready(cx)
     }
 
-    fn call(&mut self, request: MessagingRequest) -> Self::Future {
-        self.client.call(request)
-    }
-}
-
-pub(crate) type Error = <client::Client as Service<MessagingRequest>>::Error;
-pub(crate) type Future = <client::Client as Service<MessagingRequest>>::Future;
-
-impl Service<Request> for Channel {
-    type Response = Response;
-    type Error = <Self as Service<MessagingRequest>>::Error;
-    type Future = <Self as Service<MessagingRequest>>::Future;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Service::<MessagingRequest>::poll_ready(self, cx)
-    }
-
     fn call(&mut self, request: Request) -> Self::Future {
-        let request = request.into_messaging_request(self.make_request_id());
-        Service::<MessagingRequest>::call(self, request)
+        let request_id = self.make_request_id();
+        let request = request.into_messaging_request(request_id);
+        Future::new(request_id, self.client.call(request))
     }
 }
+
+pub type Future = ResponseFuture<client::Future>;
+pub type Error = client::Error;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum DispatchError<SvcErr> {
+pub enum DispatchError<SvcErr> {
     #[error("messaging decoding error")]
     Decode(#[from] DecodeError),
 

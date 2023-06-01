@@ -6,11 +6,10 @@
 pub mod capabilities;
 mod channel;
 mod client;
-mod control;
-pub mod format;
+mod format;
 mod message;
-pub mod request;
+mod request;
 mod server;
 pub mod session;
 
-pub use qi_types as types;
+pub use session::{ClientError, Request, Session};

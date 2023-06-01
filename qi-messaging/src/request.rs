@@ -4,7 +4,7 @@ use crate::{
 };
 use bytes::Bytes;
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Debug)]
 pub enum Request {
     Call {
         id: RequestId,
@@ -79,7 +79,7 @@ impl Request {
         }
     }
 
-    pub(crate) fn try_into_message(self) -> Result<Message, format::Error> {
+    pub fn try_into_message(self) -> Result<Message, format::Error> {
         let message = match self {
             Self::Call {
                 id,
@@ -114,9 +114,7 @@ impl Request {
         Ok(message)
     }
 
-    pub(crate) fn try_from_message(
-        message: Message,
-    ) -> Result<Result<Self, Message>, format::Error> {
+    pub fn try_from_message(message: Message) -> Result<Result<Self, Message>, format::Error> {
         let request = match message.kind() {
             message::Kind::Call => Ok(Self::Call {
                 id: message.id().into(),
@@ -194,6 +192,7 @@ impl From<RequestId> for message::Id {
 }
 
 #[derive(
+    derive_new::new,
     Default,
     PartialEq,
     Eq,
@@ -236,14 +235,14 @@ impl Response {
         self.0
     }
 
-    pub(crate) fn try_from_message(
+    pub fn try_from_message(
         message: Message,
     ) -> Result<Result<Response, Message>, message::GetErrorDescriptionError> {
         CallResponse::try_from_message(message)
             .map(|response| response.map(|response| Self(Some(response))))
     }
 
-    pub(crate) fn try_into_message(self) -> Result<Option<Message>, format::Error> {
+    pub fn try_into_message(self) -> Result<Option<Message>, format::Error> {
         self.0.map(|r| r.try_into_message()).transpose()
     }
 
@@ -257,7 +256,7 @@ impl Response {
                 let value = format::from_bytes(&payload).map_err(CallError::ReplyPayloadFormat)?;
                 Ok(value)
             }
-            CallResponseKind::Error(description) => Err(CallError::Error(description.into())),
+            CallResponseKind::Error(description) => Err(CallError::Error(description)),
             CallResponseKind::Canceled => Err(CallError::Canceled),
         }
     }
@@ -372,8 +371,8 @@ pub enum CallError {
     #[error("error deserializing the value from the reply payload")]
     ReplyPayloadFormat(#[from] format::Error),
 
-    #[error("the call request resulted in an error")]
-    Error(Box<dyn std::error::Error>),
+    #[error("the call request has resulted in an error: {0}")]
+    Error(String),
 
     #[error("the call request has been canceled")]
     Canceled,

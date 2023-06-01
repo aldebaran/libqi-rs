@@ -1,22 +1,11 @@
-use crate::types::{self, Dynamic};
 use derive_more::{From, Into};
-use std::cmp::Ordering;
+use once_cell::sync::OnceCell;
+pub use qi_types::Dynamic;
+use std::{borrow::Borrow, cmp::Ordering, collections::HashMap};
 
-type MapImpl = types::Map<String, Dynamic>;
+type MapImpl = HashMap<String, Dynamic>;
 
-#[derive(
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Debug,
-    From,
-    Into,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+#[derive(Default, Clone, Debug, From, Into, serde::Serialize, serde::Deserialize)]
 pub struct Map(MapImpl);
 
 impl Map {
@@ -36,60 +25,35 @@ impl Map {
         self.into_iter()
     }
 
-    pub fn get_capability<K>(&self, key: K) -> Option<&Dynamic>
+    pub fn get<K>(&self, key: &K) -> Option<&Dynamic>
     where
-        K: PartialEq<String>,
+        String: Borrow<K>,
+        K: std::hash::Hash + Eq + ?Sized,
     {
-        self.0.get(&key)
+        self.0.get(key)
     }
 
-    pub fn has_flag_capability<K>(&self, key: K) -> bool
+    pub fn has_flag_capability<K>(&self, key: &K) -> bool
     where
-        K: PartialEq<String>,
+        String: Borrow<K>,
+        K: std::hash::Hash + Eq + ?Sized,
     {
-        matches!(self.get_capability(key), Some(Dynamic::Bool(true)))
+        matches!(self.get(key), Some(Dynamic::Bool(true)))
     }
 
-    pub(crate) fn resolve_minimums_against<F>(
-        &mut self,
-        other: &Self,
-        mut reset_default: F,
-    ) -> &mut Self
-    where
-        F: FnMut(&mut Dynamic),
-    {
-        use types::map::Entry;
+    pub(crate) fn intersect(&mut self, other: &Self) -> &mut Self {
         for (key, other_value) in other.iter() {
-            match self.0.entry(key.clone()) {
-                Entry::Occupied(mut entry) => {
-                    // Prefer values from this map when no ordering can be made. Only use the other map
-                    // values if they are strictly inferior.
-                    if let Some(Ordering::Less) = other_value.partial_cmp(entry.get()) {
-                        entry.insert(other_value.clone());
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    // The value does not exist in this one but exists in the other, set them to
-                    // the default.
-                    let mut value = other_value.clone();
-                    reset_default(&mut value);
-                    entry.insert(value);
+            if let Some(value) = self.0.get_mut(key) {
+                // Prefer values from this map when no ordering can be made. Only use the other map
+                // values if they are strictly inferior.
+                if let Some(Ordering::Less) = other_value.partial_cmp(value) {
+                    *value = other_value.clone();
                 }
             }
         }
 
-        // Check for capabilities that were present in this one but not in the other, and reset
-        // them to the default.
-        for value in
-            self.0
-                .iter_mut()
-                .filter_map(|(key, value)| match other.get_capability(key.as_str()) {
-                    Some(_) => None,
-                    None => Some(value),
-                })
-        {
-            reset_default(value);
-        }
+        // Only keep capabilities that were present in `other`.
+        self.0.retain(|k, _| other.get(k).is_some());
 
         self
     }
@@ -138,7 +102,7 @@ impl<'a> std::iter::IntoIterator for &'a Map {
     type IntoIter = <&'a MapImpl as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.0).into_iter()
+        self.0.iter()
     }
 }
 
@@ -165,25 +129,9 @@ where
     }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
 #[error("expected key {0} to have value {1}")]
 pub(crate) struct ExpectedKeyValueError<T>(String, T);
-
-pub fn reset_to_default(value: &mut Dynamic) {
-    match value {
-        Dynamic::Unit => {}
-        Dynamic::Bool(v) => *v = Default::default(),
-        Dynamic::Number(v) => *v = Default::default(),
-        Dynamic::String(v) => *v = Default::default(),
-        Dynamic::Raw(v) => *v = Default::default(),
-        Dynamic::Option(v) => *v = Default::default(),
-        Dynamic::List(v) => *v = Default::default(),
-        Dynamic::Map(v) => *v = Default::default(),
-        Dynamic::Tuple(v) => *v = Default::default(),
-        Dynamic::Object(v) => *v = Default::default(),
-        Dynamic::Dynamic(v) => *v = Default::default(),
-    }
-}
 
 #[derive(Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub(crate) struct Base {
@@ -246,8 +194,16 @@ const LOCAL_BASE_CAPABILITIES: Base = Base {
     relative_endpoint_uri: true,
 };
 
-pub(crate) fn local() -> Map {
-    LOCAL_BASE_CAPABILITIES.to_map()
+static LOCAL_CAPABILITIES: OnceCell<Map> = OnceCell::new();
+
+pub(crate) fn local() -> &'static Map {
+    LOCAL_CAPABILITIES.get_or_init(|| LOCAL_BASE_CAPABILITIES.to_map())
+}
+
+pub(crate) fn local_intersected_with(remote: &Map) -> Result<Map, ExpectedKeyValueError<bool>> {
+    let mut capabilities = local().clone();
+    capabilities.intersect(remote).check_required()?;
+    Ok(capabilities)
 }
 
 #[cfg(test)]
@@ -273,15 +229,15 @@ mod tests {
             ("G", true),
             ("H", false),
         ]);
-        m.resolve_minimums_against(&m2, reset_to_default);
-        assert_matches!(m.get_capability("A"), Some(Dynamic::Bool(true)));
-        assert_matches!(m.get_capability("B"), Some(Dynamic::Bool(false)));
-        assert_matches!(m.get_capability("C"), Some(Dynamic::Bool(false)));
-        assert_matches!(m.get_capability("D"), Some(Dynamic::Bool(false)));
-        assert_matches!(m.get_capability("E"), Some(Dynamic::Bool(false)));
-        assert_matches!(m.get_capability("F"), Some(Dynamic::Bool(false)));
-        assert_matches!(m.get_capability("G"), Some(Dynamic::Bool(false)));
-        assert_matches!(m.get_capability("H"), Some(Dynamic::Bool(false)));
-        assert_matches!(m.get_capability("I"), None);
+        m.intersect(&m2);
+        assert_matches!(m.get("A"), Some(Dynamic::Bool(true)));
+        assert_matches!(m.get("B"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get("C"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get("D"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get("E"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get("F"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get("G"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get("H"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get("I"), None);
     }
 }

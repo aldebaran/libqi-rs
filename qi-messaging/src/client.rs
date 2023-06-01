@@ -16,12 +16,12 @@ use tracing::{debug, instrument};
 type ResponseSender = oneshot::Sender<Response>;
 
 #[derive(Debug)]
-pub(crate) struct Client {
+pub struct Client {
     dispatch_sender: PollSender<(Request, ResponseSender)>,
 }
 
 impl Client {
-    pub(crate) fn new<Si, St>(
+    pub fn new<Si, St>(
         responses_stream: St,
         requests_sink: Si,
     ) -> (
@@ -62,7 +62,7 @@ impl Service<Request> for Client {
 }
 
 #[derive(Debug)]
-pub(crate) enum Future {
+pub enum Future {
     DispatchIsTerminated,
     WaitingForResponse {
         response_receiver: oneshot::Receiver<Response>,
@@ -83,7 +83,7 @@ impl std::future::Future for Future {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum Error {
+pub enum Error {
     #[error("the dispatch task to remote is terminated")]
     DispatchIsTerminated,
 
