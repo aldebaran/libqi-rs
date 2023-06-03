@@ -8,6 +8,7 @@ edition = "2021"
 rust-version = "1.63"
 
 [dependencies]
+bytes = { version = "1.4.0" }
 qi-types = { path = "../qi-types" }
 serde = "1.0.152"
 thiserror = "1.0.39"

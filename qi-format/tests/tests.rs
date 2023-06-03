@@ -53,7 +53,7 @@ fn test_to_from_bytes_serializable() {
         2, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, b'h', b'e', b'l', b'l', b'o', 2, 0, 0, 0, 5, 0, 0, 0,
         b'w', b'o', b'r', b'l', b'd', // m
     ];
-    let actual_bytes = to_bytes(&sample_in).unwrap();
+    let actual_bytes = to_byte_vec(&sample_in).unwrap();
     assert_eq!(actual_bytes, expected_bytes);
     let sample_out: Serializable = from_bytes(&actual_bytes).unwrap();
     assert_eq!(sample_in, sample_out);
@@ -61,7 +61,7 @@ fn test_to_from_bytes_serializable() {
 
 #[test]
 fn test_dynamic_to_from_bytes() {
-    use crate::{from_bytes, to_bytes};
+    use crate::{from_bytes, to_byte_vec};
     let bytes_in = [
         0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72, 0x6f,
         0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f, 0x63, 0x61,
@@ -76,13 +76,13 @@ fn test_dynamic_to_from_bytes() {
         )
         .unwrap()
     );
-    let bytes_out = to_bytes(&dynamic).unwrap();
+    let bytes_out = to_byte_vec(&dynamic).unwrap();
     assert_eq!(bytes_in.as_slice(), &bytes_out);
 }
 
 #[test]
 fn test_object_to_from_bytes() {
-    use crate::{from_bytes, to_bytes};
+    use crate::{from_bytes, to_byte_vec};
 
     // An Object taken from a TCP dump of libqi tests.
     let bytes_in = vec![
@@ -428,6 +428,6 @@ fn test_object_to_from_bytes() {
             object_uid: [0x0bf8f786, 0x6b070405, 0xd63fe439, 0xf9477e96, 0xfc2f2c3d],
         }
     );
-    let bytes_out = to_bytes(&object).unwrap();
+    let bytes_out = to_byte_vec(&object).unwrap();
     assert_eq!(bytes_in.as_slice(), &bytes_out);
 }

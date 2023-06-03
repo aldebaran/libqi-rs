@@ -1,14 +1,19 @@
-mod request;
+pub(crate) mod request;
 
 use crate::{
     client, format,
-    message::{self, DecodeError, Decoder, EncodeError, Encoder},
-    request::{Request as MessagingRequest, RequestId},
+    message::{
+        self,
+        codec::{DecodeError, Decoder, EncodeError, Encoder},
+        Subject,
+    },
+    request::{Id as RequestId, Request, Response},
     server,
 };
 use futures::{SinkExt, StreamExt};
-pub use request::{Request, Response, ResponseFuture};
+use request::{Request as ChannelRequest, ResponseFuture};
 use std::{
+    fmt::Debug,
     sync::atomic::AtomicU32,
     task::{Context, Poll},
 };
@@ -22,31 +27,31 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite},
     sync::{PollSendError, PollSender},
 };
-use tower::{Service, ServiceExt};
-use tracing::{debug, debug_span};
+use tower::Service;
+use tracing::{debug, debug_span, Instrument};
 
 #[derive(Debug)]
-pub struct Channel {
+pub(crate) struct Channel {
     client: client::Client,
     current_id: AtomicU32,
 }
 
 impl Channel {
-    pub fn new<IO, Svc>(
+    pub(crate) fn new<IO, Svc>(
         io: IO,
         service: Svc,
     ) -> (
         Self,
-        impl std::future::Future<Output = Result<(), DispatchError<Svc::Error>>>,
+        impl std::future::Future<Output = Result<(), DispatchError>>,
     )
     where
         IO: AsyncWrite + AsyncRead,
-        Svc: Service<Request, Response = Response>,
+        Svc: tower::Service<Request, Response = Response>,
+        Svc::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
     {
         let (input, output) = split(io);
         let mut stream = FramedRead::new(input, Decoder::new());
         let mut sink = FramedWrite::new(output, Encoder);
-        let service = service.map_request(Into::into);
 
         const DISPATCH_CHANNEL_SIZE: usize = 1;
         let (client_responses_tx, client_responses_rx) = mpsc::channel(DISPATCH_CHANNEL_SIZE);
@@ -65,21 +70,20 @@ impl Channel {
         );
 
         let dispatch = async move {
-            let _ = debug_span!("channel_dispatch").entered();
             let mut stream_is_terminated = false;
             pin!(client_dispatch, server);
             loop {
                 select! {
                     message = stream.next(), if !stream_is_terminated => {
                         match message.transpose()? {
-                            Some(message) => match MessagingRequest::try_from_message(message).map_err(DispatchError::MessageIntoRequest)? {
+                            Some(message) => match Request::try_from_message(message).map_err(DispatchError::MessageIntoRequest)? {
                                 Ok(request) => {
                                     // Ignore the result of send, it occurs when the server dropped the request stream, which should mean that the server task has terminated.
-                                    let _ = server_requests_tx.send(request).await;
+                                    let _res = server_requests_tx.send(request).await;
                                 }
-                                Err(message) => if let Ok(response) = Response::try_from_message(message).map_err(DispatchError::MessageIntoResponse)? {
+                                Err(message) => if let Ok((id, response)) = Response::try_from_message(message).map_err(DispatchError::MessageIntoResponse)? {
                                     // Ignore the result of send, it occurs when the client dispatch dropped the response stream, which should mean that the client dispatch task has terminated.
-                                    let _ = client_responses_tx.send(response).await;
+                                    let _res = client_responses_tx.send((id, response)).await;
                                 },
                             },
                             None => {
@@ -89,11 +93,11 @@ impl Channel {
                         }
                     }
                     Some(request) = client_requests_rx.recv() => {
-                        let message = request.try_into().map_err(DispatchError::RequestIntoMessage)?;
+                        let message = request.try_into_message().map_err(DispatchError::RequestIntoMessage)?;
                         sink.send(message).await?;
                     }
-                    Some(response) = server_responses_rx.recv() => {
-                        if let Some(message) = response.try_into().map_err(DispatchError::ResponseIntoMessage)? {
+                    Some((id, subject, response)) = server_responses_rx.recv() => {
+                        if let Some(message) = response.try_into_message(id, subject).map_err(DispatchError::ResponseIntoMessage)? {
                             sink.send(message).await?;
                         }
                     }
@@ -109,7 +113,7 @@ impl Channel {
                     }
                 }
             }
-        };
+        }.instrument(debug_span!("channel_dispatch"));
 
         (
             Self {
@@ -128,27 +132,25 @@ impl Channel {
     }
 }
 
-impl Service<Request> for Channel {
+impl Service<ChannelRequest> for Channel {
     type Response = Response;
     type Error = Error;
     type Future = Future;
-
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.client.poll_ready(cx)
     }
-
-    fn call(&mut self, request: Request) -> Self::Future {
+    fn call(&mut self, request: ChannelRequest) -> Self::Future {
         let request_id = self.make_request_id();
         let request = request.into_messaging_request(request_id);
         Future::new(request_id, self.client.call(request))
     }
 }
 
-pub type Future = ResponseFuture<client::Future>;
-pub type Error = client::Error;
+pub(crate) type Future = ResponseFuture<client::Future>;
+pub(crate) type Error = client::Error;
 
 #[derive(Debug, thiserror::Error)]
-pub enum DispatchError<SvcErr> {
+pub(crate) enum DispatchError {
     #[error("messaging decoding error")]
     Decode(#[from] DecodeError),
 
@@ -156,10 +158,10 @@ pub enum DispatchError<SvcErr> {
     Encode(#[from] EncodeError),
 
     #[error("client dispatch error")]
-    ClientDispatch(#[source] PollSendError<MessagingRequest>),
+    ClientDispatch(#[source] PollSendError<Request>),
 
     #[error("server error")]
-    Server(#[from] server::Error<PollSendError<Response>, SvcErr>),
+    Server(#[from] PollSendError<(RequestId, Subject, Response)>),
 
     #[error("error converting a message into a request")]
     MessageIntoRequest(#[source] format::Error),

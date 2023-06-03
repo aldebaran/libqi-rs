@@ -1,8 +1,8 @@
-pub use crate::request::Response;
 use crate::{
-    capabilities, format,
-    message::{self, Subject},
-    request::{Request as MessagingRequest, RequestId},
+    capabilities::Map as Capabilities,
+    format,
+    message::Subject,
+    request::{Id, Request as MessagingRequest},
 };
 use bytes::Bytes;
 use pin_project_lite::pin_project;
@@ -12,7 +12,7 @@ use std::{
 };
 
 #[derive(Clone, Debug)]
-pub enum Request {
+pub(crate) enum Request {
     Call {
         subject: Subject,
         payload: Bytes,
@@ -27,13 +27,16 @@ pub enum Request {
     },
     Cancel {
         subject: Subject,
-        call_id: RequestId,
+        call_id: Id,
     },
-    Capabilities(capabilities::Map),
+    Capabilities {
+        subject: Subject,
+        capabilities: Capabilities,
+    },
 }
 
 impl Request {
-    pub fn call<T>(subject: Subject, value: &T) -> Result<Self, format::Error>
+    pub(crate) fn call<T>(subject: Subject, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -41,7 +44,7 @@ impl Request {
         Ok(Self::Call { subject, payload })
     }
 
-    pub fn post<T>(subject: Subject, value: &T) -> Result<Self, format::Error>
+    pub(crate) fn post<T>(subject: Subject, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -49,7 +52,7 @@ impl Request {
         Ok(Self::Post { subject, payload })
     }
 
-    pub fn event<T>(subject: Subject, value: &T) -> Result<Self, format::Error>
+    pub(crate) fn event<T>(subject: Subject, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -57,74 +60,92 @@ impl Request {
         Ok(Self::Event { subject, payload })
     }
 
-    pub fn subject(&self) -> Subject {
+    pub(crate) fn subject(&self) -> Subject {
+        use Request::*;
         match self {
-            Self::Call { subject, .. }
-            | Self::Post { subject, .. }
-            | Self::Event { subject, .. }
-            | Self::Cancel { subject, .. } => *subject,
-            Self::Capabilities(_) => message::CAPABILITIES_SUBJECT,
+            Call { subject, .. }
+            | Post { subject, .. }
+            | Event { subject, .. }
+            | Cancel { subject, .. }
+            | Capabilities { subject, .. } => *subject,
         }
     }
 
-    pub fn into_messaging_request(self, id: RequestId) -> MessagingRequest {
+    pub(crate) fn into_messaging_request(self, id: Id) -> MessagingRequest {
+        use Request::*;
         match self {
-            Self::Call { subject, payload } => MessagingRequest::Call {
+            Call { subject, payload } => MessagingRequest::Call {
                 id,
                 subject,
                 payload,
             },
-            Self::Post { subject, payload } => MessagingRequest::Post {
+            Post { subject, payload } => MessagingRequest::Post {
                 id,
                 subject,
                 payload,
             },
-            Self::Event { subject, payload } => MessagingRequest::Event {
+            Event { subject, payload } => MessagingRequest::Event {
                 id,
                 subject,
                 payload,
             },
-            Self::Cancel { subject, call_id } => MessagingRequest::Cancel {
+            Cancel { subject, call_id } => MessagingRequest::Cancel {
                 id,
                 subject,
                 call_id,
             },
-            Self::Capabilities(capabilities) => MessagingRequest::Capabilities { id, capabilities },
+            Capabilities {
+                subject,
+                capabilities,
+            } => MessagingRequest::Capabilities {
+                id,
+                subject,
+                capabilities,
+            },
         }
     }
 }
 
 impl From<MessagingRequest> for Request {
     fn from(request: MessagingRequest) -> Self {
+        use MessagingRequest::*;
         match request {
-            MessagingRequest::Call {
+            Call {
                 subject, payload, ..
             } => Self::Call { subject, payload },
-            MessagingRequest::Post {
+            Post {
                 subject, payload, ..
             } => Self::Post { subject, payload },
-            MessagingRequest::Event {
+            Event {
                 subject, payload, ..
             } => Self::Event { subject, payload },
-            MessagingRequest::Cancel {
+            Cancel {
                 subject, call_id, ..
             } => Self::Cancel { subject, call_id },
-            MessagingRequest::Capabilities { capabilities, .. } => Self::Capabilities(capabilities),
+            Capabilities {
+                subject,
+                capabilities,
+                ..
+            } => Self::Capabilities {
+                subject,
+                capabilities,
+            },
         }
     }
 }
 
 pin_project! {
     #[derive(derive_new::new, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-    pub struct ResponseFuture<F> {
-        request_id: RequestId,
+    #[must_use = "futures do nothing until polled"]
+    pub(crate) struct ResponseFuture<F> {
+        request_id: Id,
         #[pin]
         inner: F,
     }
 }
 
 impl<F> ResponseFuture<F> {
-    pub fn request_id(&self) -> RequestId {
+    pub(crate) fn request_id(&self) -> Id {
         self.request_id
     }
 }

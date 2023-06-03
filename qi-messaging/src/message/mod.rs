@@ -1,4 +1,4 @@
-//! Module defining `qi` the common binary representation of messages.
+//! Message types and their common binary representation.
 //!
 //! ## Message Structure
 //!
@@ -42,10 +42,11 @@
 //!
 //!  The total header size is therefore 28 bytes.
 
+pub(crate) mod codec;
+
 use crate::{capabilities, format};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes};
 use qi_types::Dynamic;
-use tracing::instrument;
 
 macro_rules! impl_u32_le_field {
     ($($name:ident),+) => {
@@ -54,7 +55,7 @@ macro_rules! impl_u32_le_field {
                 const SIZE: usize = std::mem::size_of::<u32>();
 
                 #[allow(unused)]
-                pub const fn new(value: u32) -> Self {
+                pub(crate) const fn new(value: u32) -> Self {
                     Self(value)
                 }
 
@@ -93,7 +94,7 @@ macro_rules! impl_u32_le_field {
     serde::Deserialize,
 )]
 #[serde(transparent)]
-pub struct Id(pub u32);
+pub struct Id(pub(crate) u32);
 
 #[derive(
     Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::Display,
@@ -119,32 +120,39 @@ impl Version {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display)]
-pub enum Subject {
-    Control(ControlSubject),
-    Service(ServiceSubject),
-}
-
-impl Default for Subject {
-    fn default() -> Self {
-        Self::Control(ControlSubject::default())
-    }
+#[derive(
+    derive_new::new,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    derive_more::Display,
+)]
+#[display(fmt = "({service}, {object}, {action})")]
+pub(crate) struct Subject {
+    service: Service,
+    object: Object,
+    action: Action,
 }
 
 impl Subject {
     const SIZE: usize = Service::SIZE + Object::SIZE + Action::SIZE;
 
-    pub const fn new(service: Service, object: Object, action: Action) -> Self {
-        match (service, object) {
-            (ControlSubject::SERVICE, ControlSubject::OBJECT) => {
-                Self::Control(ControlSubject(action))
-            }
-            _ => Self::Service(ServiceSubject(service, object, action)),
-        }
+    pub(crate) const fn service(&self) -> Service {
+        self.service
     }
 
-    pub const fn control(action: Action) -> Self {
-        Self::Control(ControlSubject(action))
+    pub(crate) const fn object(&self) -> Object {
+        self.object
+    }
+
+    pub(crate) const fn action(&self) -> Action {
+        self.action
     }
 
     fn read<B>(buf: &mut B) -> Self
@@ -154,7 +162,11 @@ impl Subject {
         let service = Service::read(buf);
         let object = Object::read(buf);
         let action = Action::read(buf);
-        Self::new(service, object, action)
+        Self {
+            service,
+            object,
+            action,
+        }
     }
 
     fn write<B>(self, buf: &mut B)
@@ -165,88 +177,22 @@ impl Subject {
         self.object().write(buf);
         self.action().write(buf);
     }
-
-    pub const fn service(&self) -> Service {
-        match self {
-            Subject::Control(s) => s.service(),
-            Subject::Service(s) => s.service(),
-        }
-    }
-
-    pub const fn object(&self) -> Object {
-        match self {
-            Subject::Control(s) => s.object(),
-            Subject::Service(s) => s.object(),
-        }
-    }
-
-    pub const fn action(&self) -> Action {
-        match self {
-            Subject::Control(s) => s.action(),
-            Subject::Service(s) => s.action(),
-        }
-    }
 }
 
 #[derive(
     Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
 )]
-#[display(fmt = "control({_0})")]
-pub struct ControlSubject(Action);
-
-impl ControlSubject {
-    const SERVICE: Service = Service(0);
-    const OBJECT: Object = Object(0);
-
-    pub const fn service(&self) -> Service {
-        Self::SERVICE
-    }
-
-    pub const fn object(&self) -> Object {
-        Self::OBJECT
-    }
-
-    pub const fn action(&self) -> Action {
-        self.0
-    }
-}
-
-pub const CAPABILITIES_SUBJECT: Subject = Subject::control(Action(0));
+pub(crate) struct Service(u32);
 
 #[derive(
     Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
 )]
-#[display(fmt = "({_0}, {_1}, {_2})")]
-pub struct ServiceSubject(Service, Object, Action);
-
-impl ServiceSubject {
-    pub const fn service(&self) -> Service {
-        self.0
-    }
-
-    pub const fn object(&self) -> Object {
-        self.1
-    }
-
-    pub const fn action(&self) -> Action {
-        self.2
-    }
-}
+pub(crate) struct Object(u32);
 
 #[derive(
     Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
 )]
-pub struct Service(u32);
-
-#[derive(
-    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
-)]
-pub struct Object(u32);
-
-#[derive(
-    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
-)]
-pub struct Action(u32);
+pub(crate) struct Action(u32);
 
 impl_u32_le_field!(Id, Service, Object, Action);
 
@@ -282,7 +228,7 @@ impl MagicCookie {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error("invalid message magic cookie value {0:x}")]
-pub struct InvalidMagicCookieValueError(u32);
+pub(crate) struct InvalidMagicCookieValueError(u32);
 
 #[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 struct PayloadSize(usize);
@@ -321,14 +267,14 @@ impl PayloadSize {
     "message payload size {0} cannot be represented as an usize (the maximum for this system is {})",
     usize::MAX
 )]
-pub struct PayloadCannotBeRepresentedAsUSizeError(u32);
+pub(crate) struct PayloadCannotBeRepresentedAsUSizeError(u32);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error(
     "message payload size {0} cannot be represented as an u32 (the maximum for this system is {})",
     u32::MAX
 )]
-pub struct PayloadCannotBeRepresentedAsU32Error(usize);
+pub(crate) struct PayloadCannotBeRepresentedAsU32Error(usize);
 
 #[derive(
     Clone,
@@ -344,7 +290,7 @@ pub struct PayloadCannotBeRepresentedAsU32Error(usize);
     num_derive::ToPrimitive,
 )]
 #[repr(u8)]
-pub enum Kind {
+pub(crate) enum Kind {
     #[display(fmt = "call")]
     Call = 1,
     #[display(fmt = "reply")]
@@ -405,12 +351,12 @@ impl std::convert::TryFrom<u8> for Kind {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, thiserror::Error)]
 #[error("invalid message kind value {0}")]
-pub struct InvalidKindValueError(u8);
+pub(crate) struct InvalidKindValueError(u8);
 
 bitflags::bitflags! {
     #[derive(Default, derive_more::Display)]
     #[display(fmt = "{:b}", "self.bits()")]
-    pub struct Flags: u8 {
+    pub(crate) struct Flags: u8 {
         const DYNAMIC_PAYLOAD = 0b00000001;
         const RETURN_TYPE = 0b00000010;
     }
@@ -446,7 +392,7 @@ impl std::convert::TryFrom<u8> for Flags {
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error("invalid message flags value {0}")]
-pub struct InvalidFlagsValueError(u8);
+pub(crate) struct InvalidFlagsValueError(u8);
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 struct Header {
@@ -509,7 +455,7 @@ impl Header {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub enum ReadHeaderError {
+pub(crate) enum ReadHeaderError {
     #[error(transparent)]
     MagicCookie(#[from] InvalidMagicCookieValueError),
 
@@ -527,14 +473,14 @@ pub enum ReadHeaderError {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub enum WriteHeaderError {
+pub(crate) enum WriteHeaderError {
     #[error(transparent)]
     PayloadSize(#[from] PayloadCannotBeRepresentedAsU32Error),
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, derive_more::Display)]
 #[display(fmt = "message(id={id}, {kind}, subject={subject}, flags={flags})")]
-pub struct Message {
+pub(crate) struct Message {
     id: Id,
     kind: Kind,
     subject: Subject,
@@ -556,7 +502,7 @@ impl Message {
     /// Builds a "call" message.
     ///
     /// This sets the kind, the id and the subject of the message.
-    pub fn call(id: Id, subject: Subject) -> Builder {
+    pub(crate) fn call(id: Id, subject: Subject) -> Builder {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Call)
@@ -566,7 +512,7 @@ impl Message {
     /// Builds a "reply" message.
     ///
     /// This sets the kind, the id and the subject of the message.
-    pub fn reply(id: Id, subject: Subject) -> Builder {
+    pub(crate) fn reply(id: Id, subject: Subject) -> Builder {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Reply)
@@ -576,7 +522,11 @@ impl Message {
     /// Builds a "error" message.
     ///
     /// This sets the kind, the id, the subject and the payload of the message.
-    pub fn error(id: Id, subject: Subject, description: &str) -> Result<Builder, format::Error> {
+    pub(crate) fn error(
+        id: Id,
+        subject: Subject,
+        description: &str,
+    ) -> Result<Builder, format::Error> {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Error)
@@ -587,7 +537,7 @@ impl Message {
     /// Builds a "post" message.
     ///
     /// This sets the kind, the id and the subject of the message.
-    pub fn post(id: Id, subject: Subject) -> Builder {
+    pub(crate) fn post(id: Id, subject: Subject) -> Builder {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Post)
@@ -597,7 +547,7 @@ impl Message {
     /// Builds a "event" message.
     ///
     /// This sets the kind, the id and the subject of the message.
-    pub fn event(id: Id, subject: Subject) -> Builder {
+    pub(crate) fn event(id: Id, subject: Subject) -> Builder {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Event)
@@ -607,18 +557,22 @@ impl Message {
     /// Builds a "capabilities" message.
     ///
     /// This sets the kind, the id, the subject and the payload of the message.
-    pub fn capabilities(id: Id, map: &capabilities::Map) -> Result<Builder, format::Error> {
+    pub(crate) fn capabilities(
+        id: Id,
+        subject: Subject,
+        map: &capabilities::Map,
+    ) -> Result<Builder, format::Error> {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Capabilities)
-            .set_subject(CAPABILITIES_SUBJECT)
+            .set_subject(subject)
             .set_value(&map)
     }
 
     /// Builds a "cancel" message.
     ///
     /// This sets the kind, the id, the subject and the payload of the message.
-    pub fn cancel(id: Id, subject: Subject, call_id: Id) -> Builder {
+    pub(crate) fn cancel(id: Id, subject: Subject, call_id: Id) -> Builder {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Cancel)
@@ -630,7 +584,7 @@ impl Message {
     /// Builds a "canceled" message.
     ///
     /// This sets the kind, the id and the subject of the message.
-    pub fn canceled(id: Id, subject: Subject) -> Builder {
+    pub(crate) fn canceled(id: Id, subject: Subject) -> Builder {
         Builder::new()
             .set_id(id)
             .set_subject(subject)
@@ -653,34 +607,34 @@ impl Message {
         Ok(())
     }
 
-    pub fn id(&self) -> Id {
+    pub(crate) fn id(&self) -> Id {
         self.id
     }
 
-    pub fn kind(&self) -> Kind {
+    pub(crate) fn kind(&self) -> Kind {
         self.kind
     }
 
-    pub fn subject(&self) -> Subject {
+    pub(crate) fn subject(&self) -> Subject {
         self.subject
     }
 
-    pub fn into_payload(self) -> Bytes {
+    pub(crate) fn into_payload(self) -> Bytes {
         self.payload
     }
 
-    pub fn size(&self) -> usize {
+    pub(crate) fn size(&self) -> usize {
         Header::SIZE + self.payload.len()
     }
 
-    pub fn value<T>(&self) -> Result<T, format::Error>
+    pub(crate) fn value<T>(&self) -> Result<T, format::Error>
     where
         T: serde::de::DeserializeOwned,
     {
         format::from_bytes(&self.payload)
     }
 
-    pub fn error_description(&self) -> Result<String, GetErrorDescriptionError> {
+    pub(crate) fn error_description(&self) -> Result<String, GetErrorDescriptionError> {
         let dynamic: Dynamic = self.value()?;
         match dynamic {
             Dynamic::String(s) => Ok(s),
@@ -690,7 +644,7 @@ impl Message {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum GetErrorDescriptionError {
+pub(crate) enum GetErrorDescriptionError {
     #[error("dynamic value {0} of error description is not a string")]
     DynamicValueIsNotAString(Dynamic),
 
@@ -699,7 +653,7 @@ pub enum GetErrorDescriptionError {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct Builder(Message);
+pub(crate) struct Builder(Message);
 
 impl Default for Builder {
     fn default() -> Self {
@@ -708,7 +662,7 @@ impl Default for Builder {
 }
 
 impl Builder {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self(Message::default())
     }
 
@@ -727,7 +681,7 @@ impl Builder {
         self
     }
 
-    pub fn set_payload(mut self, value: Bytes) -> Self {
+    pub(crate) fn set_payload(mut self, value: Bytes) -> Self {
         self.0.payload = value;
         self
     }
@@ -735,7 +689,7 @@ impl Builder {
     /// Sets the serialized representation of the value in the format as the payload of the message.
     /// It checks if the "dynamic payload" flag is set on the message to know how to serialize the value.
     /// If the flag is set after calling this value, the value will not be serialized coherently with the flag.
-    pub fn set_value<T>(mut self, value: &T) -> Result<Self, format::Error>
+    pub(crate) fn set_value<T>(mut self, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -747,117 +701,13 @@ impl Builder {
         Ok(self)
     }
 
-    pub fn set_error_description(self, description: &str) -> Result<Self, format::Error> {
+    pub(crate) fn set_error_description(self, description: &str) -> Result<Self, format::Error> {
         self.set_value(&Dynamic::from(description))
     }
 
-    pub fn build(self) -> Message {
+    pub(crate) fn build(self) -> Message {
         self.0
     }
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-pub struct Encoder;
-
-impl tokio_util::codec::Encoder<Message> for Encoder {
-    type Error = EncodeError;
-
-    #[instrument(name = "encode", skip_all, err)]
-    fn encode(&mut self, msg: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
-        dst.reserve(msg.size());
-        msg.write(dst)?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum EncodeError {
-    #[error("write header error")]
-    WriteHeader(#[from] WriteHeaderError),
-
-    #[error(transparent)]
-    IO(#[from] std::io::Error),
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-pub struct Decoder {
-    state: DecoderState,
-}
-
-impl Decoder {
-    pub fn new() -> Self {
-        Self {
-            state: DecoderState::Header,
-        }
-    }
-}
-
-impl Default for Decoder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl tokio_util::codec::Decoder for Decoder {
-    type Item = Message;
-    type Error = DecodeError;
-
-    #[instrument(name = "decode", skip_all, err, level = "debug")]
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let msg = loop {
-            match self.state {
-                DecoderState::Header => match decode_header(src)? {
-                    None => break None,
-                    Some(header) => self.state = DecoderState::Payload(header),
-                },
-                DecoderState::Payload(header) => match decode_payload(header.payload_size, src) {
-                    None => break None,
-                    Some(payload) => {
-                        self.state = DecoderState::Header;
-                        src.reserve(src.len());
-                        break Some(Message::new(header, payload));
-                    }
-                },
-            }
-        };
-        Ok(msg)
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DecodeError {
-    #[error("read header error")]
-    ReadHeader(#[from] ReadHeaderError),
-
-    #[error(transparent)]
-    IO(#[from] std::io::Error),
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-enum DecoderState {
-    Header,
-    Payload(Header),
-}
-
-#[instrument(skip_all, level = "debug")]
-fn decode_header(src: &mut bytes::BytesMut) -> Result<Option<Header>, DecodeError> {
-    if src.len() < Header::SIZE {
-        src.reserve(Header::SIZE - src.len());
-        return Ok(None);
-    }
-
-    let header = Header::read(&mut src.as_ref())?;
-    src.advance(Header::SIZE);
-    Ok(Some(header))
-}
-
-#[instrument(skip_all, level = "debug")]
-fn decode_payload(size: usize, src: &mut BytesMut) -> Option<Bytes> {
-    if src.len() < size {
-        src.reserve(size - src.len());
-        return None;
-    }
-    Some(src.copy_to_bytes(size))
 }
 
 #[cfg(test)]
@@ -882,7 +732,11 @@ mod tests {
                 id: Id(990340),
                 kind: Kind::Error,
                 payload_size: 35,
-                subject: Subject::Service(ServiceSubject(Service(47), Object(1), Action(178))),
+                subject: Subject {
+                    service: Service(47),
+                    object: Object(1),
+                    action: Action(178)
+                },
                 flags: Flags::empty(),
             })
         );
@@ -890,11 +744,14 @@ mod tests {
 
     #[test]
     fn test_message_write() {
-        use crate::message::*;
         let msg = Message {
             id: Id(329),
             kind: Kind::Capabilities,
-            subject: Subject::Service(ServiceSubject(Service(1), Object(1), Action(104))),
+            subject: Subject {
+                service: Service(1),
+                object: Object(1),
+                action: Action(104),
+            },
             flags: Flags::RETURN_TYPE,
             payload: Bytes::from_static(&[0x17, 0x2b, 0xe6, 0x01, 0x5f]),
         };
@@ -976,35 +833,5 @@ mod tests {
         ];
         let header = Header::read(&mut input);
         assert_eq!(header, Err(ReadHeaderError::UnsupportedVersion(0x3412)));
-    }
-
-    #[test]
-    fn test_decoder_not_enough_data_for_header() {
-        todo!()
-    }
-
-    #[test]
-    fn test_decoder_not_enough_data_for_payload() {
-        todo!()
-    }
-
-    #[test]
-    fn test_decoder_garbage() {
-        todo!()
-    }
-
-    #[test]
-    fn test_decoder_success() {
-        todo!()
-    }
-
-    #[test]
-    fn test_encoder_bad_payload_size() {
-        todo!()
-    }
-
-    #[test]
-    fn test_encoder_success() {
-        todo!()
     }
 }

@@ -12,7 +12,7 @@ mod write;
 
 pub mod ser;
 #[doc(inline)]
-pub use ser::{to_bytes, to_writer, Serializer};
+pub use ser::{to_byte_vec, to_bytes, to_writer, Serializer};
 
 pub mod de;
 #[doc(inline)]

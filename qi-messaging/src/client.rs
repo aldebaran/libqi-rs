@@ -1,4 +1,3 @@
-use crate::request::{Request, Response};
 use futures::{FutureExt, Sink, SinkExt, Stream, StreamExt};
 use std::{
     collections::HashMap,
@@ -10,18 +9,22 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_util::sync::PollSender;
-use tower::Service;
 use tracing::{debug, instrument};
+
+use crate::{
+    message::Id,
+    request::{Request, Response},
+};
 
 type ResponseSender = oneshot::Sender<Response>;
 
 #[derive(Debug)]
-pub struct Client {
+pub(crate) struct Client {
     dispatch_sender: PollSender<(Request, ResponseSender)>,
 }
 
 impl Client {
-    pub fn new<Si, St>(
+    pub(crate) fn new<Si, St>(
         responses_stream: St,
         requests_sink: Si,
     ) -> (
@@ -31,7 +34,7 @@ impl Client {
     where
         Si: Sink<Request>,
         Si::Error: std::error::Error,
-        St: Stream<Item = Response>,
+        St: Stream<Item = (Id, Response)>,
     {
         const DISPATCH_CHANNEL_SIZE: usize = 1;
         let (dispatch_sender, dispatch_receiver) = mpsc::channel(DISPATCH_CHANNEL_SIZE);
@@ -41,7 +44,7 @@ impl Client {
     }
 }
 
-impl Service<Request> for Client {
+impl tower::Service<Request> for Client {
     type Response = Response;
     type Error = Error;
     type Future = Future;
@@ -62,7 +65,7 @@ impl Service<Request> for Client {
 }
 
 #[derive(Debug)]
-pub enum Future {
+pub(crate) enum Future {
     DispatchIsTerminated,
     WaitingForResponse {
         response_receiver: oneshot::Receiver<Response>,
@@ -83,7 +86,7 @@ impl std::future::Future for Future {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub(crate) enum Error {
     #[error("the dispatch task to remote is terminated")]
     DispatchIsTerminated,
 
@@ -100,7 +103,7 @@ async fn dispatch<St, Si>(
 where
     Si: Sink<Request>,
     Si::Error: std::error::Error,
-    St: Stream<Item = Response>,
+    St: Stream<Item = (Id, Response)>,
 {
     let mut ongoing_call_requests = HashMap::new();
     let mut responses_stream_terminated = false;
@@ -123,9 +126,9 @@ where
             }
             response = responses_stream.next(), if !responses_stream_terminated => {
                 match response {
-                    Some(response) => if let Some(call_response) = response.as_call_response() {
+                    Some((id, response)) => if response.as_call_result().is_some() {
                         debug!(response = ?response, "received a call response from the server");
-                        if let Some(response_sender) = ongoing_call_requests.remove(&call_response.id()) {
+                        if let Some(response_sender) = ongoing_call_requests.remove(&id) {
                             if let Err(response) = response_sender.send(response) {
                                 debug!(response = ?response, "the client for a call request response has dropped, discarding response");
                             }

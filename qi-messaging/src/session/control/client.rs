@@ -1,6 +1,9 @@
-use super::{Error, Request, Response};
+use super::{
+    capabilities::{self, CapabilitiesExt},
+    Request, Response,
+};
 use crate::{
-    capabilities,
+    capabilities::Map as Capabilities,
     channel::{self, Channel},
     format,
     request::CallError as MessagingCallError,
@@ -14,16 +17,16 @@ use std::{
 use tokio::sync::Mutex;
 
 #[derive(Debug)]
-pub struct Client {
-    capabilities: Arc<Mutex<capabilities::Map>>,
+pub(in crate::session) struct Client {
+    capabilities: Arc<Mutex<Capabilities>>,
 }
 
 impl Client {
     pub(crate) fn new() -> (Self, Service) {
-        let capabilities = Arc::new(Mutex::new(capabilities::Map::new()));
+        let capabilities = Arc::new(Mutex::new(Capabilities::new()));
         (
             Self {
-                capabilities: capabilities.clone(),
+                capabilities: Arc::clone(&capabilities),
             },
             Service { capabilities },
         )
@@ -34,37 +37,39 @@ impl Client {
         channel: &mut Channel,
     ) -> Result<&Self, AuthenticateError> {
         use tower::{Service, ServiceExt};
-        let mut capabilities = capabilities::local().clone();
-        let request = Request::Authenticate(capabilities.clone());
+        let request = Request::Authenticate(capabilities::local().clone());
         let request = request
             .try_into_channel_request()
             .map_err(AuthenticateError::FormatLocalCapabilities)?;
         let response = async { channel.ready().await?.call(request).await }
             .await
             .map_err(AuthenticateError::Channel)?;
-        let remote_capabilities = response
-            .into_call_result()
-            .map_err(AuthenticateError::Call)?;
-        capabilities
-            .intersect(&remote_capabilities)
-            .check_required()
+        let remote_capabilities: Capabilities = response
+            .into_result()
+            .map_err(AuthenticateError::Call)?
+            .ok_or(AuthenticateError::EmptyResponse)?;
+        let capabilities = remote_capabilities
+            .check_intersect_with_local()
             .map_err(AuthenticateError::MissingRequiredCapabilities)?;
         *self.capabilities.lock().await = capabilities;
         Ok(self)
     }
 
-    pub async fn capabilities(&self) -> capabilities::Map {
-        self.capabilities.clone().lock_owned().await.clone()
+    pub(in crate::session) async fn capabilities(&self) -> Capabilities {
+        Arc::clone(&self.capabilities).lock_owned().await.clone()
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum AuthenticateError {
+pub(in crate::session) enum AuthenticateError {
     #[error("channel error")]
     Channel(#[from] channel::Error),
 
     #[error("the call request has resulted in an error: {0}")]
     Call(#[from] MessagingCallError),
+
+    #[error("empty response")]
+    EmptyResponse,
 
     #[error("error serializing local capabilities")]
     FormatLocalCapabilities(#[source] format::Error),
@@ -74,8 +79,8 @@ pub(crate) enum AuthenticateError {
 }
 
 #[derive(Debug)]
-pub(crate) struct Service {
-    capabilities: Arc<Mutex<capabilities::Map>>,
+pub(in crate::session) struct Service {
+    capabilities: Arc<Mutex<Capabilities>>,
 }
 
 impl Service {
@@ -83,18 +88,18 @@ impl Service {
     // Always returns an authentication success.
     fn authenticate_remote(
         &self,
-        _capabilities: capabilities::Map,
-    ) -> impl std::future::Future<Output = capabilities::Map> {
+        _capabilities: Capabilities,
+    ) -> impl std::future::Future<Output = Capabilities> {
         async { todo!() }
     }
 
     fn update_capabilities(
         &self,
-        remote: &capabilities::Map,
+        remote: &Capabilities,
     ) -> Result<impl std::future::Future<Output = ()>, capabilities::ExpectedKeyValueError<bool>>
     {
-        let capabilities = capabilities::local_intersected_with(remote)?;
-        let self_capabilities = self.capabilities.clone();
+        let capabilities = remote.clone().check_intersect_with_local()?;
+        let self_capabilities = Arc::clone(&self.capabilities);
         Ok(async move {
             *self_capabilities.lock_owned().await = capabilities;
         })
@@ -124,8 +129,8 @@ impl tower::Service<Request> for Service {
     }
 }
 #[must_use = "futures do nothing until polled"]
-pub(crate) enum Future {
-    Authenticate(BoxFuture<'static, capabilities::Map>),
+pub(in crate::session) enum Future {
+    Authenticate(BoxFuture<'static, Capabilities>),
     UpdateCapabilities(
         Result<BoxFuture<'static, ()>, Option<capabilities::ExpectedKeyValueError<bool>>>,
     ),
@@ -150,4 +155,10 @@ impl std::future::Future for Future {
             },
         })
     }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
+pub(in crate::session) enum Error {
+    #[error("error updating capabilities")]
+    UpdateCapabilities(#[source] capabilities::ExpectedKeyValueError<bool>),
 }

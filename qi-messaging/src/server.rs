@@ -1,26 +1,29 @@
-use crate::request::{Request, Response};
+use crate::{
+    message::{Id, Subject},
+    request::{Request, Response},
+};
 use futures::{
+    future::err,
     stream::{FusedStream, FuturesUnordered},
-    Sink, SinkExt, Stream, StreamExt,
+    FutureExt, Sink, SinkExt, Stream, StreamExt,
 };
 use tokio::{pin, select};
-use tower::{Service, ServiceExt};
+use tower::ServiceExt;
 use tracing::{debug, debug_span, instrument, Instrument};
 
-#[instrument(level = "debug", skip_all, err)]
-pub async fn serve<St, Si, Svc>(
+#[instrument(level = "debug", skip_all)]
+pub(crate) async fn serve<St, Si, Svc>(
     requests_stream: St,
     responses_sink: Si,
-    service: Svc,
-) -> Result<(), Error<Si::Error, Svc::Error>>
+    mut service: Svc,
+) -> Result<(), Si::Error>
 where
     St: Stream<Item = Request>,
-    Si: Sink<Response>,
+    Si: Sink<(Id, Subject, Response)>,
     Svc: tower::Service<Request, Response = Response>,
+    Svc::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
 {
     let mut requests_stream_terminated = false;
-    let responses_sink = responses_sink.sink_map_err(Error::Sink);
-    let mut service = service.map_err(Error::Service);
     let mut responses_futures = FuturesUnordered::new();
     pin!(requests_stream, responses_sink);
 
@@ -29,9 +32,13 @@ where
             request = requests_stream.next(), if !requests_stream_terminated => {
                 match request {
                     Some(request) => {
+                        let (id, subject) = (request.id(), request.subject());
                         debug!(?request, "received a new request, calling service");
-                        let response_future = service.ready().await?.call(request).instrument(debug_span!("service_call"));
-                        responses_futures.push(response_future);
+                        let response_future = match service.ready().await {
+                            Ok(service) => service.call(request).left_future(),
+                            Err(error) => err(error).right_future(),
+                        }.instrument(debug_span!("service_call"));
+                        responses_futures.push(response_future.map(move |response| (id, subject, response)));
                     }
                     None => {
                         debug!("request stream is terminated");
@@ -39,10 +46,10 @@ where
                     }
                 }
             },
-            Some(response) = responses_futures.next(), if !responses_futures.is_terminated() => {
-                let response = response?;
+            Some((id, subject, response)) = responses_futures.next(), if !responses_futures.is_terminated() => {
+                let response = response.unwrap_or_else(Response::error);
                 debug!(?response, "received response of service call");
-                responses_sink.send(response).await?;
+                responses_sink.send((id, subject, response)).await?;
             },
             else => {
                 debug!("server is finished");
@@ -52,19 +59,10 @@ where
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error<SiErr, SvcErr> {
-    #[error("output sink error")]
-    Sink(#[source] SiErr),
-
-    #[error("service error")]
-    Service(#[source] SvcErr),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{message, request::RequestId};
+    use crate::message;
     use assert_matches::assert_matches;
     use bytes::Bytes;
     use futures::{
@@ -85,7 +83,7 @@ mod tests {
 
     #[derive(Debug)]
     struct Service {
-        request_barriers: HashMap<RequestId, Arc<Barrier>>,
+        request_barriers: HashMap<Id, Arc<Barrier>>,
     }
 
     impl tower::Service<Request> for Service {
@@ -99,17 +97,17 @@ mod tests {
 
         fn call(&mut self, req: Request) -> Self::Future {
             match req {
-                Request::Call { id, subject, .. } => {
-                    let barrier = self.request_barriers[&id].clone();
+                Request::Call { id, .. } => {
+                    let barrier = Arc::clone(&self.request_barriers[&id]);
                     async move {
                         barrier.wait().await;
-                        Ok(Response::reply(id, subject, &()).unwrap())
+                        Ok(Response::reply(&()).unwrap())
                     }
                     .boxed()
                 }
                 _ => {
                     let id = req.id();
-                    let barrier = self.request_barriers[&id].clone();
+                    let barrier = Arc::clone(&self.request_barriers[&id]);
                     async move {
                         barrier.wait().await;
                         Ok(Response::none())
@@ -130,9 +128,9 @@ mod tests {
         let barrier_3 = Arc::new(Barrier::new(2));
         let service = Service {
             request_barriers: [
-                (RequestId::from(1), barrier_1.clone()),
-                (RequestId::from(2), barrier_2.clone()),
-                (RequestId::from(3), barrier_3.clone()),
+                (Id::from(1), Arc::clone(&barrier_1)),
+                (Id::from(2), Arc::clone(&barrier_2)),
+                (Id::from(3), Arc::clone(&barrier_3)),
             ]
             .into_iter()
             .collect(),
@@ -151,21 +149,21 @@ mod tests {
         );
         requests_tx
             .send(Request::Call {
-                id: RequestId::from(1),
+                id: Id::from(1),
                 subject,
                 payload: Bytes::new(),
             })
             .await?;
         requests_tx
             .send(Request::Call {
-                id: RequestId::from(2),
+                id: Id::from(2),
                 subject,
                 payload: Bytes::new(),
             })
             .await?;
         requests_tx
             .send(Request::Call {
-                id: RequestId::from(3),
+                id: Id::from(3),
                 subject,
                 payload: Bytes::new(),
             })
@@ -179,17 +177,23 @@ mod tests {
         // Unblock request no.3, its response is received.
         assert_matches!(poll_immediate(barrier_3.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(3), subject, &()).unwrap());
+        assert_matches!(responses_rx.try_recv(), Ok(response) => {
+            assert_matches!(response, (Id(3), _, Response(Some(_))));
+        });
 
         // Unblock request no.1, its response is received.
         assert_matches!(poll_immediate(barrier_1.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(1), subject, &()).unwrap());
+        assert_matches!(responses_rx.try_recv(), Ok(response) => {
+            assert_matches!(response, (Id(1), _, Response(Some(_))));
+        });
 
         // Unblock request no.2, its response is received.
         assert_matches!(poll_immediate(barrier_2.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => response == Response::reply(RequestId::from(2), subject, &()).unwrap());
+        assert_matches!(responses_rx.try_recv(), Ok(response) => {
+            assert_matches!(response, (Id(2), _, Response(Some(_))));
+        });
 
         // Terminate the server by closing the messages stream.
         drop(requests_tx);

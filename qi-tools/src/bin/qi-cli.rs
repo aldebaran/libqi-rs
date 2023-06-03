@@ -1,3 +1,6 @@
+#![deny(unsafe_code)]
+#![warn(unused_crate_dependencies)]
+
 use anyhow::{bail, Result};
 use iri_string::types::UriString;
 use qi_messaging::{session, Action, CallResult, Object, Params, Service};

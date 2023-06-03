@@ -1,39 +1,39 @@
-use crate::{
-    capabilities, format,
-    message::{self, Message, Subject},
-};
+use super::message::{self, Message, Subject};
+pub(crate) use crate::message::Id;
+use crate::{capabilities::Map as Capabilities, format};
 use bytes::Bytes;
 
 #[derive(Clone, Debug)]
-pub enum Request {
+pub(crate) enum Request {
     Call {
-        id: RequestId,
+        id: Id,
         subject: Subject,
         payload: Bytes,
     },
     Post {
-        id: RequestId,
+        id: Id,
         subject: Subject,
         payload: Bytes,
     },
     Event {
-        id: RequestId,
+        id: Id,
         subject: Subject,
         payload: Bytes,
     },
     Cancel {
-        id: RequestId,
+        id: Id,
         subject: Subject,
-        call_id: RequestId,
+        call_id: Id,
     },
     Capabilities {
-        id: RequestId,
-        capabilities: capabilities::Map,
+        id: Id,
+        subject: Subject,
+        capabilities: Capabilities,
     },
 }
 
 impl Request {
-    pub fn call<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+    pub(crate) fn call<T>(id: Id, subject: Subject, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -45,7 +45,7 @@ impl Request {
         })
     }
 
-    pub fn post<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+    pub(crate) fn post<T>(id: Id, subject: Subject, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -57,7 +57,7 @@ impl Request {
         })
     }
 
-    pub fn event<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+    pub(crate) fn event<T>(id: Id, subject: Subject, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -69,70 +69,82 @@ impl Request {
         })
     }
 
-    pub fn id(&self) -> RequestId {
+    pub(crate) fn id(&self) -> Id {
+        use Request::*;
         match *self {
-            Request::Call { id, .. } => id,
-            Request::Post { id, .. } => id,
-            Request::Event { id, .. } => id,
-            Request::Cancel { id, .. } => id,
-            Request::Capabilities { id, .. } => id,
+            Call { id, .. }
+            | Post { id, .. }
+            | Event { id, .. }
+            | Cancel { id, .. }
+            | Capabilities { id, .. } => id,
         }
     }
 
-    pub fn try_into_message(self) -> Result<Message, format::Error> {
+    pub(crate) fn subject(&self) -> Subject {
+        use Request::*;
+        match *self {
+            Call { subject, .. }
+            | Post { subject, .. }
+            | Event { subject, .. }
+            | Cancel { subject, .. }
+            | Capabilities { subject, .. } => subject,
+        }
+    }
+
+    pub(crate) fn try_into_message(self) -> Result<Message, format::Error> {
+        use Request::*;
         let message = match self {
-            Self::Call {
+            Call {
                 id,
                 subject,
                 payload,
-            } => Message::call(id.into(), subject)
-                .set_payload(payload)
-                .build(),
-            Request::Post {
+            } => Message::call(id, subject).set_payload(payload).build(),
+            Post {
                 id,
                 subject,
                 payload,
-            } => Message::post(id.into(), subject)
-                .set_payload(payload)
-                .build(),
-            Request::Event {
+            } => Message::post(id, subject).set_payload(payload).build(),
+            Event {
                 id,
                 subject,
                 payload,
-            } => Message::event(id.into(), subject)
-                .set_payload(payload)
-                .build(),
-            Request::Cancel {
+            } => Message::event(id, subject).set_payload(payload).build(),
+            Cancel {
                 id,
                 subject,
                 call_id,
-            } => Message::cancel(id.into(), subject, call_id.into()).build(),
-            Request::Capabilities { id, capabilities } => {
-                Message::capabilities(id.into(), &capabilities)?.build()
-            }
+            } => Message::cancel(id, subject, call_id).build(),
+            Capabilities {
+                id,
+                subject,
+                capabilities,
+            } => Message::capabilities(id, subject, &capabilities)?.build(),
         };
         Ok(message)
     }
 
-    pub fn try_from_message(message: Message) -> Result<Result<Self, Message>, format::Error> {
+    pub(crate) fn try_from_message(
+        message: Message,
+    ) -> Result<Result<Self, Message>, format::Error> {
+        use message::Kind::*;
         let request = match message.kind() {
-            message::Kind::Call => Ok(Self::Call {
-                id: message.id().into(),
+            Call => Ok(Self::Call {
+                id: message.id(),
                 subject: message.subject(),
                 payload: message.into_payload(),
             }),
-            message::Kind::Post => Ok(Self::Post {
-                id: message.id().into(),
+            Post => Ok(Self::Post {
+                id: message.id(),
                 subject: message.subject(),
                 payload: message.into_payload(),
             }),
-            message::Kind::Event => Ok(Self::Event {
-                id: message.id().into(),
+            Event => Ok(Self::Event {
+                id: message.id(),
                 subject: message.subject(),
                 payload: message.into_payload(),
             }),
-            message::Kind::Cancel => Ok(Self::Cancel {
-                id: message.id().into(),
+            Cancel => Ok(Self::Cancel {
+                id: message.id(),
                 subject: message.subject(),
                 call_id: message.value()?,
             }),
@@ -142,237 +154,139 @@ impl Request {
     }
 }
 
-impl TryFrom<Request> for Message {
-    type Error = format::Error;
-
-    fn try_from(request: Request) -> Result<Self, Self::Error> {
-        request.try_into_message()
-    }
-}
-
-impl TryFrom<Message> for Result<Request, Message> {
-    type Error = format::Error;
-
-    fn try_from(message: Message) -> Result<Self, Self::Error> {
-        Request::try_from_message(message)
-    }
-}
-
 #[derive(
-    Default,
-    Copy,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-    serde::Serialize,
-    serde::Deserialize,
+    derive_new::new, Default, Debug, derive_more::From, derive_more::Into, derive_more::AsRef,
 )]
-#[serde(from = "message::Id", into = "message::Id")]
-pub struct RequestId(u32);
-
-#[doc(hidden)]
-impl From<message::Id> for RequestId {
-    fn from(value: message::Id) -> Self {
-        Self(value.0)
-    }
-}
-
-#[doc(hidden)]
-impl From<RequestId> for message::Id {
-    fn from(value: RequestId) -> Self {
-        Self(value.0)
-    }
-}
-
-#[derive(
-    derive_new::new,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Debug,
-    Clone,
-    Hash,
-    derive_more::From,
-    derive_more::Into,
-    derive_more::AsRef,
-)]
-pub struct Response(Option<CallResponse>);
+pub struct Response(pub(crate) Option<CallResult>);
 
 impl Response {
     pub fn none() -> Self {
         Self(None)
     }
 
-    pub fn reply<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+    pub fn reply<T>(value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
-        Ok(Self(Some(CallResponse::reply(id, subject, value)?)))
+        Ok(Self(Some(CallResult::reply(value)?)))
     }
 
-    pub fn error(id: RequestId, subject: Subject, description: impl Into<String>) -> Self {
-        Self(Some(CallResponse::error(id, subject, description)))
+    pub fn error<E>(error: E) -> Self
+    where
+        E: Into<Box<dyn std::error::Error + Sync + Send>>,
+    {
+        Self(Some(CallResult::Error(error.into())))
     }
 
-    pub fn canceled(id: RequestId, subject: Subject) -> Self {
-        Self(Some(CallResponse::canceled(id, subject)))
+    pub fn canceled() -> Self {
+        Self(Some(CallResult::Canceled))
     }
 
-    pub fn as_call_response(&self) -> Option<&CallResponse> {
+    pub(crate) fn as_call_result(&self) -> Option<&CallResult> {
         self.0.as_ref()
     }
 
-    pub fn into_call_response(self) -> Option<CallResponse> {
+    pub(crate) fn into_call_result(self) -> Option<CallResult> {
         self.0
     }
 
-    pub fn try_from_message(
-        message: Message,
-    ) -> Result<Result<Response, Message>, message::GetErrorDescriptionError> {
-        CallResponse::try_from_message(message)
-            .map(|response| response.map(|response| Self(Some(response))))
-    }
-
-    pub fn try_into_message(self) -> Result<Option<Message>, format::Error> {
-        self.0.map(|r| r.try_into_message()).transpose()
-    }
-
-    pub fn into_call_result<T>(self) -> Result<T, CallError>
+    pub fn into_result<T>(self) -> Result<Option<T>, CallError>
     where
         T: serde::de::DeserializeOwned,
     {
-        let call_response = self.0.ok_or(CallError::Empty)?;
-        match call_response.kind {
-            CallResponseKind::Reply(payload) => {
-                let value = format::from_bytes(&payload).map_err(CallError::ReplyPayloadFormat)?;
-                Ok(value)
+        match self.0 {
+            Some(call_result) => {
+                let result = call_result.into_result()?;
+                Ok(Some(result))
             }
-            CallResponseKind::Error(description) => Err(CallError::Error(description)),
-            CallResponseKind::Canceled => Err(CallError::Canceled),
+            None => Ok(None),
         }
     }
-}
 
-impl TryFrom<Message> for Result<Response, Message> {
-    type Error = message::GetErrorDescriptionError;
+    pub(crate) fn try_from_message(
+        message: message::Message,
+    ) -> Result<Result<(Id, Response), message::Message>, message::GetErrorDescriptionError> {
+        CallResult::try_from_message(message)
+            .map(|response| response.map(|(id, response)| (id, Self(Some(response)))))
+    }
 
-    fn try_from(message: Message) -> Result<Self, Self::Error> {
-        Response::try_from_message(message)
+    pub(crate) fn try_into_message(
+        self,
+        id: Id,
+        subject: message::Subject,
+    ) -> Result<Option<message::Message>, format::Error> {
+        self.0.map(|r| r.try_into_message(id, subject)).transpose()
     }
 }
 
-impl TryFrom<Response> for Option<Message> {
-    type Error = format::Error;
-
-    fn try_from(response: Response) -> Result<Self, Self::Error> {
-        response.try_into_message()
-    }
+#[derive(Debug)]
+pub enum CallResult {
+    Reply(Bytes),
+    Error(Box<dyn std::error::Error + Sync + Send>),
+    Canceled,
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Hash)]
-pub struct CallResponse {
-    id: RequestId,
-    subject: Subject,
-    kind: CallResponseKind,
-}
-
-impl CallResponse {
-    pub fn reply<T>(id: RequestId, subject: Subject, value: &T) -> Result<Self, format::Error>
+impl CallResult {
+    pub fn reply<T>(value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
         let payload = format::to_bytes(value)?;
-        Ok(Self {
-            id,
-            subject,
-            kind: CallResponseKind::Reply(payload),
-        })
+        Ok(Self::Reply(payload))
     }
 
-    pub fn error(id: RequestId, subject: Subject, description: impl Into<String>) -> Self {
-        Self {
-            id,
-            subject,
-            kind: CallResponseKind::Error(description.into()),
+    pub fn into_result<T>(self) -> Result<T, CallError>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        use CallResult::*;
+        match self {
+            Reply(payload) => {
+                let value = format::from_bytes(&payload).map_err(CallError::ReplyPayloadFormat)?;
+                Ok(value)
+            }
+            Error(description) => Err(CallError::Error(description)),
+            Canceled => Err(CallError::Canceled),
         }
     }
 
-    pub fn canceled(id: RequestId, subject: Subject) -> Self {
-        Self {
-            id,
-            subject,
-            kind: CallResponseKind::Canceled,
-        }
-    }
-
-    pub fn id(&self) -> RequestId {
-        self.id
-    }
-
-    pub fn subject(&self) -> Subject {
-        self.subject
-    }
-
-    pub fn kind(&self) -> &CallResponseKind {
-        &self.kind
-    }
-
-    fn try_into_message(self) -> Result<Message, format::Error> {
-        Ok(match self.kind {
-            CallResponseKind::Reply(payload) => Message::reply(self.id.into(), self.subject)
+    fn try_into_message(
+        self,
+        id: Id,
+        subject: message::Subject,
+    ) -> Result<message::Message, format::Error> {
+        use CallResult::*;
+        Ok(match self {
+            Reply(payload) => message::Message::reply(id, subject)
                 .set_payload(payload)
                 .build(),
-            CallResponseKind::Error(description) => {
-                Message::error(self.id.into(), self.subject, &description)?.build()
-            }
-            CallResponseKind::Canceled => Message::canceled(self.id.into(), self.subject).build(),
+            Error(err) => message::Message::error(id, subject, &err.to_string())?.build(),
+            Canceled => message::Message::canceled(id, subject).build(),
         })
     }
 
     fn try_from_message(
-        message: Message,
-    ) -> Result<Result<Self, Message>, message::GetErrorDescriptionError> {
-        use message::Kind;
-        let response = Self {
-            id: message.id().into(),
-            subject: message.subject(),
-            kind: match message.kind() {
-                Kind::Reply => CallResponseKind::Reply(message.into_payload()),
-                Kind::Error => CallResponseKind::Error(message.error_description()?),
-                Kind::Canceled => CallResponseKind::Canceled,
-                _ => return Ok(Err(message)),
-            },
+        message: message::Message,
+    ) -> Result<Result<(Id, Self), message::Message>, message::GetErrorDescriptionError> {
+        use message::Kind::*;
+        let id = message.id();
+        let response = match message.kind() {
+            Reply => Self::Reply(message.into_payload()),
+            Error => Self::Error(message.error_description()?.into()),
+            Canceled => Self::Canceled,
+            _ => return Ok(Err(message)),
         };
-        Ok(Ok(response))
+        Ok(Ok((id, response)))
     }
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Hash)]
-pub enum CallResponseKind {
-    Reply(Bytes),
-    Error(String),
-    Canceled,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum CallError {
-    #[error("the call request did not get a response")]
-    Empty,
-
     #[error("error deserializing the value from the reply payload")]
     ReplyPayloadFormat(#[from] format::Error),
 
-    #[error("the call request has resulted in an error: {0}")]
-    Error(String),
+    #[error(transparent)]
+    Error(#[from] Box<dyn std::error::Error + Sync + Send>),
 
     #[error("the call request has been canceled")]
     Canceled,

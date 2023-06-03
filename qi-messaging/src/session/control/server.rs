@@ -1,10 +1,9 @@
+use super::{Error, Request, Response};
+use crate::capabilities;
 use std::{
     future::{ready, Ready},
     task::{Context, Poll},
 };
-
-use super::{Error, Request, Response};
-use crate::capabilities;
 use tower::Service;
 
 #[derive(Debug)]

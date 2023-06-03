@@ -1,3 +1,5 @@
+# qi-format
+
 The `qi-format` is a pure Rust implementation of the `qi` format. It offers
 serializers and deserializers for encoding and decoding values of the `qi` type
 system.
@@ -5,34 +7,34 @@ system.
 The `qi` format is a binary representation of values. It is mainly used for
 communicating values in the `qi` messaging protocol.
 
-# Minimum Rust Required Version (MSRV)
+## Minimum Rust Required Version (MSRV)
 
-This crate requires Rust 1.59+.
+This crate requires Rust 1.63+.
 
-# Getting started
+## Getting started
 
-## Serializing a type into the format
-
-TODO
-
-## Serializing a type into a `Value`
+### Serializing a type into the format
 
 TODO
 
-## Deserializing a type from the format
+### Serializing a type into a `Value`
 
 TODO
 
-## Deserializing a type from a value
+### Deserializing a type from the format
 
 TODO
 
-# `qi` format
+### Deserializing a type from a value
+
+TODO
+
+## `qi` format
 
 You may refer to the `qi` type system and format specification (reference
 `spec:/aldebaran/framework/2022/h`) document for details.
 
-# Implementation of the format
+## Implementation of the format
 
 Let `Qi` be the type of all values representable in the `qi` format (equivalent
 to the `qi` type system).
