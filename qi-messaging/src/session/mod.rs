@@ -1,8 +1,9 @@
 mod control;
 mod router;
-mod service;
+pub mod service;
 
-use crate::{capabilities, channel::Channel};
+use crate::{capabilities, channel::Channel, request::IsCanceled};
+use bytes::Bytes;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     spawn,
@@ -19,8 +20,9 @@ impl Session {
     pub async fn client<IO, Svc>(io: IO, service: Svc) -> Result<Self, ClientError>
     where
         IO: AsyncWrite + AsyncRead + Send + 'static,
-        Svc: tower::Service<service::Request, Response = service::Response> + Send + 'static,
-        Svc::Error: std::error::Error + Sync + Send,
+        Svc: tower::Service<service::Request> + Send + 'static,
+        Svc::Response: Into<Option<Bytes>>,
+        Svc::Error: IsCanceled + std::fmt::Display + std::fmt::Debug + Sync + Send,
         Svc::Future: Send,
     {
         let (control_client, control_service) = control::client::Client::new();
@@ -42,7 +44,7 @@ impl Session {
         })
     }
 
-    pub async fn server<IO, Svc>(io: IO, service: Svc) -> Result<Self, ServerError> {
+    pub async fn server<IO, Svc>(_io: IO, _service: Svc) -> Result<Self, ServerError> {
         todo!()
     }
 

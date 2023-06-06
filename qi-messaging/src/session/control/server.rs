@@ -1,4 +1,4 @@
-use super::{Error, Request, Response};
+use super::{Error, Request};
 use crate::capabilities;
 use std::{
     future::{ready, Ready},
