@@ -4,7 +4,7 @@ description = "Types of the `qi` type system"
 keywords = ["qi", "type", "typesystem"]
 license-file = "LICENSE.txt"
 repository = "https://github.com/nyibbang/libqi-rs"
-version = "0.1.0"
+version = "0.1.0-dev"
 edition = "2021"
 rust-version = "1.63"
 
