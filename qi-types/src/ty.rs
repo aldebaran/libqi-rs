@@ -265,21 +265,23 @@ where
     let mut names = names.into_iter().fuse();
     let mut elements = elements.into_iter().fuse();
     let mut fields = Vec::new();
-    while let (Some(name), Some(element)) = (names.next(), elements.next()) {
-        fields.push(StructField {
-            name: name.into(),
-            value_type: element.into(),
-        })
+    loop {
+        match (names.next(), elements.next()) {
+            (Some(name), Some(element)) => fields.push(StructField {
+                name: name.into(),
+                value_type: element.into(),
+            }),
+            (None, None) => break Ok(fields),
+            (name, element) => {
+                break Err(ZipStructFieldsSizeError {
+                    name_count: fields.len() + if name.is_some() { 1 } else { 0 } + names.count(),
+                    element_count: fields.len()
+                        + if element.is_some() { 1 } else { 0 }
+                        + elements.count(),
+                })
+            }
+        }
     }
-    let name_count = fields.len() + names.count();
-    let element_count = fields.len() + elements.count();
-    if name_count != element_count {
-        return Err(ZipStructFieldsSizeError {
-            name_count,
-            element_count,
-        });
-    }
-    Ok(fields)
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, thiserror::Error)]
