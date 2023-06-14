@@ -55,7 +55,7 @@ macro_rules! impl_u32_le_field {
                 const SIZE: usize = std::mem::size_of::<u32>();
 
                 #[allow(unused)]
-                pub(crate) const fn new(value: u32) -> Self {
+                pub const fn new(value: u32) -> Self {
                     Self(value)
                 }
 
@@ -182,17 +182,17 @@ impl Subject {
 #[derive(
     Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
 )]
-pub(crate) struct Service(u32);
+pub struct Service(u32);
 
 #[derive(
     Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
 )]
-pub(crate) struct Object(u32);
+pub struct Object(u32);
 
 #[derive(
     Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
 )]
-pub(crate) struct Action(u32);
+pub struct Action(u32);
 
 impl_u32_le_field!(Id, Service, Object, Action);
 
@@ -560,7 +560,7 @@ impl Message {
     pub(crate) fn capabilities(
         id: Id,
         subject: Subject,
-        map: &capabilities::Map,
+        map: &capabilities::CapabilitiesMap,
     ) -> Result<Builder, format::Error> {
         Builder::new()
             .set_id(id)

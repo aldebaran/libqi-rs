@@ -1,4 +1,4 @@
-pub(crate) mod request;
+pub(crate) mod as_service;
 
 use crate::{
     client, format,
@@ -6,12 +6,12 @@ use crate::{
         self,
         codec::{DecodeError, Decoder, EncodeError, Encoder},
     },
-    request::{Id as RequestId, IsCanceled},
+    request::{Id as RequestId, IsCanceledError},
     server,
 };
+pub(crate) use as_service::{Call, Cancel, Capabilities, Event, Post, Request};
 use bytes::Bytes;
 use futures::{future, SinkExt, StreamExt};
-use request::{Call, Cancel, Capabilities, Event, Future, Post, Request};
 use std::{
     fmt::Debug,
     sync::atomic::AtomicU32,
@@ -28,7 +28,7 @@ use tokio_util::{
     sync::{PollSendError, PollSender},
 };
 use tower::Service;
-use tracing::{debug, debug_span, Instrument};
+use tracing::debug;
 
 #[derive(Debug)]
 pub(crate) struct Channel {
@@ -46,9 +46,9 @@ impl Channel {
     )
     where
         IO: AsyncWrite + AsyncRead,
-        Svc: tower::Service<crate::request::Request>,
-        Svc::Response: Into<Option<Bytes>> + Send + 'static,
-        Svc::Error: IsCanceled + ToString + Send + 'static,
+        Svc: tower::Service<crate::Request>,
+        Svc::Response: Into<Option<Bytes>> + std::fmt::Debug + Send + 'static,
+        Svc::Error: IsCanceledError + ToString + std::fmt::Debug + Send + 'static,
     {
         let (input, output) = split(io);
         let mut stream = FramedRead::new(input, Decoder::new()).fuse();
@@ -78,7 +78,7 @@ impl Channel {
                         let message = message?;
                         // Ignore the results of send, it occurs when the client or server dropped the
                         // request or response stream, which means that their task have terminated.
-                        match crate::request::Request::try_from_message(message).map_err(DispatchError::MessageIntoRequest)? {
+                        match crate::Request::try_from_message(message).map_err(DispatchError::MessageIntoRequest)? {
                             Ok(request) => {
                                 let _res = server_requests_tx.send(request).await;
                             }
@@ -120,13 +120,13 @@ impl Channel {
                         break Ok(());
                     }
                     res = &mut server => {
-                        res?;
+                        res.map_err(DispatchError::Server)?;
                         debug!("server has terminated with success");
                         break Ok(());
                     }
                 }
             }
-        }.instrument(debug_span!("channel_dispatch"));
+        };
 
         (
             Self {
@@ -152,17 +152,19 @@ impl Channel {
 macro_rules! impl_service {
     ($($req:ident),+) => {
         $(
-            impl Service<self::request::$req> for Channel {
+            impl Service<as_service::$req> for Channel {
                 type Response = <Self::Future as future::TryFuture>::Ok;
-                type Error = Error;
-                type Future = Future<<client::Client as Service<crate::request::$req>>::Future>;
+                type Error = <Self::Future as future::TryFuture>::Error;
+                type Future = as_service::ResponseFuture<<client::Client as Service<crate::$req>>::Future>;
+
                 fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-                    self.client.poll_ready(cx)
+                    <client::Client as Service<crate::$req>>::poll_ready(&mut self.client, cx)
                 }
+
                 fn call(&mut self, request: $req) -> Self::Future {
                     let request_id = self.make_request_id();
                     let request = request.into_messaging(request_id);
-                    Future::new(request_id, self.client.call(request))
+                    as_service::ResponseFuture::new(request_id, self.client.call(request))
                 }
             }
         )+
@@ -174,6 +176,9 @@ impl_service! {
 }
 
 pub(crate) type Error = client::Error;
+pub(crate) type ResponseFuture = as_service::ResponseFuture<client::ResponseFuture>;
+pub(crate) type CallResponseFuture = as_service::ResponseFuture<client::CallResponseFuture>;
+pub(crate) type NoResponseFuture = as_service::ResponseFuture<client::NoResponseFuture>;
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DispatchError<SvcResp, SvcErr> {
@@ -184,10 +189,10 @@ pub(crate) enum DispatchError<SvcResp, SvcErr> {
     Encode(#[from] EncodeError),
 
     #[error("client dispatch error")]
-    ClientDispatch(#[source] PollSendError<crate::request::Request>),
+    ClientDispatch(#[source] PollSendError<crate::Request>),
 
     #[error("server error")]
-    Server(#[from] PollSendError<server::Response<SvcResp, SvcErr>>),
+    Server(#[source] PollSendError<server::Response<SvcResp, SvcErr>>),
 
     #[error("error converting a message into a request")]
     MessageIntoRequest(#[source] format::Error),

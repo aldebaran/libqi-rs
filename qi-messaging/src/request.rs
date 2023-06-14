@@ -37,26 +37,10 @@ impl Request {
     pub(crate) fn try_into_message(self) -> Result<Message, format::Error> {
         let message = match self {
             Request::Call(call) => call.into_message(),
-            Request::Post(Post {
-                id,
-                subject,
-                payload,
-            }) => Message::post(id, subject).set_payload(payload).build(),
-            Request::Event(Event {
-                id,
-                subject,
-                payload,
-            }) => Message::event(id, subject).set_payload(payload).build(),
-            Request::Cancel(Cancel {
-                id,
-                subject,
-                call_id,
-            }) => Message::cancel(id, subject, call_id).build(),
-            Request::Capabilities(Capabilities {
-                id,
-                subject,
-                capabilities,
-            }) => Message::capabilities(id, subject, &capabilities)?.build(),
+            Request::Post(post) => post.into_message(),
+            Request::Event(event) => event.into_message(),
+            Request::Cancel(cancel) => cancel.into_message(),
+            Request::Capabilities(capabilities) => capabilities.try_into_message()?,
         };
         Ok(message)
     }
@@ -107,18 +91,6 @@ pub(crate) struct Call {
 }
 
 impl Call {
-    pub(crate) fn with_value<T>(id: Id, subject: Subject, value: &T) -> Result<Self, format::Error>
-    where
-        T: serde::Serialize,
-    {
-        let payload = format::to_bytes(value)?;
-        Ok(Self {
-            id,
-            subject,
-            payload,
-        })
-    }
-
     pub(crate) fn value<'de, T>(&'de self) -> Result<T, format::Error>
     where
         T: serde::Deserialize<'de>,
@@ -141,18 +113,6 @@ pub(crate) struct Post {
 }
 
 impl Post {
-    pub(crate) fn with_value<T>(id: Id, subject: Subject, value: &T) -> Result<Self, format::Error>
-    where
-        T: serde::Serialize,
-    {
-        let payload = format::to_bytes(value)?;
-        Ok(Self {
-            id,
-            subject,
-            payload,
-        })
-    }
-
     pub(crate) fn into_message(self) -> Message {
         Message::post(self.id, self.subject)
             .set_payload(self.payload)
@@ -168,18 +128,6 @@ pub(crate) struct Event {
 }
 
 impl Event {
-    pub(crate) fn with_value<T>(id: Id, subject: Subject, value: &T) -> Result<Self, format::Error>
-    where
-        T: serde::Serialize,
-    {
-        let payload = format::to_bytes(value)?;
-        Ok(Self {
-            id,
-            subject,
-            payload,
-        })
-    }
-
     pub(crate) fn into_message(self) -> Message {
         Message::event(self.id, self.subject)
             .set_payload(self.payload)
@@ -205,7 +153,7 @@ pub(crate) struct Capabilities {
     pub(crate) id: Id,
     pub(crate) subject: Subject,
     #[into]
-    pub(crate) capabilities: capabilities::Map,
+    pub(crate) capabilities: capabilities::CapabilitiesMap,
 }
 
 impl Capabilities {
@@ -214,8 +162,57 @@ impl Capabilities {
     }
 }
 
-pub trait IsCanceled {
+pub trait IsCanceledError {
     fn is_canceled(&self) -> bool;
+}
+
+impl<'t, T> IsCanceledError for &'t T
+where
+    T: IsCanceledError + ?Sized,
+{
+    fn is_canceled(&self) -> bool {
+        <T as IsCanceledError>::is_canceled(*self)
+    }
+}
+
+impl<T> IsCanceledError for Box<T>
+where
+    T: IsCanceledError,
+{
+    fn is_canceled(&self) -> bool {
+        <T as IsCanceledError>::is_canceled(self.as_ref())
+    }
+}
+
+impl<T> IsCanceledError for std::sync::Arc<T>
+where
+    T: IsCanceledError,
+{
+    fn is_canceled(&self) -> bool {
+        <T as IsCanceledError>::is_canceled(self.as_ref())
+    }
+}
+
+macro_rules! impl_never_is_canceled_error {
+    ($($err:ty),+) => {
+        $(impl IsCanceledError for $err {
+            fn is_canceled(&self) -> bool {
+                false
+            }
+        })+
+    };
+}
+
+impl_never_is_canceled_error! {
+    std::io::Error,
+    std::convert::Infallible,
+    std::fmt::Error,
+    std::num::ParseIntError,
+    std::num::ParseFloatError,
+    std::num::TryFromIntError,
+    std::str::ParseBoolError,
+    std::str::Utf8Error,
+    std::string::FromUtf8Error
 }
 
 #[sealed]
@@ -226,7 +223,7 @@ pub(crate) trait TryIntoFailureMessage {
 #[sealed]
 impl<T> TryIntoFailureMessage for T
 where
-    T: IsCanceled + ToString,
+    T: IsCanceledError + ToString,
 {
     fn try_into_failure_message(self, id: Id, subject: Subject) -> Result<Message, format::Error> {
         Ok(if self.is_canceled() {

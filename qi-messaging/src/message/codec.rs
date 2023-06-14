@@ -108,33 +108,79 @@ fn decode_payload(size: usize, src: &mut BytesMut) -> Option<Bytes> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::message;
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn test_encoder_success() {
+        let message = Message {
+            id: message::Id(1),
+            kind: message::Kind::Call,
+            subject: message::Subject::default(),
+            flags: message::Flags::all(),
+            payload: Bytes::from_static(&[1, 2, 3]),
+        };
+        let mut buf = BytesMut::new();
+        let mut encoder = Encoder;
+        let res = tokio_util::codec::Encoder::encode(&mut encoder, message.clone(), &mut buf);
+        assert_matches!(res, Ok(()));
+
+        let mut buf2 = vec![];
+        message.write(&mut buf2).unwrap();
+        assert_eq!(buf, buf2);
+    }
+
     #[test]
     fn test_decoder_not_enough_data_for_header() {
-        todo!()
+        let data = [0x42, 0xde, 0xad];
+        let mut buf = BytesMut::from_iter(data);
+        let mut decoder = Decoder::new();
+        let res = tokio_util::codec::Decoder::decode(&mut decoder, &mut buf);
+        assert_matches!(res, Ok(None));
     }
 
     #[test]
     fn test_decoder_not_enough_data_for_payload() {
-        todo!()
+        let data = [
+            0x42, 0xde, 0xad, 0x42, // cookie
+            1, 0, 0, 0, // id
+            5, 0, 0, 0, // size
+            0, 0, 6, 2, // version, type, flags
+            1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, // subject,
+            1, 2, 3, // payload
+        ];
+        let mut buf = BytesMut::from_iter(data);
+        let mut decoder = Decoder::new();
+        let res = tokio_util::codec::Decoder::decode(&mut decoder, &mut buf);
+        assert_matches!(res, Ok(None));
     }
 
     #[test]
-    fn test_decoder_garbage() {
-        todo!()
+    fn test_decoder_garbage_magic_cookie() {
+        let data = [1; Header::SIZE];
+        let mut buf = BytesMut::from_iter(data);
+        let mut decoder = Decoder::new();
+        let res = tokio_util::codec::Decoder::decode(&mut decoder, &mut buf);
+        assert_matches!(
+            res,
+            Err(DecodeError::ReadHeader(ReadHeaderError::MagicCookie(_)))
+        );
     }
 
     #[test]
     fn test_decoder_success() {
-        todo!()
-    }
-
-    #[test]
-    fn test_encoder_bad_payload_size() {
-        todo!()
-    }
-
-    #[test]
-    fn test_encoder_success() {
-        todo!()
+        let data = [
+            0x42, 0xde, 0xad, 0x42, // cookie
+            1, 0, 0, 0, // id
+            4, 0, 0, 0, // size
+            0, 0, 6, 2, // version, type, flags
+            1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, // subject,
+            1, 2, 3, 4, // payload
+        ];
+        let mut buf = BytesMut::from_iter(data);
+        let mut decoder = Decoder::new();
+        let res = tokio_util::codec::Decoder::decode(&mut decoder, &mut buf);
+        assert_matches!(res, Ok(Some(_msg)));
     }
 }

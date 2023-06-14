@@ -4,9 +4,9 @@ use std::{borrow::Borrow, cmp::Ordering, collections::HashMap};
 type MapImpl = HashMap<String, Dynamic>;
 
 #[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Map(MapImpl);
+pub struct CapabilitiesMap(MapImpl);
 
-impl Map {
+impl CapabilitiesMap {
     pub fn new() -> Self {
         Self(MapImpl::new())
     }
@@ -57,7 +57,7 @@ impl Map {
     }
 }
 
-impl<'map> std::iter::IntoIterator for &'map Map {
+impl<'map> std::iter::IntoIterator for &'map CapabilitiesMap {
     type Item = <&'map MapImpl as IntoIterator>::Item;
     type IntoIter = <&'map MapImpl as IntoIterator>::IntoIter;
 
@@ -66,7 +66,7 @@ impl<'map> std::iter::IntoIterator for &'map Map {
     }
 }
 
-impl<K, V> std::iter::FromIterator<(K, V)> for Map
+impl<K, V> std::iter::FromIterator<(K, V)> for CapabilitiesMap
 where
     K: Into<String>,
     V: Into<Dynamic>,
@@ -78,7 +78,7 @@ where
     }
 }
 
-impl<K, V> std::iter::Extend<(K, V)> for Map
+impl<K, V> std::iter::Extend<(K, V)> for CapabilitiesMap
 where
     K: Into<String>,
     V: Into<Dynamic>,
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_capability_map_merge_with() {
-        let mut m = Map::from_iter([
+        let mut m = CapabilitiesMap::from_iter([
             ("A", true),
             ("B", true),
             ("C", false),
@@ -104,7 +104,7 @@ mod tests {
             ("E", true),
             ("F", false),
         ]);
-        let m2 = Map::from_iter([
+        let m2 = CapabilitiesMap::from_iter([
             ("A", true),
             ("B", false),
             ("C", true),

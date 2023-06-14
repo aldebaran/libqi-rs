@@ -29,8 +29,7 @@
     clippy::rc_mutex,
     clippy::rest_pat_in_fully_bound_structs,
     clippy::same_name_method,
-    clippy::self_named_module_files,
-    clippy::single_char_lifetime_names,
+    clippy::mod_module_files,
     clippy::str_to_string,
     clippy::string_slice,
     clippy::string_to_string,
@@ -54,3 +53,8 @@ mod server;
 pub mod session;
 
 use qi_format as format;
+
+use request::{Call, Cancel, Capabilities, Event, Post, Request};
+pub use session::Session;
+#[doc(inline)]
+pub use {capabilities::CapabilitiesMap, request::IsCanceledError, session::service};

@@ -1,14 +1,13 @@
 use crate::{
     message::{Id, Message, Subject},
-    request::{IsCanceled, Request, TryIntoFailureMessage},
+    request::{IsCanceledError, Request, TryIntoFailureMessage},
 };
 use bytes::Bytes;
 use futures::{future::err, stream::FuturesUnordered, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use tokio::{pin, select};
 use tower::ServiceExt;
-use tracing::{debug, debug_span, instrument, Instrument};
+use tracing::{debug, debug_span, Instrument};
 
-#[instrument(level = "debug", skip_all)]
 pub(crate) async fn serve<St, Si, Svc>(
     requests_stream: St,
     responses_sink: Si,
@@ -18,6 +17,8 @@ where
     St: Stream<Item = Request>,
     Si: Sink<Response<Svc::Response, Svc::Error>>,
     Svc: tower::Service<Request>,
+    Svc::Response: std::fmt::Debug,
+    Svc::Error: std::fmt::Debug,
 {
     let requests_stream = requests_stream.fuse();
     let mut responses_futures = FuturesUnordered::new();
@@ -35,7 +36,7 @@ where
                 responses_futures.push(response_future.map(move |response| (id, subject, response)));
             },
             Some((id, subject, response)) = responses_futures.next() => {
-                debug!("received response of service call");
+                debug!(%id, %subject, ?response, "received response of service call");
                 responses_sink.send(Response { id, subject, response }).await?;
             },
             else => {
@@ -56,7 +57,7 @@ pub(crate) struct Response<R, E> {
 impl<R, E> TryFrom<Response<R, E>> for Option<Message>
 where
     R: Into<Option<Bytes>>,
-    E: IsCanceled + ToString,
+    E: IsCanceledError + ToString,
 {
     type Error = crate::format::Error;
 
@@ -112,20 +113,23 @@ mod tests {
 
         fn call(&mut self, req: Request) -> Self::Future {
             let id = req.id();
-            let barrier = Arc::clone(&self.request_barriers[&id]);
+            let barrier = self.request_barriers.get(&id).cloned();
             async move {
-                barrier.wait().await;
+                if let Some(barrier) = barrier {
+                    barrier.wait().await;
+                }
                 Ok(id)
             }
             .boxed()
         }
     }
 
-    /// Tests that the service calls are executed concurrently as soon as a request is received, without waiting for previous requests to be finished.
+    /// Tests that the service calls are executed concurrently as soon as a request is received
+    /// without waiting for previous requests to be finished.
     #[tokio::test]
-    async fn test_service_futures_execute_concurrently() -> Result<(), Box<dyn std::error::Error>> {
-        let (requests_tx, requests_rx) = mpsc::channel(8);
-        let (responses_tx, mut responses_rx) = mpsc::channel(8);
+    async fn test_server_service_futures_execute_concurrently() {
+        let (requests_tx, requests_rx) = mpsc::channel(4);
+        let (responses_tx, mut responses_rx) = mpsc::channel(4);
         let barrier_1 = Arc::new(Barrier::new(2));
         let barrier_2 = Arc::new(Barrier::new(2));
         let barrier_3 = Arc::new(Barrier::new(2));
@@ -156,21 +160,24 @@ mod tests {
                 subject,
                 payload: Bytes::new(),
             }))
-            .await?;
+            .await
+            .unwrap();
         requests_tx
             .send(Request::Call(Call {
                 id: Id::from(2),
                 subject,
                 payload: Bytes::new(),
             }))
-            .await?;
+            .await
+            .unwrap();
         requests_tx
             .send(Request::Call(Call {
                 id: Id::from(3),
                 subject,
                 payload: Bytes::new(),
             }))
-            .await?;
+            .await
+            .unwrap();
 
         // Poll the server once to process the requests.
         // Responses are not received yet, the service is awaiting.
@@ -201,7 +208,34 @@ mod tests {
         // Terminate the server by closing the messages stream.
         drop(requests_tx);
         assert_matches!(poll_immediate(&mut serve).await, Some(Ok(())));
+    }
 
-        Ok(())
+    #[tokio::test]
+    async fn test_server_sink_error_stops_task() {
+        let (requests_tx, requests_rx) = mpsc::channel(1);
+        let (responses_tx, responses_rx) = mpsc::channel(1);
+        let service = Service {
+            request_barriers: HashMap::new(),
+        };
+        let requests_stream = ReceiverStream::new(requests_rx);
+        let responses_sink = PollSender::new(responses_tx);
+
+        let serve = serve(requests_stream, responses_sink, service);
+        pin!(serve);
+
+        // Drop the sink receiver, this will cause errors from the sender.
+        drop(responses_rx);
+
+        // Send a call request, causing the server to try to put a response in the sink.
+        requests_tx
+            .send(Request::Call(Call {
+                id: Id::from(1),
+                subject: message::Subject::default(),
+                payload: Bytes::new(),
+            }))
+            .await
+            .unwrap();
+
+        assert_matches!(poll_immediate(&mut serve).await, Some(Err(_err)));
     }
 }

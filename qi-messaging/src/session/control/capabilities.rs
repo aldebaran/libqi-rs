@@ -1,4 +1,4 @@
-pub(in crate::session) use crate::capabilities::Map;
+pub(in crate::session) use crate::capabilities::CapabilitiesMap;
 use once_cell::sync::OnceCell;
 
 #[derive(Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -19,7 +19,7 @@ impl Base {
     const OBJECT_PTR_UID: &'static str = "ObjectPtrUID";
     const RELATIVE_ENDPOINT_URI: &'static str = "RelativeEndpointURI";
 
-    fn from_capabilities(map: &Map) -> Self {
+    fn from_capabilities(map: &CapabilitiesMap) -> Self {
         Self {
             client_server_socket: map.has_flag_capability(Self::CLIENT_SERVER_SOCKET),
             meta_object_cache: map.has_flag_capability(Self::META_OBJECT_CACHE),
@@ -30,8 +30,8 @@ impl Base {
         }
     }
 
-    fn to_capabilities(self) -> Map {
-        Map::from_iter([
+    fn to_capabilities(self) -> CapabilitiesMap {
+        CapabilitiesMap::from_iter([
             (Self::CLIENT_SERVER_SOCKET, self.client_server_socket),
             (Self::META_OBJECT_CACHE, self.meta_object_cache),
             (Self::MESSAGE_FLAGS, self.message_flags),
@@ -42,7 +42,7 @@ impl Base {
     }
 }
 
-pub(crate) trait MapExt {
+pub(crate) trait CapabilitiesMapExt {
     fn check_required(&self) -> Result<&Self, ExpectedKeyValueError<bool>>;
     fn check_intersect_with_local(self) -> Result<Self, ExpectedKeyValueError<bool>>
     where
@@ -50,10 +50,10 @@ pub(crate) trait MapExt {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
-#[error("expected key {0} to have value {1}")]
-pub(crate) struct ExpectedKeyValueError<T>(String, T);
+#[error("expected key \"{0}\" to have value \"{1}\"")]
+pub struct ExpectedKeyValueError<T>(String, T);
 
-impl MapExt for Map {
+impl CapabilitiesMapExt for CapabilitiesMap {
     /// Checks that the capabilities have the required values that are only supported by this implementation.
     ///
     /// This implementation does not yet handle all the possible effects of each capability cases. This function
@@ -107,8 +107,8 @@ const LOCAL_BASE_CAPABILITIES: Base = Base {
     relative_endpoint_uri: true,
 };
 
-static LOCAL_CAPABILITIES: OnceCell<Map> = OnceCell::new();
+static LOCAL_CAPABILITIES: OnceCell<CapabilitiesMap> = OnceCell::new();
 
-pub(super) fn local() -> &'static Map {
+pub(super) fn local() -> &'static CapabilitiesMap {
     LOCAL_CAPABILITIES.get_or_init(|| LOCAL_BASE_CAPABILITIES.to_capabilities())
 }

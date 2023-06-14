@@ -16,17 +16,7 @@ pub(crate) enum Request {
 }
 
 impl Request {
-    pub(crate) fn subject(&self) -> Subject {
-        match self {
-            Request::Call(Call { subject, .. })
-            | Request::Post(Post { subject, .. })
-            | Request::Event(Event { subject, .. })
-            | Request::Cancel(Cancel { subject, .. })
-            | Request::Capabilities(Capabilities { subject, .. }) => *subject,
-        }
-    }
-
-    pub(crate) fn into_messaging(self, id: Id) -> crate::request::Request {
+    pub(crate) fn into_messaging(self, id: Id) -> crate::Request {
         match self {
             Request::Call(call) => call.into_messaging(id).into(),
             Request::Post(post) => post.into_messaging(id).into(),
@@ -37,23 +27,23 @@ impl Request {
     }
 }
 
-impl From<crate::request::Request> for Request {
-    fn from(request: crate::request::Request) -> Self {
-        use crate::request::Request;
+impl From<crate::Request> for Request {
+    fn from(request: crate::Request) -> Self {
+        use crate::Request;
         match request {
-            Request::Call(crate::request::Call {
+            Request::Call(crate::Call {
                 subject, payload, ..
             }) => Call { subject, payload }.into(),
-            Request::Post(crate::request::Post {
+            Request::Post(crate::Post {
                 subject, payload, ..
             }) => Post { subject, payload }.into(),
-            Request::Event(crate::request::Event {
+            Request::Event(crate::Event {
                 subject, payload, ..
             }) => Event { subject, payload }.into(),
-            Request::Cancel(crate::request::Cancel {
+            Request::Cancel(crate::Cancel {
                 subject, call_id, ..
             }) => Cancel { subject, call_id }.into(),
-            Request::Capabilities(crate::request::Capabilities {
+            Request::Capabilities(crate::Capabilities {
                 subject,
                 capabilities,
                 ..
@@ -81,8 +71,8 @@ impl Call {
         Ok(Self { subject, payload })
     }
 
-    pub(crate) fn into_messaging(self, id: Id) -> crate::request::Call {
-        crate::request::Call {
+    pub(crate) fn into_messaging(self, id: Id) -> crate::Call {
+        crate::Call {
             id,
             subject: self.subject,
             payload: self.payload,
@@ -97,16 +87,8 @@ pub(crate) struct Post {
 }
 
 impl Post {
-    pub(crate) fn with_value<T>(subject: Subject, value: &T) -> Result<Self, format::Error>
-    where
-        T: serde::Serialize,
-    {
-        let payload = format::to_bytes(value)?;
-        Ok(Self { subject, payload })
-    }
-
-    pub(crate) fn into_messaging(self, id: Id) -> crate::request::Post {
-        crate::request::Post {
+    pub(crate) fn into_messaging(self, id: Id) -> crate::Post {
+        crate::Post {
             id,
             subject: self.subject,
             payload: self.payload,
@@ -121,16 +103,8 @@ pub(crate) struct Event {
 }
 
 impl Event {
-    pub(crate) fn with_value<T>(subject: Subject, value: &T) -> Result<Self, format::Error>
-    where
-        T: serde::Serialize,
-    {
-        let payload = format::to_bytes(value)?;
-        Ok(Self { subject, payload })
-    }
-
-    pub(crate) fn into_messaging(self, id: Id) -> crate::request::Event {
-        crate::request::Event {
+    pub(crate) fn into_messaging(self, id: Id) -> crate::Event {
+        crate::Event {
             id,
             subject: self.subject,
             payload: self.payload,
@@ -145,8 +119,8 @@ pub(crate) struct Cancel {
 }
 
 impl Cancel {
-    pub(crate) fn into_messaging(self, id: Id) -> crate::request::Cancel {
-        crate::request::Cancel {
+    pub(crate) fn into_messaging(self, id: Id) -> crate::Cancel {
+        crate::Cancel {
             id,
             subject: self.subject,
             call_id: self.call_id,
@@ -157,12 +131,12 @@ impl Cancel {
 #[derive(derive_new::new, Debug)]
 pub(crate) struct Capabilities {
     subject: Subject,
-    capabilities: capabilities::Map,
+    capabilities: capabilities::CapabilitiesMap,
 }
 
 impl Capabilities {
-    pub(crate) fn into_messaging(self, id: Id) -> crate::request::Capabilities {
-        crate::request::Capabilities {
+    pub(crate) fn into_messaging(self, id: Id) -> crate::Capabilities {
+        crate::Capabilities {
             id,
             subject: self.subject,
             capabilities: self.capabilities,
@@ -173,20 +147,20 @@ impl Capabilities {
 pin_project! {
     #[derive(derive_new::new, Debug)]
     #[must_use = "futures do nothing until polled"]
-    pub(crate) struct Future<F> {
+    pub(crate) struct ResponseFuture<F> {
         request_id: Id,
         #[pin]
         inner: F,
     }
 }
 
-impl<F> Future<F> {
+impl<F> ResponseFuture<F> {
     pub(crate) fn request_id(&self) -> Id {
         self.request_id
     }
 }
 
-impl<F> std::future::Future for Future<F>
+impl<F> std::future::Future for ResponseFuture<F>
 where
     F: std::future::Future,
 {
