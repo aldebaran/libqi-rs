@@ -75,7 +75,7 @@ pub(super) fn verify_result(result: &CapabilitiesMap) -> Result<(), VerifyResult
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum VerifyResultError {
+pub(in crate::session) enum VerifyResultError {
     #[error("no authentication state value was found in the result")]
     NoStateValue,
 

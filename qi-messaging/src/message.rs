@@ -78,7 +78,6 @@ macro_rules! impl_u32_le_field {
 }
 
 #[derive(
-    Default,
     Debug,
     Hash,
     PartialEq,
@@ -95,6 +94,12 @@ macro_rules! impl_u32_le_field {
 )]
 #[serde(transparent)]
 pub struct Id(pub(crate) u32);
+
+impl Default for Id {
+    fn default() -> Self {
+        Self(1)
+    }
+}
 
 #[derive(
     Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::Display,
@@ -521,7 +526,7 @@ impl Message {
 
     /// Builds a "error" message.
     ///
-    /// This sets the kind, the id, the subject and the payload of the message.
+    /// This sets the kind, the id, the subject and the content of the message.
     pub(crate) fn error(
         id: Id,
         subject: Subject,
@@ -556,7 +561,7 @@ impl Message {
 
     /// Builds a "capabilities" message.
     ///
-    /// This sets the kind, the id, the subject and the payload of the message.
+    /// This sets the kind, the id, the subject and the content of the message.
     pub(crate) fn capabilities(
         id: Id,
         subject: Subject,
@@ -566,18 +571,18 @@ impl Message {
             .set_id(id)
             .set_kind(Kind::Capabilities)
             .set_subject(subject)
-            .set_value(&map)
+            .set_content(&map)
     }
 
     /// Builds a "cancel" message.
     ///
-    /// This sets the kind, the id, the subject and the payload of the message.
+    /// This sets the kind, the id, the subject and the content of the message.
     pub(crate) fn cancel(id: Id, subject: Subject, call_id: Id) -> Builder {
         Builder::new()
             .set_id(id)
             .set_kind(Kind::Cancel)
             .set_subject(subject)
-            .set_value(&call_id)
+            .set_content(&call_id)
             .expect("failed to serialize a message ID in the format")
     }
 
@@ -627,7 +632,7 @@ impl Message {
         Header::SIZE + self.payload.len()
     }
 
-    pub(crate) fn value<T>(&self) -> Result<T, format::Error>
+    pub(crate) fn content<T>(&self) -> Result<T, format::Error>
     where
         T: serde::de::DeserializeOwned,
     {
@@ -635,7 +640,7 @@ impl Message {
     }
 
     pub(crate) fn error_description(&self) -> Result<String, GetErrorDescriptionError> {
-        let dynamic: Dynamic = self.value()?;
+        let dynamic: Dynamic = self.content()?;
         match dynamic {
             Dynamic::String(s) => Ok(s),
             d => Err(GetErrorDescriptionError::DynamicValueIsNotAString(d)),
@@ -681,15 +686,15 @@ impl Builder {
         self
     }
 
-    pub(crate) fn set_payload(mut self, value: Bytes) -> Self {
-        self.0.payload = value;
+    pub(crate) fn set_content_bytes(mut self, content: Bytes) -> Self {
+        self.0.payload = content;
         self
     }
 
     /// Sets the serialized representation of the value in the format as the payload of the message.
     /// It checks if the "dynamic payload" flag is set on the message to know how to serialize the value.
     /// If the flag is set after calling this value, the value will not be serialized coherently with the flag.
-    pub(crate) fn set_value<T>(mut self, value: &T) -> Result<Self, format::Error>
+    pub(crate) fn set_content<T>(mut self, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -702,7 +707,7 @@ impl Builder {
     }
 
     pub(crate) fn set_error_description(self, description: &str) -> Result<Self, format::Error> {
-        self.set_value(&Dynamic::from(description))
+        self.set_content(&Dynamic::from(description))
     }
 
     pub(crate) fn build(self) -> Message {

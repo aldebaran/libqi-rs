@@ -1,11 +1,12 @@
 use crate::{
-    message::{Id, Message, Subject},
-    request::{IsCanceledError, Request, TryIntoFailureMessage},
+    messaging::{
+        CallWithId, Message, NotificationWithId, RequestId, RequestWithId, Service, Subject,
+        ToRequestId, ToSubject, TryIntoFailureMessage,
+    },
+    Bytes, IsErrorCanceledTermination,
 };
-use bytes::Bytes;
-use futures::{future::err, stream::FuturesUnordered, FutureExt, Sink, SinkExt, Stream, StreamExt};
+use futures::{stream::FuturesUnordered, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use tokio::{pin, select};
-use tower::ServiceExt;
 use tracing::{debug, debug_span, Instrument};
 
 pub(crate) async fn serve<St, Si, Svc>(
@@ -14,10 +15,9 @@ pub(crate) async fn serve<St, Si, Svc>(
     mut service: Svc,
 ) -> Result<(), Si::Error>
 where
-    St: Stream<Item = Request>,
-    Si: Sink<Response<Svc::Response, Svc::Error>>,
-    Svc: tower::Service<Request>,
-    Svc::Response: std::fmt::Debug,
+    St: Stream<Item = RequestWithId>,
+    Si: Sink<Response<Svc::Error>>,
+    Svc: Service<CallWithId, NotificationWithId>,
     Svc::Error: std::fmt::Debug,
 {
     let requests_stream = requests_stream.fuse();
@@ -27,17 +27,16 @@ where
     loop {
         select! {
             Some(request) = requests_stream.next() => {
-                let (id, subject) = (request.id(), request.subject());
+                let (id, subject) = (request.to_request_id(), request.to_subject());
                 debug!(?request, "received a new request, calling service");
-                let response_future = match service.ready().await {
-                    Ok(service) => service.call(request).left_future(),
-                    Err(error) => err(error).right_future(),
-                }.instrument(debug_span!("service_call"));
+                let response_future = service.request(request.transpose_id()).instrument(debug_span!("service_call"));
                 responses_futures.push(response_future.map(move |response| (id, subject, response)));
             },
             Some((id, subject, response)) = responses_futures.next() => {
                 debug!(%id, %subject, ?response, "received response of service call");
-                responses_sink.send(Response { id, subject, response }).await?;
+                if let Some(response) = response.transpose() {
+                    responses_sink.send(Response { id, subject, response }).await?;
+                }
             },
             else => {
                 debug!("server is finished");
@@ -48,29 +47,24 @@ where
 }
 
 #[derive(Debug)]
-pub(crate) struct Response<R, E> {
-    id: Id,
+pub(crate) struct Response<E> {
+    id: RequestId,
     subject: Subject,
-    response: Result<R, E>,
+    response: Result<Bytes, E>,
 }
 
-impl<R, E> TryFrom<Response<R, E>> for Option<Message>
+impl<E> TryFrom<Response<E>> for Message
 where
-    R: Into<Option<Bytes>>,
-    E: IsCanceledError + ToString,
+    E: IsErrorCanceledTermination + ToString,
 {
     type Error = crate::format::Error;
 
-    fn try_from(response: Response<R, E>) -> Result<Self, Self::Error> {
+    fn try_from(response: Response<E>) -> Result<Self, Self::Error> {
         match response.response {
-            Ok(reply) => Ok(reply.into().map(|payload| {
-                Message::reply(response.id, response.subject)
-                    .set_payload(payload)
-                    .build()
-            })),
-            Err(err) => err
-                .try_into_failure_message(response.id, response.subject)
-                .map(Some),
+            Ok(payload) => Ok(Message::reply(response.id, response.subject)
+                .set_content_bytes(payload)
+                .build()),
+            Err(err) => err.try_into_failure_message(response.id, response.subject),
         }
     }
 }
@@ -78,18 +72,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{message, request::Call};
+    use crate::{
+        format, message,
+        messaging::{Call, Request},
+        service, Bytes,
+    };
     use assert_matches::assert_matches;
-    use bytes::Bytes;
     use futures::{
         future::{poll_immediate, BoxFuture},
         FutureExt,
     };
-    use std::{
-        collections::HashMap,
-        sync::Arc,
-        task::{Context, Poll},
-    };
+    use std::{collections::HashMap, sync::Arc};
     use tokio::sync::{
         mpsc::{self, error::TryRecvError},
         Barrier,
@@ -99,28 +92,29 @@ mod tests {
 
     #[derive(Debug)]
     struct Service {
-        request_barriers: HashMap<Id, Arc<Barrier>>,
+        request_barriers: HashMap<RequestId, Arc<Barrier>>,
     }
 
-    impl tower::Service<Request> for Service {
-        type Response = Id;
+    impl<N> service::Service<CallWithId, N> for Service {
         type Error = String;
-        type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+        type CallFuture = BoxFuture<'static, Result<Bytes, Self::Error>>;
+        type NotifyFuture = BoxFuture<'static, Result<(), Self::Error>>;
 
-        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            Poll::Ready(Ok(()))
-        }
-
-        fn call(&mut self, req: Request) -> Self::Future {
-            let id = req.id();
+        fn call(&mut self, call: CallWithId) -> Self::CallFuture {
+            let id = call.to_request_id();
             let barrier = self.request_barriers.get(&id).cloned();
             async move {
                 if let Some(barrier) = barrier {
                     barrier.wait().await;
                 }
-                Ok(id)
+                let payload = format::to_bytes(&id).map_err(|err| err.to_string())?;
+                Ok(payload)
             }
             .boxed()
+        }
+
+        fn notify(&mut self, _notif: N) -> Self::NotifyFuture {
+            unimplemented!()
         }
     }
 
@@ -135,9 +129,9 @@ mod tests {
         let barrier_3 = Arc::new(Barrier::new(2));
         let service = Service {
             request_barriers: [
-                (Id::from(1), Arc::clone(&barrier_1)),
-                (Id::from(2), Arc::clone(&barrier_2)),
-                (Id::from(3), Arc::clone(&barrier_3)),
+                (RequestId::from(1), Arc::clone(&barrier_1)),
+                (RequestId::from(2), Arc::clone(&barrier_2)),
+                (RequestId::from(3), Arc::clone(&barrier_3)),
             ]
             .into_iter()
             .collect(),
@@ -155,27 +149,33 @@ mod tests {
             message::Action::new(3),
         );
         requests_tx
-            .send(Request::Call(Call {
-                id: Id::from(1),
-                subject,
-                payload: Bytes::new(),
-            }))
+            .send(RequestWithId {
+                id: RequestId::from(1),
+                inner: Request::Call(Call {
+                    subject,
+                    payload: Bytes::new(),
+                }),
+            })
             .await
             .unwrap();
         requests_tx
-            .send(Request::Call(Call {
-                id: Id::from(2),
-                subject,
-                payload: Bytes::new(),
-            }))
+            .send(RequestWithId {
+                id: RequestId::from(2),
+                inner: Request::Call(Call {
+                    subject,
+                    payload: Bytes::new(),
+                }),
+            })
             .await
             .unwrap();
         requests_tx
-            .send(Request::Call(Call {
-                id: Id::from(3),
-                subject,
-                payload: Bytes::new(),
-            }))
+            .send(RequestWithId {
+                id: RequestId::from(3),
+                inner: Request::Call(Call {
+                    subject,
+                    payload: Bytes::new(),
+                }),
+            })
             .await
             .unwrap();
 
@@ -187,22 +187,22 @@ mod tests {
         // Unblock request no.3, its response is received.
         assert_matches!(poll_immediate(barrier_3.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => {
-            assert_matches!(response, Response{ id: Id(3), response: Ok(Id(3)), .. });
+        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(3), response: Ok(reply), .. }) => {
+            assert_eq!(reply, [3, 0, 0, 0].as_slice())
         });
 
         // Unblock request no.1, its response is received.
         assert_matches!(poll_immediate(barrier_1.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => {
-            assert_matches!(response, Response{ id: Id(1), response: Ok(Id(1)), .. });
+        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(1), response: Ok(reply), .. }) => {
+            assert_eq!(reply, [1, 0, 0, 0].as_slice())
         });
 
         // Unblock request no.2, its response is received.
         assert_matches!(poll_immediate(barrier_2.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(response) => {
-            assert_matches!(response, Response{ id: Id(2), response: Ok(Id(2)), .. });
+        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(2), response: Ok(reply), .. }) => {
+            assert_eq!(reply, [2, 0, 0, 0].as_slice())
         });
 
         // Terminate the server by closing the messages stream.
@@ -228,11 +228,13 @@ mod tests {
 
         // Send a call request, causing the server to try to put a response in the sink.
         requests_tx
-            .send(Request::Call(Call {
-                id: Id::from(1),
-                subject: message::Subject::default(),
-                payload: Bytes::new(),
-            }))
+            .send(RequestWithId {
+                id: RequestId::from(1),
+                inner: Request::Call(Call {
+                    subject: Subject::default(),
+                    payload: Bytes::new(),
+                }),
+            })
             .await
             .unwrap();
 

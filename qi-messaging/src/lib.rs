@@ -35,7 +35,6 @@
     clippy::string_to_string,
     clippy::todo,
     clippy::try_err,
-    clippy::unimplemented,
     clippy::unnecessary_self_imports,
     clippy::unneeded_field_pattern,
     clippy::use_debug
@@ -48,13 +47,17 @@ mod capabilities;
 mod channel;
 mod client;
 mod message;
-mod request;
+mod messaging;
 mod server;
+mod service;
 pub mod session;
 
 use qi_format as format;
 
-use request::{Call, Cancel, Capabilities, Event, Post, Request};
-pub use session::Session;
+use client::Client;
+pub use service::{Service, ToRequestId, ToSubject};
 #[doc(inline)]
-pub use {capabilities::CapabilitiesMap, request::IsCanceledError, session::service};
+pub use {
+    bytes::Bytes, capabilities::CapabilitiesMap, service::IsErrorCanceledTermination,
+    service::RequestId,
+};

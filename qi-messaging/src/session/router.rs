@@ -1,28 +1,29 @@
-use super::{control, service};
-use crate::{format, request::IsCanceledError};
-use bytes::Bytes;
+use super::{control, Service};
+use crate::{
+    format,
+    messaging::{self, CallWithId, NotificationWithId},
+    service::ToRequestId,
+    Bytes, IsErrorCanceledTermination,
+};
 use futures::{ready, TryFuture};
 use pin_project_lite::pin_project;
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::sync::oneshot;
 
 #[derive(Debug)]
-pub(super) struct Router<C, S> {
-    control: C,
+pub(super) struct Router<S> {
+    control: control::Service,
     service: Option<S>,
     enable_service_receiver: Option<oneshot::Receiver<EnableService<S>>>,
 }
 
-impl<C, S> Router<C, S>
-where
-    C: tower::Service<control::Request, Response = Option<control::capabilities::CapabilitiesMap>>,
-    S: tower::Service<service::Request>,
-    S::Response: Into<Option<Bytes>>,
-{
-    pub(super) fn new(control: C) -> (Self, oneshot::Sender<EnableService<S>>) {
+/// Routes request between a control service and a client service.
+impl<S> Router<S> {
+    pub(super) fn new(control: control::Service) -> (Self, oneshot::Sender<EnableService<S>>) {
         let (enable_service_sender, enable_service_receiver) = oneshot::channel();
         (
             Self {
@@ -34,7 +35,7 @@ where
         )
     }
 
-    pub(super) fn new_service_enabled(control: C, service: S) -> Self {
+    pub(super) fn with_service_enabled(control: control::Service, service: S) -> Self {
         Self {
             control,
             service: Some(service),
@@ -46,43 +47,9 @@ where
         self.service.replace(service);
     }
 
-    fn route_request(&mut self, request: crate::Request) -> Future<C::Future, S::Future> {
-        match Request::from_messaging(request) {
-            Err(error) => Future::FormatError { error: Some(error) },
-            Ok(Ok(Request::Control(request))) => {
-                Self::route_control_request(&mut self.control, request)
-            }
-            Ok(Ok(Request::Service(request))) => match self.service.as_mut() {
-                Some(service) => Self::route_service_request(service, request),
-                None => Future::UnhandledRequest,
-            },
-            _ => Future::UnhandledRequest,
-        }
-    }
-
-    fn route_control_request(
-        control: &mut C,
-        request: control::Request,
-    ) -> Future<C::Future, S::Future> {
-        let inner = control.call(request);
-        Future::Control { inner }
-    }
-
-    fn route_service_request(
-        service: &mut S,
-        request: service::Request,
-    ) -> Future<C::Future, S::Future> {
-        let inner = service.call(request);
-        Future::Service { inner }
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn poll_command_and_services_ready(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Error<C::Error, S::Error>>> {
-        if let Some(command) = self.enable_service_receiver.as_mut() {
-            match command.try_recv() {
+    fn recv_enable_service(&mut self) {
+        if let Some(enable_service) = self.enable_service_receiver.as_mut() {
+            match enable_service.try_recv() {
                 Ok(EnableService(service)) => {
                     self.enable_service(service);
                     self.enable_service_receiver = None
@@ -91,31 +58,75 @@ where
                 Err(oneshot::error::TryRecvError::Empty) => (),
             }
         }
-
-        ready!(self.control.poll_ready(cx)).map_err(Error::Control)?;
-        if let Some(service) = self.service.as_mut() {
-            ready!(service.poll_ready(cx)).map_err(Error::Service)?;
-        }
-        Poll::Ready(Ok(()))
     }
 }
 
-impl<C, S> tower::Service<crate::Request> for Router<C, S>
-where
-    C: tower::Service<control::Request, Response = Option<control::capabilities::CapabilitiesMap>>,
-    S: tower::Service<service::Request>,
-    S::Response: Into<Option<Bytes>>,
-{
-    type Response = Option<Bytes>;
-    type Error = Error<C::Error, S::Error>;
-    type Future = Future<C::Future, S::Future>;
+// impl<'a, S> Route<'a, S> {
+//     fn from_subject(router: &'a mut Router<S>, subject: crate::Subject) -> Option<Self> {
+//         if let Some(service) = router.service.as_mut() {
+//             if let Some(subject) = super::Subject::from_message(subject) {
+//                 return Some(Self::Service { service, subject });
+//             }
+//         }
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.poll_command_and_services_ready(cx)
+//         None
+//     }
+// }
+
+impl<S> Service<CallWithId, NotificationWithId> for Router<S>
+where
+    S: Service<super::CallWithId, super::NotificationWithId>,
+{
+    type Error = Error<S::Error>;
+    type CallFuture = CallFuture<S::CallFuture>;
+    type NotifyFuture = NotifyFuture<S::NotifyFuture>;
+
+    fn call(&mut self, call: CallWithId) -> Self::CallFuture {
+        self.recv_enable_service();
+
+        match control::Call::from_messaging(&call.inner) {
+            Ok(Some(control_call)) => {
+                return CallFuture::Control {
+                    inner: self.control.call(control_call),
+                }
+            }
+            Err(err) => return CallFuture::FormatError { error: Some(err) },
+            _ => {}
+        };
+
+        if let Some(service) = self.service.as_mut() {
+            if let Ok(call) = super::CallWithId::from_messaging(call) {
+                return CallFuture::Service {
+                    inner: service.call(call),
+                };
+            }
+        }
+
+        CallFuture::UnhandledRequest
     }
 
-    fn call(&mut self, request: crate::Request) -> Self::Future {
-        self.route_request(request)
+    fn notify(&mut self, notif_with_id: NotificationWithId) -> Self::NotifyFuture {
+        self.recv_enable_service();
+
+        let id = notif_with_id.to_request_id();
+        let notif = match control::Notification::from_messaging(notif_with_id.into_inner()) {
+            Ok(control_notif) => {
+                return NotifyFuture::Control {
+                    inner: self.control.notify(control_notif),
+                }
+            }
+            Err(notif) => notif,
+        };
+        if let Some(service) = self.service.as_mut() {
+            let notif_with_id = messaging::NotificationWithId::new(id, notif);
+            if let Ok(notif) = super::NotificationWithId::from_messaging(notif_with_id) {
+                return NotifyFuture::Service {
+                    inner: service.notify(notif),
+                };
+            }
+        }
+
+        NotifyFuture::UnhandledRequest
     }
 }
 
@@ -123,9 +134,9 @@ where
 pub(super) struct EnableService<S>(S);
 
 #[derive(Debug, thiserror::Error)]
-pub(super) enum Error<C, S> {
+pub(super) enum Error<S> {
     #[error("control error")]
-    Control(#[source] C),
+    Control(#[source] control::Error),
 
     #[error(transparent)]
     Service(S),
@@ -137,10 +148,9 @@ pub(super) enum Error<C, S> {
     UnhandledRequest,
 }
 
-impl<C, S> IsCanceledError for Error<C, S>
+impl<S> IsErrorCanceledTermination for Error<S>
 where
-    C: IsCanceledError,
-    S: IsCanceledError,
+    S: IsErrorCanceledTermination,
 {
     fn is_canceled(&self) -> bool {
         match self {
@@ -152,13 +162,12 @@ where
 }
 
 pin_project! {
-    #[derive(Debug)]
-    #[project = FutureProj]
+    #[project = CallFutureProj]
     #[must_use = "futures do nothing until polled"]
-    pub(super) enum Future<C, S> {
+    pub(super) enum CallFuture<S> {
         Control {
             #[pin]
-            inner: C
+            inner: <control::Service as crate::Service<control::Call, control::Notification>>::CallFuture,
         },
         Service {
             #[pin]
@@ -171,56 +180,64 @@ pin_project! {
     }
 }
 
-impl<C, S> std::future::Future for Future<C, S>
+impl<S> Future for CallFuture<S>
 where
-    C: TryFuture<Ok = Option<control::capabilities::CapabilitiesMap>>,
-    S: TryFuture,
-    S::Ok: Into<Option<Bytes>>,
+    S: TryFuture<Ok = Bytes>,
 {
-    type Output = Result<Option<Bytes>, Error<C::Error, S::Error>>;
+    type Output = Result<Bytes, Error<S::Error>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            FutureProj::Control { inner } => {
-                let response = match ready!(inner.try_poll(cx)).map_err(Error::Control)? {
-                    Some(control_response) => {
-                        Some(format::to_bytes(&control_response).map_err(Error::Format)?)
-                    }
-                    None => None,
-                };
-                Poll::Ready(Ok(response))
+            CallFutureProj::Control { inner } => {
+                let reply_payload = ready!(inner.try_poll(cx)).map_err(Error::Control)?;
+                Poll::Ready(Ok(reply_payload))
             }
-            FutureProj::Service { inner } => {
-                let response = ready!(inner.try_poll(cx)).map_err(Error::Service)?;
-                Poll::Ready(Ok(response.into()))
+            CallFutureProj::Service { inner } => {
+                let reply_payload = ready!(inner.try_poll(cx)).map_err(Error::Service)?;
+                Poll::Ready(Ok(reply_payload))
             }
-            FutureProj::FormatError { error } => match error.take() {
-                Some(err) => Poll::Ready(Err(Error::Format(err))),
+            CallFutureProj::FormatError { error } => match error.take() {
+                Some(error) => Poll::Ready(Err(Error::Format(error))),
                 None => Poll::Pending,
             },
-            FutureProj::UnhandledRequest => Poll::Ready(Err(Error::UnhandledRequest)),
+            CallFutureProj::UnhandledRequest => Poll::Ready(Err(Error::UnhandledRequest)),
         }
     }
 }
 
-#[derive(Debug)]
-enum Request {
-    Control(control::Request),
-    Service(service::Request),
+pin_project! {
+    #[project = NotifyFutureProj]
+    #[must_use = "futures do nothing until polled"]
+    pub(super) enum NotifyFuture<S> {
+        Control {
+            #[pin]
+            inner: <control::Service as crate::Service<control::Call, control::Notification>>::NotifyFuture
+        },
+        Service {
+            #[pin]
+            inner: S
+        },
+        UnhandledRequest,
+    }
 }
 
-impl Request {
-    fn from_messaging(
-        request: crate::Request,
-    ) -> Result<Result<Self, crate::Request>, format::Error> {
-        let request = match control::Request::try_from_messaging(request)? {
-            Ok(request) => return Ok(Ok(Self::Control(request))),
-            Err(request) => request,
-        };
-        let request = match service::Request::try_from_messaging(request) {
-            Ok(request) => return Ok(Ok(Request::Service(request))),
-            Err(request) => request,
-        };
-        Ok(Err(request))
+impl<S> Future for NotifyFuture<S>
+where
+    S: TryFuture<Ok = ()>,
+{
+    type Output = Result<(), Error<S::Error>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            NotifyFutureProj::Control { inner } => {
+                ready!(inner.try_poll(cx)).map_err(Error::Control)?;
+                Poll::Ready(Ok(()))
+            }
+            NotifyFutureProj::Service { inner } => {
+                ready!(inner.try_poll(cx)).map_err(Error::Service)?;
+                Poll::Ready(Ok(()))
+            }
+            NotifyFutureProj::UnhandledRequest => Poll::Ready(Err(Error::UnhandledRequest)),
+        }
     }
 }
