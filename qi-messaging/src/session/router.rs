@@ -2,8 +2,7 @@ use super::{control, Service};
 use crate::{
     format,
     messaging::{self, CallWithId, NotificationWithId},
-    service::ToRequestId,
-    Bytes, IsErrorCanceledTermination,
+    service::{CallTermination, Reply, ToRequestId},
 };
 use futures::{ready, TryFuture};
 use pin_project_lite::pin_project;
@@ -60,18 +59,6 @@ impl<S> Router<S> {
         }
     }
 }
-
-// impl<'a, S> Route<'a, S> {
-//     fn from_subject(router: &'a mut Router<S>, subject: crate::Subject) -> Option<Self> {
-//         if let Some(service) = router.service.as_mut() {
-//             if let Some(subject) = super::Subject::from_message(subject) {
-//                 return Some(Self::Service { service, subject });
-//             }
-//         }
-
-//         None
-//     }
-// }
 
 impl<S> Service<CallWithId, NotificationWithId> for Router<S>
 where
@@ -148,19 +135,6 @@ pub(super) enum Error<S> {
     UnhandledRequest,
 }
 
-impl<S> IsErrorCanceledTermination for Error<S>
-where
-    S: IsErrorCanceledTermination,
-{
-    fn is_canceled(&self) -> bool {
-        match self {
-            Self::Control(control) => control.is_canceled(),
-            Self::Service(service) => service.is_canceled(),
-            _ => false,
-        }
-    }
-}
-
 pin_project! {
     #[project = CallFutureProj]
     #[must_use = "futures do nothing until polled"]
@@ -180,27 +154,29 @@ pin_project! {
     }
 }
 
-impl<S> Future for CallFuture<S>
+impl<S, E> Future for CallFuture<S>
 where
-    S: TryFuture<Ok = Bytes>,
+    S: TryFuture<Ok = Reply, Error = CallTermination<E>>,
 {
-    type Output = Result<Bytes, Error<S::Error>>;
+    type Output = Result<Reply, CallTermination<Error<E>>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             CallFutureProj::Control { inner } => {
-                let reply_payload = ready!(inner.try_poll(cx)).map_err(Error::Control)?;
-                Poll::Ready(Ok(reply_payload))
+                let reply =
+                    ready!(inner.try_poll(cx)).map_err(|err| err.map_err(Error::Control))?;
+                Poll::Ready(Ok(reply))
             }
             CallFutureProj::Service { inner } => {
-                let reply_payload = ready!(inner.try_poll(cx)).map_err(Error::Service)?;
+                let reply_payload =
+                    ready!(inner.try_poll(cx)).map_err(|err| err.map_err(Error::Service))?;
                 Poll::Ready(Ok(reply_payload))
             }
             CallFutureProj::FormatError { error } => match error.take() {
-                Some(error) => Poll::Ready(Err(Error::Format(error))),
+                Some(error) => Poll::Ready(Err(Error::Format(error).into())),
                 None => Poll::Pending,
             },
-            CallFutureProj::UnhandledRequest => Poll::Ready(Err(Error::UnhandledRequest)),
+            CallFutureProj::UnhandledRequest => Poll::Ready(Err(Error::UnhandledRequest.into())),
         }
     }
 }

@@ -3,15 +3,14 @@ use crate::{capabilities, format, message};
 pub(crate) use crate::{
     message::Message,
     service::{
-        self, CallTermination, IsErrorCanceledTermination, RequestId, Service, ToRequestId,
-        ToSubject, TryIntoMessageWithId, WithRequestId,
+        self, CallTermination, Error, Reply, RequestId, Service, ToRequestId, ToSubject,
+        WithRequestId,
     },
 };
 
 pub(crate) mod subject {
     pub(crate) use crate::message::{Action, Object, Service, Subject};
 }
-use sealed::sealed;
 pub(crate) use subject::Subject;
 
 pub(crate) type Request = service::Request<Call, Notification>;
@@ -107,30 +106,30 @@ impl RequestWithId {
     }
 }
 
-pub(crate) type Call = service::Call<Subject>;
+impl TryFrom<RequestWithId> for Message {
+    type Error = format::Error;
 
-impl Call {
-    pub(crate) fn into_message(self, id: message::Id) -> Message {
-        Message::call(id, self.subject)
-            .set_content_bytes(self.payload)
-            .build()
+    fn try_from(value: RequestWithId) -> Result<Self, Self::Error> {
+        match value.inner {
+            service::Request::Call(call) => Ok(WithRequestId::new(value.id, call).into()),
+            service::Request::Notification(notif) => WithRequestId::new(value.id, notif).try_into(),
+        }
     }
 }
 
-impl<S> TryIntoMessageWithId for service::Call<S>
+pub(crate) type Call = service::Call<Subject>;
+pub(crate) type CallWithId = service::CallWithId<Subject>;
+
+impl<S> From<service::CallWithId<S>> for Message
 where
     S: Into<Subject>,
 {
-    fn try_into_message(self, id: message::Id) -> Result<Message, format::Error> {
-        Ok(Call {
-            subject: self.subject.into(),
-            payload: self.payload,
-        }
-        .into_message(id))
+    fn from(call: service::CallWithId<S>) -> Self {
+        Message::call(call.id, call.inner.subject.into())
+            .set_payload(call.inner.payload)
+            .build()
     }
 }
-
-pub(crate) type CallWithId = service::CallWithId<Subject>;
 
 #[derive(Debug, Clone)]
 pub(crate) enum Notification {
@@ -153,13 +152,14 @@ impl ToSubject for Notification {
     }
 }
 
-impl TryIntoMessageWithId for Notification {
-    fn try_into_message(self, id: message::Id) -> Result<Message, format::Error> {
-        match self {
-            Self::Post(post) => post.try_into_message(id),
-            Self::Event(event) => event.try_into_message(id),
-            Self::Cancel(cancel) => cancel.try_into_message(id),
-            Self::Capabilities(capa) => capa.try_into_message(id),
+impl TryFrom<NotificationWithId> for Message {
+    type Error = format::Error;
+    fn try_from(notif: NotificationWithId) -> Result<Self, Self::Error> {
+        match notif.inner {
+            Notification::Post(post) => Ok(WithRequestId::new(notif.id, post).into()),
+            Notification::Event(event) => Ok(WithRequestId::new(notif.id, event).into()),
+            Notification::Cancel(cancel) => Ok(WithRequestId::new(notif.id, cancel).into()),
+            Notification::Capabilities(capa) => WithRequestId::new(notif.id, capa).try_into(),
         }
     }
 }
@@ -227,77 +227,44 @@ impl From<CapabilitiesWithId> for NotificationWithId {
 }
 
 pub(crate) type Post = service::Post<Subject>;
+pub(crate) type PostWithId = service::PostWithId<Subject>;
 
-impl Post {
-    pub(crate) fn into_message(self, id: message::Id) -> Message {
-        Message::post(id, self.subject)
-            .set_content_bytes(self.payload)
-            .build()
-    }
-}
-
-impl<S> TryIntoMessageWithId for service::Post<S>
+impl<S> From<service::PostWithId<S>> for Message
 where
     S: Into<Subject>,
 {
-    fn try_into_message(self, id: message::Id) -> Result<Message, format::Error> {
-        Ok(Post {
-            subject: self.subject.into(),
-            payload: self.payload,
-        }
-        .into_message(id))
+    fn from(value: service::PostWithId<S>) -> Self {
+        Message::post(value.id, value.inner.subject.into())
+            .set_payload(value.inner.payload)
+            .build()
     }
 }
-
-pub(crate) type PostWithId = WithRequestId<Post>;
 
 pub(crate) type Event = service::Event<Subject>;
+pub(crate) type EventWithId = service::EventWithId<Subject>;
 
-impl Event {
-    pub(crate) fn into_message(self, id: message::Id) -> Message {
-        Message::event(id, self.subject)
-            .set_content_bytes(self.payload)
+impl<S> From<service::EventWithId<S>> for Message
+where
+    S: Into<Subject>,
+{
+    fn from(value: service::EventWithId<S>) -> Self {
+        Message::event(value.id, value.inner.subject.into())
+            .set_payload(value.inner.payload)
             .build()
     }
 }
 
-impl<S> TryIntoMessageWithId for service::Event<S>
-where
-    S: Into<Subject>,
-{
-    fn try_into_message(self, id: message::Id) -> Result<Message, format::Error> {
-        Ok(Event {
-            subject: self.subject.into(),
-            payload: self.payload,
-        }
-        .into_message(id))
-    }
-}
-
-pub(crate) type EventWithId = WithRequestId<Event>;
-
 pub(crate) type Cancel = service::Cancel<Subject>;
+pub(crate) type CancelWithId = service::CancelWithId<Subject>;
 
-impl Cancel {
-    pub(crate) fn into_message(self, id: message::Id) -> Message {
-        Message::cancel(id, self.subject, self.call_id).build()
-    }
-}
-
-impl<S> TryIntoMessageWithId for service::Cancel<S>
+impl<S> From<service::CancelWithId<S>> for Message
 where
     S: Into<Subject>,
 {
-    fn try_into_message(self, id: message::Id) -> Result<Message, format::Error> {
-        Ok(Cancel {
-            subject: self.subject.into(),
-            call_id: self.call_id,
-        }
-        .into_message(id))
+    fn from(value: service::CancelWithId<S>) -> Self {
+        Message::cancel(value.id, value.inner.subject.into(), value.inner.call_id).build()
     }
 }
-
-pub(crate) type CancelWithId = WithRequestId<Cancel>;
 
 #[derive(Debug, Clone, derive_more::Into)]
 pub(crate) struct Capabilities {
@@ -305,6 +272,8 @@ pub(crate) struct Capabilities {
     #[into]
     pub(crate) capabilities: capabilities::CapabilitiesMap,
 }
+
+pub(crate) type CapabilitiesWithId = WithRequestId<Capabilities>;
 
 impl ToSubject for Capabilities {
     type Subject = Subject;
@@ -314,37 +283,13 @@ impl ToSubject for Capabilities {
     }
 }
 
-impl TryIntoMessageWithId for Capabilities {
-    fn try_into_message(self, id: message::Id) -> Result<Message, format::Error> {
-        Ok(Message::capabilities(id, self.subject, &self.capabilities)?.build())
-    }
-}
+impl TryFrom<CapabilitiesWithId> for Message {
+    type Error = format::Error;
 
-pub(crate) type CapabilitiesWithId = WithRequestId<Capabilities>;
-
-#[sealed]
-pub(crate) trait TryIntoFailureMessage {
-    fn try_into_failure_message(
-        self,
-        id: RequestId,
-        subject: Subject,
-    ) -> Result<Message, format::Error>;
-}
-
-#[sealed]
-impl<T> TryIntoFailureMessage for T
-where
-    T: IsErrorCanceledTermination + ToString,
-{
-    fn try_into_failure_message(
-        self,
-        id: RequestId,
-        subject: Subject,
-    ) -> Result<Message, format::Error> {
-        Ok(if self.is_canceled() {
-            Message::canceled(id, subject).build()
-        } else {
-            Message::error(id, subject, &self.to_string())?.build()
-        })
+    fn try_from(value: CapabilitiesWithId) -> Result<Self, Self::Error> {
+        Ok(
+            Message::capabilities(value.id, value.inner.subject, &value.inner.capabilities)?
+                .build(),
+        )
     }
 }

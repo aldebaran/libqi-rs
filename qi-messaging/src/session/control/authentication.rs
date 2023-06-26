@@ -63,12 +63,12 @@ pub(super) fn verify_result(result: &CapabilitiesMap) -> Result<(), VerifyResult
         // occurred, the server should return a call error, not a call reply, and therefore
         // we should not have a capability map to check.
         State::Error => {
-            let reason = result
+            let err = result
                 .get(ERROR_REASON_KEY)
                 .and_then(Dynamic::as_string)
                 .map(String::as_str)
                 .unwrap_or_else(|| "unknown reason");
-            Err(VerifyResultError::Error(reason.to_owned()))
+            Err(VerifyResultError::Refused(err.to_owned()))
         }
         State::Done => Ok(()),
     }
@@ -85,6 +85,6 @@ pub(in crate::session) enum VerifyResultError {
     #[error("the authentication is incomplete and must be continued")]
     Continue,
 
-    #[error("the authentication ended with an error: {0}")]
-    Error(String),
+    #[error("the authentication attempt was refused, reason is: {0}")]
+    Refused(String),
 }

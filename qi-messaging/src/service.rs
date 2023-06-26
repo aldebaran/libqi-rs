@@ -1,8 +1,5 @@
-use crate::{
-    format,
-    message::{self, Message},
-    Bytes,
-};
+use crate::{format, message};
+use bytes::Bytes;
 pub use message::Id as RequestId;
 use pin_project_lite::pin_project;
 use std::{
@@ -13,7 +10,7 @@ use std::{
 
 pub trait Service<C, N> {
     type Error;
-    type CallFuture: Future<Output = Result<Bytes, Self::Error>>;
+    type CallFuture: Future<Output = Result<Reply, CallTermination<Self::Error>>>;
     type NotifyFuture: Future<Output = Result<(), Self::Error>>;
 
     fn call(&mut self, call: C) -> Self::CallFuture;
@@ -40,10 +37,6 @@ pub trait ToSubject {
 
 pub trait ToRequestId {
     fn to_request_id(&self) -> RequestId;
-}
-
-pub(crate) trait TryIntoMessageWithId: Sized {
-    fn try_into_message(self, id: message::Id) -> Result<Message, format::Error>;
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -79,19 +72,6 @@ where
     }
 }
 
-impl<C, N> TryIntoMessageWithId for Request<C, N>
-where
-    C: TryIntoMessageWithId,
-    N: TryIntoMessageWithId,
-{
-    fn try_into_message(self, id: message::Id) -> Result<Message, format::Error> {
-        match self {
-            Request::Call(call) => call.try_into_message(id),
-            Request::Notification(notif) => notif.try_into_message(id),
-        }
-    }
-}
-
 impl<C, N> WithRequestId<Request<C, N>> {
     pub fn transpose_id(self) -> Request<WithRequestId<C>, WithRequestId<N>> {
         let WithRequestId { id, inner } = self;
@@ -109,7 +89,7 @@ pub struct Call<S> {
 }
 
 impl<S> Call<S> {
-    pub fn with_content<T>(subject: S, value: &T) -> Result<Self, format::Error>
+    pub fn with_value<T>(subject: S, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -119,7 +99,7 @@ impl<S> Call<S> {
         })
     }
 
-    pub fn content<'de, T>(&'de self) -> Result<T, format::Error>
+    pub fn value<'de, T>(&'de self) -> Result<T, format::Error>
     where
         T: serde::Deserialize<'de>,
     {
@@ -189,7 +169,19 @@ where
     }
 }
 
-#[derive(derive_new::new, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
+#[derive(
+    derive_new::new,
+    Debug,
+    Clone,
+    Copy,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Default,
+    derive_more::From,
+)]
 pub struct WithRequestId<T> {
     pub(crate) id: RequestId,
     pub(crate) inner: T,
@@ -226,90 +218,69 @@ where
     }
 }
 
-impl<T> TryFrom<WithRequestId<T>> for Message
-where
-    T: TryIntoMessageWithId,
-{
-    type Error = format::Error;
-
-    fn try_from(value: WithRequestId<T>) -> Result<Self, Self::Error> {
-        value.inner.try_into_message(value.id)
-    }
-}
-
 pub(crate) type CallWithId<S> = WithRequestId<Call<S>>;
 pub(crate) type PostWithId<S> = WithRequestId<Post<S>>;
 pub(crate) type EventWithId<S> = WithRequestId<Event<S>>;
 pub(crate) type CancelWithId<S> = WithRequestId<Cancel<S>>;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CallTermination {
+pub enum CallTermination<E> {
     #[error("the call request has been canceled")]
     Canceled,
 
     #[error("the call request ended with an error: {0}")]
-    Error(String),
+    Error(#[from] E),
 }
 
-pub trait IsErrorCanceledTermination {
-    fn is_canceled(&self) -> bool;
-}
-
-impl IsErrorCanceledTermination for CallTermination {
-    fn is_canceled(&self) -> bool {
-        matches!(self, Self::Canceled)
+impl<E> CallTermination<E> {
+    pub fn map_err<F, ToE>(self, f: F) -> CallTermination<ToE>
+    where
+        F: FnOnce(E) -> ToE,
+    {
+        match self {
+            Self::Canceled => CallTermination::Canceled,
+            Self::Error(err) => CallTermination::Error(f(err)),
+        }
     }
 }
 
-impl<'t, T> IsErrorCanceledTermination for &'t T
-where
-    T: IsErrorCanceledTermination + ?Sized,
-{
-    fn is_canceled(&self) -> bool {
-        <T as IsErrorCanceledTermination>::is_canceled(*self)
+#[derive(derive_new::new, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Reply {
+    pub(crate) payload: Bytes,
+}
+
+impl Reply {
+    pub fn with_value<T>(value: &T) -> Result<Self, format::Error>
+    where
+        T: serde::Serialize,
+    {
+        Ok(Self {
+            payload: format::to_bytes(value)?,
+        })
+    }
+
+    pub fn value<'de, T>(&'de self) -> Result<T, format::Error>
+    where
+        T: serde::Deserialize<'de>,
+    {
+        format::from_bytes(&self.payload)
+    }
+
+    pub fn payload(&self) -> &Bytes {
+        &self.payload
     }
 }
 
-impl<T> IsErrorCanceledTermination for Box<T>
-where
-    T: IsErrorCanceledTermination,
-{
-    fn is_canceled(&self) -> bool {
-        <T as IsErrorCanceledTermination>::is_canceled(self.as_ref())
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, thiserror::Error, derive_more::From,
+)]
+#[error("the call request ended with an error: {0}")]
+pub struct Error(pub(crate) String);
+
+impl Error {
+    pub fn reason(&self) -> &str {
+        &self.0
     }
-}
-
-impl<T> IsErrorCanceledTermination for std::sync::Arc<T>
-where
-    T: IsErrorCanceledTermination,
-{
-    fn is_canceled(&self) -> bool {
-        <T as IsErrorCanceledTermination>::is_canceled(self.as_ref())
-    }
-}
-
-macro_rules! impl_is_never_canceled_termination {
-    ($($err:ty),+) => {
-        $(impl IsErrorCanceledTermination for $err {
-            fn is_canceled(&self) -> bool {
-                false
-            }
-        })+
-    };
-}
-
-impl_is_never_canceled_termination! {
-    std::io::Error,
-    std::convert::Infallible,
-    std::fmt::Error,
-    std::num::ParseIntError,
-    std::num::ParseFloatError,
-    std::num::TryFromIntError,
-    std::str::ParseBoolError,
-    std::str::Utf8Error,
-    std::string::FromUtf8Error,
-    Box<dyn std::error::Error>,
-    Box<dyn std::error::Error + Send + Sync>
 }
 
 pin_project! {
@@ -330,15 +301,18 @@ pin_project! {
 
 impl<Call, Notif, E> Future for RequestFuture<Call, Notif>
 where
-    Call: Future<Output = Result<Bytes, E>>,
+    Call: Future<Output = Result<Reply, CallTermination<E>>>,
     Notif: Future<Output = Result<(), E>>,
 {
-    type Output = Result<Option<Bytes>, E>;
+    type Output = Result<Option<Reply>, CallTermination<E>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             RequestFutureProj::Call { inner } => inner.poll(cx)?.map(|reply| Ok(Some(reply))),
-            RequestFutureProj::Notification { inner } => inner.poll(cx)?.map(|()| Ok(None)),
+            RequestFutureProj::Notification { inner } => inner.poll(cx).map(|res| match res {
+                Ok(()) => Ok(None),
+                Err(err) => Err(CallTermination::Error(err)),
+            }),
         }
     }
 }

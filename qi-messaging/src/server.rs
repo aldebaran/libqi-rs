@@ -1,9 +1,6 @@
-use crate::{
-    messaging::{
-        CallWithId, Message, NotificationWithId, RequestId, RequestWithId, Service, Subject,
-        ToRequestId, ToSubject, TryIntoFailureMessage,
-    },
-    Bytes, IsErrorCanceledTermination,
+use crate::messaging::{
+    CallTermination, CallWithId, Message, NotificationWithId, Reply, RequestId, RequestWithId,
+    Service, Subject, ToRequestId, ToSubject,
 };
 use futures::{stream::FuturesUnordered, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use tokio::{pin, select};
@@ -50,21 +47,26 @@ where
 pub(crate) struct Response<E> {
     id: RequestId,
     subject: Subject,
-    response: Result<Bytes, E>,
+    response: Result<Reply, CallTermination<E>>,
 }
 
 impl<E> TryFrom<Response<E>> for Message
 where
-    E: IsErrorCanceledTermination + ToString,
+    E: ToString,
 {
     type Error = crate::format::Error;
 
     fn try_from(response: Response<E>) -> Result<Self, Self::Error> {
         match response.response {
-            Ok(payload) => Ok(Message::reply(response.id, response.subject)
-                .set_content_bytes(payload)
+            Ok(reply) => Ok(Message::reply(response.id, response.subject)
+                .set_payload(reply.payload)
                 .build()),
-            Err(err) => err.try_into_failure_message(response.id, response.subject),
+            Err(CallTermination::Canceled) => {
+                Ok(Message::canceled(response.id, response.subject).build())
+            }
+            Err(CallTermination::Error(err)) => {
+                Ok(Message::error(response.id, response.subject, &err.to_string())?.build())
+            }
         }
     }
 }
@@ -73,11 +75,12 @@ where
 mod tests {
     use super::*;
     use crate::{
-        format, message,
+        message,
         messaging::{Call, Request},
-        service, Bytes,
+        service,
     };
     use assert_matches::assert_matches;
+    use bytes::Bytes;
     use futures::{
         future::{poll_immediate, BoxFuture},
         FutureExt,
@@ -97,7 +100,7 @@ mod tests {
 
     impl<N> service::Service<CallWithId, N> for Service {
         type Error = String;
-        type CallFuture = BoxFuture<'static, Result<Bytes, Self::Error>>;
+        type CallFuture = BoxFuture<'static, Result<Reply, CallTermination<Self::Error>>>;
         type NotifyFuture = BoxFuture<'static, Result<(), Self::Error>>;
 
         fn call(&mut self, call: CallWithId) -> Self::CallFuture {
@@ -107,8 +110,7 @@ mod tests {
                 if let Some(barrier) = barrier {
                     barrier.wait().await;
                 }
-                let payload = format::to_bytes(&id).map_err(|err| err.to_string())?;
-                Ok(payload)
+                Ok(Reply::with_value(&id).map_err(|err| err.to_string())?)
             }
             .boxed()
         }
@@ -187,22 +189,22 @@ mod tests {
         // Unblock request no.3, its response is received.
         assert_matches!(poll_immediate(barrier_3.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(3), response: Ok(reply), .. }) => {
-            assert_eq!(reply, [3, 0, 0, 0].as_slice())
+        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(3), response: Ok(Reply { payload }), .. }) => {
+            assert_eq!(payload, [3, 0, 0, 0].as_slice())
         });
 
         // Unblock request no.1, its response is received.
         assert_matches!(poll_immediate(barrier_1.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(1), response: Ok(reply), .. }) => {
-            assert_eq!(reply, [1, 0, 0, 0].as_slice())
+        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(1), response: Ok(Reply { payload }), .. }) => {
+            assert_eq!(payload, [1, 0, 0, 0].as_slice())
         });
 
         // Unblock request no.2, its response is received.
         assert_matches!(poll_immediate(barrier_2.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(2), response: Ok(reply), .. }) => {
-            assert_eq!(reply, [2, 0, 0, 0].as_slice())
+        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(2), response: Ok(Reply { payload }), .. }) => {
+            assert_eq!(payload, [2, 0, 0, 0].as_slice())
         });
 
         // Terminate the server by closing the messages stream.

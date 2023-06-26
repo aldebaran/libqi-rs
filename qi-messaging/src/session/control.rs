@@ -3,7 +3,10 @@ pub(super) mod capabilities;
 
 use self::authentication::authenticate;
 use crate::{
-    channel::RequestIdSequence, format, messaging, Bytes, Client, IsErrorCanceledTermination,
+    channel::RequestIdSequenceRef,
+    client, format, messaging,
+    service::{CallTermination, Reply},
+    Client,
 };
 use capabilities::{CapabilitiesMap, CapabilitiesMapExt};
 use futures::{future, FutureExt, TryFutureExt};
@@ -87,7 +90,7 @@ impl Control {
     pub(super) async fn authenticate_to_remote(
         &self,
         client: &mut Client,
-        id_sequence: &RequestIdSequence,
+        id_sequence: &RequestIdSequenceRef,
     ) -> Result<(), AuthenticateToRemoteError> {
         use crate::service::Service;
         let authenticate = Authenticate::new_outgoing();
@@ -96,7 +99,8 @@ impl Control {
             .map_err(AuthenticateToRemoteError::SerializeLocalCapabilities)?;
         debug!("sending authentication request to server");
         let reply = client.call(id_sequence.pair_with_new_id(call)).await?;
-        let result_capabilities = format::from_bytes(&reply)
+        let result_capabilities = reply
+            .value()
             .map_err(AuthenticateToRemoteError::DeserializeRemoteCapabilities)?;
         debug!(capabilities = ?result_capabilities, "received authentication result and capabilities from server");
         authentication::verify_result(&result_capabilities)?;
@@ -129,8 +133,11 @@ impl Control {
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum AuthenticateToRemoteError {
-    #[error("request error")]
-    SendRequest(#[from] crate::client::Error),
+    #[error(transparent)]
+    Client(#[from] client::Error),
+
+    #[error("the authentication request was canceled")]
+    Canceled,
 
     #[error("error serializing local capabilities")]
     SerializeLocalCapabilities(#[source] format::Error),
@@ -143,6 +150,15 @@ pub(super) enum AuthenticateToRemoteError {
 
     #[error("some required capabilities are missing")]
     MissingRequiredCapabilities(#[from] capabilities::ExpectedKeyValueError<bool>),
+}
+
+impl From<CallTermination<client::Error>> for AuthenticateToRemoteError {
+    fn from(value: CallTermination<client::Error>) -> Self {
+        match value {
+            CallTermination::Canceled => Self::Canceled,
+            CallTermination::Error(err) => Self::Client(err),
+        }
+    }
 }
 
 pub(super) use authentication::VerifyResultError as VerifyAuthenticationResultError;
@@ -186,16 +202,17 @@ impl Service {
 
 impl crate::Service<Call, Notification> for Service {
     type Error = Error;
-    type CallFuture = future::Ready<Result<Bytes, Error>>;
+    type CallFuture = future::Ready<Result<Reply, CallTermination<Error>>>;
     type NotifyFuture = future::BoxFuture<'static, Result<(), Error>>;
 
     fn call(&mut self, call: Call) -> Self::CallFuture {
         match call {
             Call::Authenticate(Authenticate(parameters)) => {
                 let auth_result = self.authenticate(&parameters);
-                let reply_payload_result =
-                    format::to_bytes(&auth_result).map_err(Error::SerializeAuthenticationResult);
-                future::ready(reply_payload_result)
+                let reply = Reply::with_value(&auth_result).map_err(|err| {
+                    CallTermination::Error(Error::SerializeAuthenticationResult(err))
+                });
+                future::ready(reply)
             }
         }
     }
@@ -285,9 +302,3 @@ pub(super) enum Error {
 #[derive(Debug, thiserror::Error)]
 #[error("error updating capabilities")]
 pub(super) struct UpdateCapabilitiesError(#[from] capabilities::ExpectedKeyValueError<bool>);
-
-impl IsErrorCanceledTermination for Error {
-    fn is_canceled(&self) -> bool {
-        false
-    }
-}

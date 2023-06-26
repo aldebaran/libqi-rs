@@ -571,7 +571,7 @@ impl Message {
             .set_id(id)
             .set_kind(Kind::Capabilities)
             .set_subject(subject)
-            .set_content(&map)
+            .set_value(&map)
     }
 
     /// Builds a "cancel" message.
@@ -582,7 +582,7 @@ impl Message {
             .set_id(id)
             .set_kind(Kind::Cancel)
             .set_subject(subject)
-            .set_content(&call_id)
+            .set_value(&call_id)
             .expect("failed to serialize a message ID in the format")
     }
 
@@ -686,7 +686,7 @@ impl Builder {
         self
     }
 
-    pub(crate) fn set_content_bytes(mut self, content: Bytes) -> Self {
+    pub(crate) fn set_payload(mut self, content: Bytes) -> Self {
         self.0.payload = content;
         self
     }
@@ -694,7 +694,7 @@ impl Builder {
     /// Sets the serialized representation of the value in the format as the payload of the message.
     /// It checks if the "dynamic payload" flag is set on the message to know how to serialize the value.
     /// If the flag is set after calling this value, the value will not be serialized coherently with the flag.
-    pub(crate) fn set_content<T>(mut self, value: &T) -> Result<Self, format::Error>
+    pub(crate) fn set_value<T>(mut self, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
@@ -707,7 +707,7 @@ impl Builder {
     }
 
     pub(crate) fn set_error_description(self, description: &str) -> Result<Self, format::Error> {
-        self.set_content(&Dynamic::from(description))
+        self.set_value(&Dynamic::from(description))
     }
 
     pub(crate) fn build(self) -> Message {

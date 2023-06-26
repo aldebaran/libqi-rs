@@ -1,9 +1,6 @@
-use crate::{
-    messaging::{
-        Call, CallTermination, CallWithId, Notification, NotificationWithId, RequestId,
-        RequestWithId, Service, ToRequestId, WithRequestId,
-    },
-    Bytes,
+use crate::messaging::{
+    self, Call, CallTermination, CallWithId, Notification, NotificationWithId, Reply, RequestId,
+    RequestWithId, Service, ToRequestId, WithRequestId,
 };
 use futures::{ready, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use std::{
@@ -16,7 +13,7 @@ use tokio::{
     pin, select,
     sync::{mpsc, oneshot},
 };
-use tokio_util::sync::{PollSendError, PollSender};
+use tokio_util::sync::PollSender;
 use tracing::debug;
 
 pub(crate) fn setup<Si, St>(
@@ -26,7 +23,7 @@ pub(crate) fn setup<Si, St>(
 where
     Si: Sink<RequestWithId>,
     Si::Error: std::error::Error,
-    St: Stream<Item = (RequestId, Result<Bytes, CallTermination>)>,
+    St: Stream<Item = (RequestId, Result<Reply, CallTermination<messaging::Error>>)>,
 {
     const DISPATCH_CHANNEL_SIZE: usize = 1;
     let (dispatch_sender, dispatch_receiver) = mpsc::channel(DISPATCH_CHANNEL_SIZE);
@@ -84,7 +81,7 @@ pub(crate) enum CallFuture {
     },
     WaitForResponse {
         id: RequestId,
-        response_receiver: oneshot::Receiver<Result<Bytes, CallTermination>>,
+        response_receiver: oneshot::Receiver<Result<Reply, CallTermination<messaging::Error>>>,
     },
     Done {
         id: RequestId,
@@ -102,7 +99,7 @@ impl ToRequestId for CallFuture {
 }
 
 impl Future for CallFuture {
-    type Output = Result<Bytes, Error>;
+    type Output = Result<Reply, CallTermination<Error>>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -117,13 +114,16 @@ impl Future for CallFuture {
                         Some(call) => call,
                         None => return Poll::Pending,
                     };
-                    ready!(dispatch_request_sender.poll_reserve(cx))?;
+                    ready!(dispatch_request_sender.poll_reserve(cx))
+                        .map_err(|_err| Error::DispatchTerminated)?;
                     let (response_sender, response_receiver) = oneshot::channel();
-                    dispatch_request_sender.send_item(DispatchRequest::Call {
-                        id: *id,
-                        call,
-                        response_sender,
-                    })?;
+                    dispatch_request_sender
+                        .send_item(DispatchRequest::Call {
+                            id: *id,
+                            call,
+                            response_sender,
+                        })
+                        .map_err(|_err| Error::DispatchDroppedResponse)?;
                     *this = Self::WaitForResponse {
                         id: *id,
                         response_receiver,
@@ -133,7 +133,9 @@ impl Future for CallFuture {
                     id,
                     response_receiver,
                 } => {
-                    let reply = ready!(response_receiver.poll_unpin(cx))??;
+                    let reply = ready!(response_receiver.poll_unpin(cx))
+                        .map_err(|_err| Error::DispatchDroppedResponse)?
+                        .map_err(|err| err.map_err(Error::Messaging))?;
                     *this = Self::Done { id: *id };
                     break Poll::Ready(Ok(reply));
                 }
@@ -174,9 +176,11 @@ impl Future for NotifyFuture {
             Some(notif) => notif,
             None => return Poll::Pending,
         };
-        ready!(this.dispatch_request_sender.poll_reserve(cx))?;
+        ready!(this.dispatch_request_sender.poll_reserve(cx))
+            .map_err(|_err| Error::DispatchTerminated)?;
         this.dispatch_request_sender
-            .send_item(DispatchRequest::Notification { id: this.id, notif })?;
+            .send_item(DispatchRequest::Notification { id: this.id, notif })
+            .map_err(|_err| Error::DispatchTerminated)?;
         Poll::Ready(Ok(()))
     }
 }
@@ -189,20 +193,8 @@ pub(crate) enum Error {
     #[error("the client dispatch task has dropped the request response")]
     DispatchDroppedResponse,
 
-    #[error("the service procedure has been terminated")]
-    Terminated(#[from] CallTermination),
-}
-
-impl From<PollSendError<DispatchRequest>> for Error {
-    fn from(_: PollSendError<DispatchRequest>) -> Self {
-        Self::DispatchTerminated
-    }
-}
-
-impl From<oneshot::error::RecvError> for Error {
-    fn from(_: oneshot::error::RecvError) -> Self {
-        Self::DispatchDroppedResponse
-    }
+    #[error(transparent)]
+    Messaging(#[from] messaging::Error),
 }
 
 async fn dispatch<St, Si>(
@@ -213,7 +205,7 @@ async fn dispatch<St, Si>(
 where
     Si: Sink<RequestWithId>,
     Si::Error: std::error::Error,
-    St: Stream<Item = (RequestId, Result<Bytes, CallTermination>)>,
+    St: Stream<Item = (RequestId, Result<Reply, CallTermination<messaging::Error>>)>,
 {
     let mut ongoing_call_requests = HashMap::new();
     let requests_sink = requests_sink;
@@ -261,7 +253,7 @@ pub(crate) enum DispatchRequest {
     Call {
         id: RequestId,
         call: Call,
-        response_sender: oneshot::Sender<Result<Bytes, CallTermination>>,
+        response_sender: oneshot::Sender<Result<Reply, CallTermination<messaging::Error>>>,
     },
     Notification {
         id: RequestId,
@@ -272,15 +264,19 @@ pub(crate) enum DispatchRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messaging::{Post, PostWithId, Request, Subject, WithRequestId};
+    use crate::{
+        messaging::{Post, PostWithId, Request, Subject, WithRequestId},
+        service,
+    };
     use assert_matches::assert_matches;
+    use bytes::Bytes;
     use futures::future::{poll_immediate, BoxFuture};
     use tokio_stream::wrappers::ReceiverStream;
     use tokio_util::sync::PollSendError;
 
     struct TestClient {
         requests_rx: mpsc::Receiver<RequestWithId>,
-        responses_tx: mpsc::Sender<(RequestId, Result<Bytes, CallTermination>)>,
+        responses_tx: mpsc::Sender<(RequestId, Result<Reply, CallTermination<messaging::Error>>)>,
         client: Client,
         dispatch: BoxFuture<'static, Result<(), PollSendError<RequestWithId>>>,
     }
@@ -317,7 +313,7 @@ mod tests {
                 },
             ))
             .await;
-        assert_matches!(res, Err(Error::DispatchTerminated));
+        assert_matches!(res, Err(CallTermination::Error(Error::DispatchTerminated)));
 
         // Dropping the dispatch between the `ready` and the `call` doesn't make the `call` fail
         // as the `ready` will reserve a slot to send to the dispatch, so the send always succeeds
@@ -358,7 +354,7 @@ mod tests {
         drop(test.dispatch);
         assert_matches!(
             poll_immediate(call).await,
-            Some(Err(Error::DispatchDroppedResponse))
+            Some(Err(CallTermination::Error(Error::DispatchDroppedResponse)))
         );
     }
 
@@ -435,13 +431,18 @@ mod tests {
         assert_matches!(poll_immediate(&mut call).await, None);
 
         test.responses_tx
-            .send((RequestId(1), (Ok(Bytes::from_static(&[5, 6, 7, 8])))))
+            .send((
+                RequestId(1),
+                (Ok(Reply {
+                    payload: Bytes::from_static(&[5, 6, 7, 8]),
+                })),
+            ))
             .await
             .unwrap();
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
 
         // The call gets its response.
-        assert_matches!(poll_immediate(&mut call).await, Some(Ok(payload)) => {
+        assert_matches!(poll_immediate(&mut call).await, Some(Ok(Reply { payload })) => {
             assert_eq!(payload, Bytes::from_static(&[5, 6, 7, 8]));
         });
     }
@@ -483,7 +484,9 @@ mod tests {
         test.responses_tx
             .send((
                 RequestId(1),
-                Err(CallTermination::Error("some error".to_owned())),
+                Err(CallTermination::Error(messaging::Error(
+                    "some error".to_owned(),
+                ))),
             ))
             .await
             .unwrap();
@@ -492,7 +495,7 @@ mod tests {
         // The call gets its response.
         assert_matches!(
             poll_immediate(&mut call).await,
-            Some(Err(Error::Terminated(CallTermination::Error(err)))) => {
+            Some(Err(CallTermination::Error(Error::Messaging(service::Error(err))))) => {
                 assert_eq!(err, "some error");
             }
         );
@@ -541,7 +544,7 @@ mod tests {
         // The call gets its response.
         assert_matches!(
             poll_immediate(&mut call).await,
-            Some(Err(Error::Terminated(CallTermination::Canceled)))
+            Some(Err(CallTermination::Canceled))
         );
     }
 
@@ -581,7 +584,12 @@ mod tests {
 
         // Send a response of request id = 2.
         test.responses_tx
-            .send((RequestId(2), Ok(Bytes::from_static(&[5, 6, 7, 8]))))
+            .send((
+                RequestId(2),
+                Ok(Reply {
+                    payload: Bytes::from_static(&[5, 6, 7, 8]),
+                }),
+            ))
             .await
             .unwrap();
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
@@ -591,13 +599,18 @@ mod tests {
 
         // Send a response of request id = 1.
         test.responses_tx
-            .send((RequestId(1), Ok(Bytes::from_static(&[9, 10, 11, 12]))))
+            .send((
+                RequestId(1),
+                Ok(Reply {
+                    payload: Bytes::from_static(&[9, 10, 11, 12]),
+                }),
+            ))
             .await
             .unwrap();
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
 
         // The call gets its response.
-        assert_matches!(poll_immediate(&mut call).await, Some(Ok(payload)) => {
+        assert_matches!(poll_immediate(&mut call).await, Some(Ok(Reply { payload })) => {
             assert_eq!(payload, Bytes::from_static(&[9, 10, 11, 12]));
         });
     }

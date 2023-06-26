@@ -5,8 +5,8 @@ use crate::{
         codec::{DecodeError, Decoder, EncodeError, Encoder},
     },
     messaging::{
-        CallTermination, CallWithId, IsErrorCanceledTermination, NotificationWithId, RequestId,
-        RequestWithId, Service, WithRequestId,
+        self, CallTermination, CallWithId, NotificationWithId, Reply, RequestId, RequestWithId,
+        Service, WithRequestId,
     },
     server,
 };
@@ -35,13 +35,13 @@ pub(crate) fn open<IO, Svc>(
     service: Svc,
 ) -> (
     client::Client,
-    RequestIdSequence,
+    RequestIdSequenceRef,
     impl std::future::Future<Output = Result<(), Error<Svc::Error>>>,
 )
 where
     IO: AsyncWrite + AsyncRead,
     Svc: Service<CallWithId, NotificationWithId>,
-    Svc::Error: IsErrorCanceledTermination + ToString + std::fmt::Debug + Send + 'static,
+    Svc::Error: ToString + std::fmt::Debug + Send + 'static,
 {
     let (input, output) = split(io);
     let mut stream = FramedRead::new(input, Decoder::new()).fuse();
@@ -79,14 +79,15 @@ where
                             let id = message.id();
                             let send_response = match message.kind() {
                                 message::Kind::Reply => {
-                                    let reply = message.into_payload();
+                                    let reply = Reply{ payload: message.into_payload() };
                                     client_responses_tx.send((id, Ok(reply)))
                                 },
                                 message::Kind::Canceled => {
                                     client_responses_tx.send((id, Err(CallTermination::Canceled)))
                                 },
                                 message::Kind::Error => {
-                                    let error = message.error_description().map_err(Error::GetErrorDescription)?;
+                                    let error_description = message.error_description().map_err(Error::GetErrorDescription)?;
+                                    let error = messaging::Error(error_description);
                                     client_responses_tx.send((id, Err(CallTermination::Error(error))))
                                 },
                                 // Either a message is a request, or it is a call response.
@@ -119,15 +120,15 @@ where
         }
     };
 
-    (client_request_sender, RequestIdSequence::new(), dispatch)
+    (client_request_sender, RequestIdSequenceRef::new(), dispatch)
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RequestIdSequence {
+pub(crate) struct RequestIdSequenceRef {
     current_id: Arc<AtomicU32>,
 }
 
-impl RequestIdSequence {
+impl RequestIdSequenceRef {
     fn new() -> Self {
         Self {
             current_id: Arc::new(AtomicU32::new(1)),

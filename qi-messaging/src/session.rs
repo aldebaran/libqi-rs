@@ -1,21 +1,25 @@
 mod control;
 mod router;
 
-pub use crate::RequestId;
 use crate::{
     channel, client, messaging,
     service::{self, CallTermination, ToSubject, WithRequestId},
-    Bytes, IsErrorCanceledTermination, Service,
+    Service,
 };
+pub use crate::{service::Reply, RequestId};
 use futures::{FutureExt, TryFutureExt};
-use std::future::Future;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::debug;
 
 #[derive(Debug, Clone)]
 pub struct Client {
     client: client::Client,
-    id_sequence: channel::RequestIdSequence,
+    id_sequence: channel::RequestIdSequenceRef,
 }
 
 impl crate::Service<Call, Notification> for Client {
@@ -36,7 +40,27 @@ impl crate::Service<Call, Notification> for Client {
 
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
-pub struct ClientError(#[from] client::Error);
+pub enum ClientError {
+    #[error(transparent)]
+    SessionClosed(#[from] SessionClosedError),
+
+    #[error(transparent)]
+    Service(#[from] service::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("session is closed")]
+pub struct SessionClosedError(#[source] client::Error);
+
+impl From<client::Error> for ClientError {
+    fn from(error: client::Error) -> Self {
+        match error {
+            client::Error::DispatchTerminated => SessionClosedError(error).into(),
+            client::Error::DispatchDroppedResponse => SessionClosedError(error).into(),
+            client::Error::Messaging(err) => Self::Service(err),
+        }
+    }
+}
 
 pub fn connect<IO, Svc>(
     io: IO,
@@ -48,8 +72,7 @@ pub fn connect<IO, Svc>(
 where
     IO: AsyncWrite + AsyncRead,
     Svc: Service<CallWithId, NotificationWithId>,
-    Svc::Error:
-        IsErrorCanceledTermination + std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
+    Svc::Error: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
 {
     // As a client, we can enable the service in the router right away.
     let (control, control_service) = control::create();
@@ -84,8 +107,8 @@ impl From<control::AuthenticateToRemoteError> for ConnectError {
         use control::AuthenticateToRemoteError as AuthError;
         use control::VerifyAuthenticationResultError;
         match error {
-            AuthError::SendRequest(client::Error::Terminated(CallTermination::Error(message)))
-            | AuthError::VerifyAuthenticationResult(VerifyAuthenticationResultError::Error(
+            AuthError::Client(client::Error::Messaging(messaging::Error(message)))
+            | AuthError::VerifyAuthenticationResult(VerifyAuthenticationResultError::Refused(
                 message,
             )) => Self::AuthenticationFailure(message),
             _ => Self::Other(error.into()),
@@ -103,8 +126,7 @@ pub fn listen<IO, Svc>(
 where
     IO: AsyncWrite + AsyncRead + Send + 'static,
     Svc: Service<CallWithId, NotificationWithId>,
-    Svc::Error:
-        IsErrorCanceledTermination + std::fmt::Display + std::fmt::Debug + Sync + Send + 'static,
+    Svc::Error: std::fmt::Display + std::fmt::Debug + Sync + Send + 'static,
 {
     // As a server, we first have to create the router, then wait for a successful
     // authentication to enable access to the service.
@@ -314,13 +336,10 @@ pub type CancelWithId = service::CancelWithId<Subject>;
 pub struct CallFuture(client::CallFuture);
 
 impl Future for CallFuture {
-    type Output = Result<Bytes, ClientError>;
+    type Output = Result<Reply, CallTermination<ClientError>>;
 
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        self.0.poll_unpin(cx).map_err(Into::into)
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.0.poll_unpin(cx).map_err(|err| err.map_err(Into::into))
     }
 }
 
@@ -337,10 +356,7 @@ pub struct NotifyFuture(client::NotifyFuture);
 impl Future for NotifyFuture {
     type Output = Result<(), ClientError>;
 
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0.poll_unpin(cx).map_err(Into::into)
     }
 }
@@ -359,7 +375,6 @@ mod tests {
         future::{self, BoxFuture},
         FutureExt,
     };
-    use qi_format::to_bytes;
     use tokio::{io, join, select, spawn};
 
     struct ServiceFn<T, U, E> {
@@ -385,19 +400,22 @@ mod tests {
         E: std::error::Error + Sync + Send + 'static,
     {
         type Error = Box<dyn std::error::Error + Sync + Send>;
-        type CallFuture = BoxFuture<'static, Result<Bytes, Self::Error>>;
+        type CallFuture = BoxFuture<'static, Result<Reply, CallTermination<Self::Error>>>;
         type NotifyFuture = BoxFuture<'static, Result<(), Self::Error>>;
 
         fn call(&mut self, call: CallWithId) -> Self::CallFuture {
             let input = match from_bytes(&call.inner.payload) {
                 Ok(input) => input,
-                Err(err) => return future::err(err.into()).boxed(),
+                Err(err) => return future::err(CallTermination::Error(err.into())).boxed(),
             };
             let output_future = (self.f)(input);
             async move {
-                let output = output_future.await?;
-                let output_bytes = to_bytes(&output)?;
-                Ok(output_bytes)
+                let output = output_future
+                    .await
+                    .map_err(|err| CallTermination::Error(err.into()))?;
+                let reply =
+                    Reply::with_value(&output).map_err(|err| CallTermination::Error(err.into()))?;
+                Ok(reply)
             }
             .boxed()
         }
@@ -474,17 +492,17 @@ mod tests {
 
         let subject = any_service_subject();
         let reply = client
-            .call(Call::with_content(subject, &(12, -49)).unwrap())
+            .call(Call::with_value(subject, &(12, -49)).unwrap())
             .await
             .unwrap();
-        let value: String = from_bytes(&reply).unwrap();
+        let value: String = reply.value().unwrap();
         assert_eq!(value, "-37");
 
         let reply = server
-            .call(Call::with_content(subject, &vec![32, 2893, -123, 3287, 0, -38293]).unwrap())
+            .call(Call::with_value(subject, &vec![32, 2893, -123, 3287, 0, -38293]).unwrap())
             .await
             .unwrap();
-        let value: i32 = from_bytes(&reply).unwrap();
+        let value: i32 = reply.value().unwrap();
         assert_eq!(value, -32204);
     }
 }

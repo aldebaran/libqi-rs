@@ -57,7 +57,4 @@ use qi_format as format;
 use client::Client;
 pub use service::{Service, ToRequestId, ToSubject};
 #[doc(inline)]
-pub use {
-    bytes::Bytes, capabilities::CapabilitiesMap, service::IsErrorCanceledTermination,
-    service::RequestId,
-};
+pub use {capabilities::CapabilitiesMap, service::RequestId};
