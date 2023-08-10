@@ -1,7 +1,8 @@
 [package]
 name = "qi-tools"
 description = ""
-license-file = "LICENSE.txt"
+
+license-file = "../LICENSE.txt"
 repository = "https://github.com/nyibbang/libqi-rs"
 version = "0.1.0-dev"
 edition = "2021"
@@ -9,13 +10,10 @@ rust-version = "1.63"
 
 [dependencies]
 anyhow = "1.0.69"
-futures = "0.3.27"
-iri-string = { version = "0.5.6", features = ["serde-std"] }
-qi-types = { path = "../qi-types" }
-qi-messaging = { path = "../qi-messaging" }
-serde = "1.0.158"
-tokio = { version = "1.26.0", features = ["rt-multi-thread", "macros", "net"] }
-tokio-util = { version = "0.7.7", features = ["codec"] }
+clap = { version = "= 3.2.25", features = ["derive"] }
+colored = "2.0.0"
+qi = { path = "../qi" }
+tokio = { version = "1.26.0", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.37"
 tracing-subscriber = "0.3.16"
 

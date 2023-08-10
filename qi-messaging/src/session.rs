@@ -3,10 +3,10 @@ mod router;
 
 use crate::{
     channel, client, messaging,
-    service::{self, CallTermination, ToSubject, WithRequestId},
+    service::{self, CallResult, GetSubject, WithRequestId},
     Service,
 };
-pub use crate::{service::Reply, RequestId};
+pub use crate::{client::CancelFuture, service::Reply, RequestId};
 use futures::{FutureExt, TryFutureExt};
 use std::{
     future::Future,
@@ -14,27 +14,44 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::io::{AsyncRead, AsyncWrite};
-use tracing::debug;
+use tracing::trace;
 
 #[derive(Debug, Clone)]
 pub struct Client {
     client: client::Client,
-    id_sequence: channel::RequestIdSequenceRef,
 }
 
 impl crate::Service<Call, Notification> for Client {
+    type CallReply = Reply;
     type Error = ClientError;
     type CallFuture = CallFuture;
     type NotifyFuture = NotifyFuture;
 
     fn call(&mut self, call: Call) -> Self::CallFuture {
-        let call = self.id_sequence.pair_with_new_id(call.into());
-        CallFuture(self.client.call(call))
+        let mut this = &*self;
+        this.call(call)
     }
 
     fn notify(&mut self, notif: Notification) -> Self::NotifyFuture {
-        let notif = self.id_sequence.pair_with_new_id(notif.into());
-        NotifyFuture(self.client.notify(notif))
+        let mut this = &*self;
+        this.notify(notif)
+    }
+}
+
+impl crate::Service<Call, Notification> for &Client {
+    type CallReply = Reply;
+    type Error = ClientError;
+    type CallFuture = CallFuture;
+    type NotifyFuture = NotifyFuture;
+
+    fn call(&mut self, call: Call) -> Self::CallFuture {
+        let mut client = &self.client;
+        CallFuture(client.call(call.into()))
+    }
+
+    fn notify(&mut self, notif: Notification) -> Self::NotifyFuture {
+        let mut client = &self.client;
+        NotifyFuture(client.notify(notif.into()))
     }
 }
 
@@ -44,6 +61,8 @@ pub enum ClientError {
     #[error(transparent)]
     SessionClosed(#[from] SessionClosedError),
 
+    // #[error("format serialization/deserialization error")]
+    // Format(#[from] format::Error),
     #[error(transparent)]
     Service(#[from] service::Error),
 }
@@ -73,20 +92,16 @@ where
     IO: AsyncWrite + AsyncRead,
     Svc: Service<CallWithId, NotificationWithId>,
     Svc::Error: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
+    Svc::CallReply: serde::Serialize,
 {
     // As a client, we can enable the service in the router right away.
     let (control, control_service) = control::create();
     let router = router::Router::with_service_enabled(control_service, service);
-    let (mut client, id_sequence, channel_dispatch) = channel::open(io, router);
+    let (mut client, channel_dispatch) = channel::open(io, router);
 
     let client = async move {
-        control
-            .authenticate_to_remote(&mut client, &id_sequence)
-            .await?;
-        Ok(Client {
-            client,
-            id_sequence,
-        })
+        control.authenticate_to_remote(&mut client).await?;
+        Ok(Client { client })
     };
     let session = channel_dispatch.map_err(|err| Error(err.into()));
 
@@ -127,13 +142,14 @@ where
     IO: AsyncWrite + AsyncRead + Send + 'static,
     Svc: Service<CallWithId, NotificationWithId>,
     Svc::Error: std::fmt::Display + std::fmt::Debug + Sync + Send + 'static,
+    Svc::CallReply: serde::Serialize,
 {
     // As a server, we first have to create the router, then wait for a successful
     // authentication to enable access to the service.
 
     let (mut control, control_service) = control::create();
     let (router, router_enable_service_sender) = router::Router::new(control_service);
-    let (client, id_sequence, channel_dispatch) = channel::open(io, router);
+    let (client, channel_dispatch) = channel::open(io, router);
 
     let client = async move {
         control.remote_authentication().await?;
@@ -141,12 +157,9 @@ where
             .send(router::EnableService::new(service))
             .is_err()
         {
-            debug!("failed to enable the service of the session router, the router service is probably terminated.");
+            trace!("failed to enable the service of the session router, the router service is probably terminated.");
         }
-        Ok(Client {
-            client,
-            id_sequence,
-        })
+        Ok(Client { client })
     };
     let session = channel_dispatch.map_err(|err| Error(err.into()));
 
@@ -170,47 +183,66 @@ impl From<control::RemoteAuthenticationError> for ListenError {
 pub struct Error(#[from] Box<dyn std::error::Error + Send + Sync>);
 
 pub mod subject {
-    pub use crate::message::{Action, Object, Service};
+    use crate::types::object::{ActionId, ObjectId, ServiceId};
     use crate::{message, session::control};
 
     #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-    pub struct Subject {
-        service: Service,
-        object: Object,
-        action: Action,
+    pub struct ServiceObject {
+        service: ServiceId,
+        object: ObjectId,
     }
 
-    impl Subject {
-        pub fn new(service: Service, object: Object, action: Action) -> Option<Self> {
+    impl ServiceObject {
+        pub fn new(service: ServiceId, object: ObjectId) -> Option<Self> {
             if control::is_service(service) || control::is_object(object) {
                 None
             } else {
-                Some(Self {
-                    service,
-                    object,
-                    action,
-                })
+                Some(Self { service, object })
             }
         }
 
-        pub fn service(&self) -> Service {
+        pub fn service(&self) -> ServiceId {
             self.service
         }
 
-        pub fn object(&self) -> Object {
+        pub fn object(&self) -> ObjectId {
             self.object
         }
+    }
 
-        pub fn action(&self) -> Action {
+    #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+    pub struct Subject {
+        service_object: ServiceObject,
+        action: ActionId,
+    }
+
+    impl Subject {
+        pub fn new(service_object: ServiceObject, action: ActionId) -> Self {
+            Self {
+                service_object,
+                action,
+            }
+        }
+
+        pub fn service(&self) -> ServiceId {
+            self.service_object.service
+        }
+
+        pub fn object(&self) -> ObjectId {
+            self.service_object.object
+        }
+
+        pub fn action(&self) -> ActionId {
             self.action
         }
 
         pub(crate) fn from_messaging(subject: message::Subject) -> Option<Self> {
-            Self::new(subject.service(), subject.object(), subject.action())
+            let service_object = ServiceObject::new(subject.service(), subject.object());
+            service_object.map(|service_object| Self::new(service_object, subject.action()))
         }
 
         pub(crate) fn into_messaging(self) -> message::Subject {
-            message::Subject::new(self.service, self.object, self.action)
+            message::Subject::new(self.service(), self.object(), self.action())
         }
     }
 
@@ -228,46 +260,39 @@ pub type Call = service::Call<Subject>;
 
 impl From<Call> for messaging::Call {
     fn from(call: Call) -> Self {
-        Self {
-            subject: call.subject.into(),
-            payload: call.payload,
-        }
+        Self::new((*call.subject()).into()).with_formatted_value(call.into_formatted_value())
     }
 }
 
 impl CallWithId {
     fn from_messaging(call: messaging::CallWithId) -> Result<Self, messaging::CallWithId> {
-        match Subject::from_messaging(call.to_subject()) {
+        match Subject::from_messaging(*call.subject()) {
             Some(subject) => {
-                let messaging::CallWithId {
-                    id,
-                    inner: messaging::Call { payload, .. },
-                } = call;
-                Ok(Self {
-                    id,
-                    inner: Call { subject, payload },
-                })
+                let id = call.id();
+                let call = Call::new(subject)
+                    .with_formatted_value(call.into_inner().into_formatted_value());
+                Ok(Self::new(id, call))
             }
             None => Err(call),
         }
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, derive_more::From)]
 pub enum Notification {
     Post(Post),
     Event(Event),
     Cancel(Cancel),
 }
 
-impl ToSubject for Notification {
+impl GetSubject for Notification {
     type Subject = Subject;
 
-    fn to_subject(&self) -> Self::Subject {
+    fn subject(&self) -> &Self::Subject {
         match self {
-            Self::Post(post) => post.to_subject(),
-            Self::Event(event) => event.to_subject(),
-            Self::Cancel(cancel) => cancel.to_subject(),
+            Self::Post(post) => post.subject(),
+            Self::Event(event) => event.subject(),
+            Self::Cancel(cancel) => cancel.subject(),
         }
     }
 }
@@ -275,21 +300,9 @@ impl ToSubject for Notification {
 impl From<Notification> for messaging::Notification {
     fn from(notif: Notification) -> Self {
         match notif {
-            Notification::Post(Post { subject, payload }) => messaging::Post {
-                subject: subject.into(),
-                payload,
-            }
-            .into(),
-            Notification::Event(Event { subject, payload }) => messaging::Event {
-                subject: subject.into(),
-                payload,
-            }
-            .into(),
-            Notification::Cancel(Cancel { subject, call_id }) => messaging::Cancel {
-                subject: subject.into(),
-                call_id,
-            }
-            .into(),
+            Notification::Post(post) => messaging::Post::from(post).into(),
+            Notification::Event(event) => messaging::Event::from(event).into(),
+            Notification::Cancel(cancel) => messaging::Cancel::from(cancel).into(),
         }
     }
 }
@@ -298,31 +311,53 @@ impl NotificationWithId {
     fn from_messaging(
         notif: messaging::NotificationWithId,
     ) -> Result<Self, messaging::NotificationWithId> {
-        let subject = match Subject::from_messaging(notif.to_subject()) {
+        let subject = match Subject::from_messaging(*notif.subject()) {
             Some(subject) => subject,
             None => return Err(notif),
         };
-        let id = notif.id;
-        let notif_res = match notif.inner {
-            messaging::Notification::Post(messaging::Post { payload, .. }) => {
-                Ok(Notification::Post(Post { subject, payload }))
+        let id = notif.id();
+        let notif = match notif.into_inner() {
+            messaging::Notification::Post(post) => Post::new(subject)
+                .with_formatted_value(post.into_formatted_value())
+                .into(),
+            messaging::Notification::Event(event) => Event::new(subject)
+                .with_formatted_value(event.into_formatted_value())
+                .into(),
+            messaging::Notification::Cancel(cancel) => {
+                Cancel::new(subject, cancel.call_id()).into()
             }
-            messaging::Notification::Event(messaging::Event { payload, .. }) => {
-                Ok(Notification::Event(Event { subject, payload }))
+            notif @ messaging::Notification::Capabilities(_) => {
+                return Err(WithRequestId::new(id, notif))
             }
-            messaging::Notification::Cancel(messaging::Cancel { call_id, .. }) => {
-                Ok(Notification::Cancel(Cancel { subject, call_id }))
-            }
-            messaging::Notification::Capabilities(_) => Err(notif),
         };
 
-        notif_res.map(|notif| WithRequestId { id, inner: notif })
+        Ok(WithRequestId::new(id, notif))
     }
 }
 
 pub type Post = service::Post<Subject>;
+
+impl From<Post> for messaging::Post {
+    fn from(post: Post) -> Self {
+        messaging::Post::new((*post.subject()).into())
+    }
+}
+
 pub type Event = service::Event<Subject>;
+
+impl From<Event> for messaging::Event {
+    fn from(event: Event) -> Self {
+        messaging::Event::new((*event.subject()).into())
+    }
+}
+
 pub type Cancel = service::Cancel<Subject>;
+
+impl From<Cancel> for messaging::Cancel {
+    fn from(cancel: Cancel) -> Self {
+        messaging::Cancel::new((*cancel.subject()).into(), cancel.call_id())
+    }
+}
 
 pub type CallWithId = service::CallWithId<Subject>;
 pub type NotificationWithId = WithRequestId<Notification>;
@@ -335,8 +370,14 @@ pub type CancelWithId = service::CancelWithId<Subject>;
 #[must_use = "futures do nothing until polled"]
 pub struct CallFuture(client::CallFuture);
 
+impl CallFuture {
+    pub fn cancel(mut self) -> CancelFuture {
+        self.0.cancel()
+    }
+}
+
 impl Future for CallFuture {
-    type Output = Result<Reply, CallTermination<ClientError>>;
+    type Output = CallResult<Reply, ClientError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.0.poll_unpin(cx).map_err(|err| err.map_err(Into::into))
@@ -370,7 +411,10 @@ impl service::ToRequestId for NotifyFuture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::from_bytes;
+    use crate::{
+        service::CallTermination,
+        types::object::{ActionId, ObjectId, ServiceId},
+    };
     use futures::{
         future::{self, BoxFuture},
         FutureExt,
@@ -399,12 +443,13 @@ mod tests {
         U: serde::Serialize + Send + 'static,
         E: std::error::Error + Sync + Send + 'static,
     {
+        type CallReply = U;
         type Error = Box<dyn std::error::Error + Sync + Send>;
-        type CallFuture = BoxFuture<'static, Result<Reply, CallTermination<Self::Error>>>;
+        type CallFuture = BoxFuture<'static, CallResult<Self::CallReply, Self::Error>>;
         type NotifyFuture = BoxFuture<'static, Result<(), Self::Error>>;
 
         fn call(&mut self, call: CallWithId) -> Self::CallFuture {
-            let input = match from_bytes(&call.inner.payload) {
+            let input = match call.inner().value() {
                 Ok(input) => input,
                 Err(err) => return future::err(CallTermination::Error(err.into())).boxed(),
             };
@@ -413,15 +458,13 @@ mod tests {
                 let output = output_future
                     .await
                     .map_err(|err| CallTermination::Error(err.into()))?;
-                let reply =
-                    Reply::with_value(&output).map_err(|err| CallTermination::Error(err.into()))?;
-                Ok(reply)
+                Ok(output)
             }
             .boxed()
         }
 
         fn notify(&mut self, _notif: NotificationWithId) -> Self::NotifyFuture {
-            unimplemented!()
+            future::ok(()).boxed()
         }
     }
 
@@ -475,12 +518,9 @@ mod tests {
     }
 
     fn any_service_subject() -> super::Subject {
-        super::Subject::new(
-            super::subject::Service::new(1),
-            super::subject::Object::new(1),
-            super::subject::Action::new(1),
-        )
-        .unwrap()
+        let service_object =
+            subject::ServiceObject::new(ServiceId::new(1), ObjectId::new(1)).unwrap();
+        super::Subject::new(service_object, ActionId::new(1))
     }
 
     #[tokio::test]
@@ -492,14 +532,18 @@ mod tests {
 
         let subject = any_service_subject();
         let reply = client
-            .call(Call::with_value(subject, &(12, -49)).unwrap())
+            .call(Call::new(subject).with_value(&(12, -49)).unwrap())
             .await
             .unwrap();
         let value: String = reply.value().unwrap();
         assert_eq!(value, "-37");
 
         let reply = server
-            .call(Call::with_value(subject, &vec![32, 2893, -123, 3287, 0, -38293]).unwrap())
+            .call(
+                Call::new(subject)
+                    .with_value(&vec![32, 2893, -123, 3287, 0, -38293])
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let value: i32 = reply.value().unwrap();

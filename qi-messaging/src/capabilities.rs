@@ -1,9 +1,11 @@
-use qi_types::Dynamic;
-use std::{borrow::Borrow, cmp::Ordering, collections::HashMap};
+use crate::types::{Dynamic, Map};
+use std::cmp::Ordering;
 
-type MapImpl = HashMap<String, Dynamic>;
+type MapImpl = Map<String, Dynamic>;
 
-#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Default, Clone, PartialEq, Eq, PartialOrd, Debug, serde::Serialize, serde::Deserialize,
+)]
 pub struct CapabilitiesMap(MapImpl);
 
 impl CapabilitiesMap {
@@ -25,16 +27,14 @@ impl CapabilitiesMap {
 
     pub fn get<K>(&self, key: &K) -> Option<&Dynamic>
     where
-        String: Borrow<K>,
-        K: std::hash::Hash + Eq + ?Sized,
+        K: PartialEq<String> + ?Sized,
     {
         self.0.get(key)
     }
 
     pub fn has_flag_capability<K>(&self, key: &K) -> bool
     where
-        String: Borrow<K>,
-        K: std::hash::Hash + Eq + ?Sized,
+        K: PartialEq<String> + ?Sized,
     {
         matches!(self.get(key), Some(Dynamic::Bool(true)))
     }
@@ -62,7 +62,7 @@ impl<'map> std::iter::IntoIterator for &'map CapabilitiesMap {
     type IntoIter = <&'map MapImpl as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.iter()
+        (&self.0).into_iter()
     }
 }
 

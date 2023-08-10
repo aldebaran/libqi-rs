@@ -17,7 +17,7 @@ num-derive = "0.3.3"
 num-traits = "0.2.15"
 serde = { version = "1.0.152", features = ["derive"] }
 thiserror = "1.0.39"
-tokio = { version = "1.26.0", features = ["io-util", "sync", "macros"] }
+tokio = { version = "1.26.0", features = ["io-util", "sync", "macros", "rt"] }
 tracing = "0.1.37"
 tokio-util = { version = "0.7.7", features = ["codec"] }
 qi-types = { path = "../qi-types" }

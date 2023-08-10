@@ -2,7 +2,7 @@ use super::{control, Service};
 use crate::{
     format,
     messaging::{self, CallWithId, NotificationWithId},
-    service::{CallTermination, Reply, ToRequestId},
+    service::{CallResult, Reply, ToRequestId},
 };
 use futures::{ready, TryFuture};
 use pin_project_lite::pin_project;
@@ -63,7 +63,9 @@ impl<S> Router<S> {
 impl<S> Service<CallWithId, NotificationWithId> for Router<S>
 where
     S: Service<super::CallWithId, super::NotificationWithId>,
+    S::CallReply: serde::Serialize,
 {
+    type CallReply = Reply;
     type Error = Error<S::Error>;
     type CallFuture = CallFuture<S::CallFuture>;
     type NotifyFuture = NotifyFuture<S::NotifyFuture>;
@@ -71,7 +73,7 @@ where
     fn call(&mut self, call: CallWithId) -> Self::CallFuture {
         self.recv_enable_service();
 
-        match control::Call::from_messaging(&call.inner) {
+        match control::Call::from_messaging(call.inner()) {
             Ok(Some(control_call)) => {
                 return CallFuture::Control {
                     inner: self.control.call(control_call),
@@ -154,23 +156,26 @@ pin_project! {
     }
 }
 
-impl<S, E> Future for CallFuture<S>
+impl<S, R, E> Future for CallFuture<S>
 where
-    S: TryFuture<Ok = Reply, Error = CallTermination<E>>,
+    S: Future<Output = CallResult<R, E>>,
+    R: serde::Serialize,
 {
-    type Output = Result<Reply, CallTermination<Error<E>>>;
+    type Output = CallResult<Reply, Error<E>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             CallFutureProj::Control { inner } => {
-                let reply =
+                let result =
                     ready!(inner.try_poll(cx)).map_err(|err| err.map_err(Error::Control))?;
+                let reply = Reply::with_value(&result).map_err(Error::Format)?;
                 Poll::Ready(Ok(reply))
             }
             CallFutureProj::Service { inner } => {
-                let reply_payload =
+                let result =
                     ready!(inner.try_poll(cx)).map_err(|err| err.map_err(Error::Service))?;
-                Poll::Ready(Ok(reply_payload))
+                let reply = Reply::with_value(&result).map_err(Error::Format)?;
+                Poll::Ready(Ok(reply))
             }
             CallFutureProj::FormatError { error } => match error.take() {
                 Some(error) => Poll::Ready(Err(Error::Format(error).into())),

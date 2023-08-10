@@ -4,7 +4,6 @@ use once_cell::sync::OnceCell;
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 struct Supported {
     client_server_socket: bool,
-    message_flags: bool,
     remote_cancelable_calls: bool,
     object_ptr_uid: bool,
     relative_endpoint_uri: bool,
@@ -12,7 +11,6 @@ struct Supported {
 
 impl Supported {
     const CLIENT_SERVER_SOCKET: &'static str = "ClientServerSocket";
-    const MESSAGE_FLAGS: &'static str = "MessageFlags";
     const REMOTE_CANCELABLE_CALLS: &'static str = "RemoteCancelableCalls";
     const OBJECT_PTR_UID: &'static str = "ObjectPtrUID";
     const RELATIVE_ENDPOINT_URI: &'static str = "RelativeEndpointURI";
@@ -20,7 +18,6 @@ impl Supported {
     const fn new() -> Self {
         Self {
             client_server_socket: true,
-            message_flags: true,
             remote_cancelable_calls: true,
             object_ptr_uid: true,
             relative_endpoint_uri: true,
@@ -30,7 +27,6 @@ impl Supported {
     fn from_capabilities(map: &CapabilitiesMap) -> Self {
         Self {
             client_server_socket: map.has_flag_capability(Self::CLIENT_SERVER_SOCKET),
-            message_flags: map.has_flag_capability(Self::MESSAGE_FLAGS),
             remote_cancelable_calls: map.has_flag_capability(Self::REMOTE_CANCELABLE_CALLS),
             object_ptr_uid: map.has_flag_capability(Self::OBJECT_PTR_UID),
             relative_endpoint_uri: map.has_flag_capability(Self::RELATIVE_ENDPOINT_URI),
@@ -40,7 +36,6 @@ impl Supported {
     fn to_capabilities(self) -> CapabilitiesMap {
         CapabilitiesMap::from_iter([
             (Self::CLIENT_SERVER_SOCKET, self.client_server_socket),
-            (Self::MESSAGE_FLAGS, self.message_flags),
             (Self::REMOTE_CANCELABLE_CALLS, self.remote_cancelable_calls),
             (Self::OBJECT_PTR_UID, self.object_ptr_uid),
             (Self::RELATIVE_ENDPOINT_URI, self.relative_endpoint_uri),
@@ -79,9 +74,6 @@ impl CapabilitiesMapExt for CapabilitiesMap {
                 Supported::CLIENT_SERVER_SOCKET.into(),
                 true,
             ));
-        }
-        if !supported.message_flags {
-            return Err(ExpectedKeyValueError(Supported::MESSAGE_FLAGS.into(), true));
         }
         if !supported.remote_cancelable_calls {
             return Err(ExpectedKeyValueError(

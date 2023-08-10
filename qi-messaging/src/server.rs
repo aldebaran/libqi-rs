@@ -1,10 +1,13 @@
-use crate::messaging::{
-    CallTermination, CallWithId, Message, NotificationWithId, Reply, RequestId, RequestWithId,
-    Service, Subject, ToRequestId, ToSubject,
+use crate::{
+    format,
+    messaging::{
+        CallResult, CallTermination, CallWithId, GetSubject, Message, NotificationWithId,
+        RequestId, RequestWithId, Service, Subject, ToRequestId,
+    },
 };
 use futures::{stream::FuturesUnordered, FutureExt, Sink, SinkExt, Stream, StreamExt};
 use tokio::{pin, select};
-use tracing::{debug, debug_span, Instrument};
+use tracing::{trace, trace_span, Instrument};
 
 pub(crate) async fn serve<St, Si, Svc>(
     requests_stream: St,
@@ -13,30 +16,30 @@ pub(crate) async fn serve<St, Si, Svc>(
 ) -> Result<(), Si::Error>
 where
     St: Stream<Item = RequestWithId>,
-    Si: Sink<Response<Svc::Error>>,
+    Si: Sink<Response<Svc::CallReply, Svc::Error>>,
     Svc: Service<CallWithId, NotificationWithId>,
     Svc::Error: std::fmt::Debug,
 {
     let requests_stream = requests_stream.fuse();
-    let mut responses_futures = FuturesUnordered::new();
+    let mut result_futures = FuturesUnordered::new();
     pin!(requests_stream, responses_sink);
 
     loop {
         select! {
             Some(request) = requests_stream.next() => {
-                let (id, subject) = (request.to_request_id(), request.to_subject());
-                debug!(?request, "received a new request, calling service");
-                let response_future = service.request(request.transpose_id()).instrument(debug_span!("service_call"));
-                responses_futures.push(response_future.map(move |response| (id, subject, response)));
+                let (id, subject) = (request.to_request_id(), *request.subject());
+                trace!(?request, "received a new request, calling service");
+                let result_future = service.request(request.transpose_id()).instrument(trace_span!("service_call"));
+                result_futures.push(result_future.map(move |response| (id, subject, response)));
             },
-            Some((id, subject, response)) = responses_futures.next() => {
-                debug!(%id, %subject, ?response, "received response of service call");
-                if let Some(response) = response.transpose() {
-                    responses_sink.send(Response { id, subject, response }).await?;
+            Some((id, subject, result)) = result_futures.next() => {
+                trace!(%id, %subject, "received result of service call");
+                if let Some(result) = result.transpose() {
+                    responses_sink.send(Response { id, subject, result }).await?;
                 }
             },
             else => {
-                debug!("server is finished");
+                trace!("server is finished");
                 break Ok(())
             }
         }
@@ -44,22 +47,23 @@ where
 }
 
 #[derive(Debug)]
-pub(crate) struct Response<E> {
+pub(crate) struct Response<T, E> {
     id: RequestId,
     subject: Subject,
-    response: Result<Reply, CallTermination<E>>,
+    result: CallResult<T, E>,
 }
 
-impl<E> TryFrom<Response<E>> for Message
+impl<T, E> TryFrom<Response<T, E>> for Message
 where
+    T: Into<format::Value>,
     E: ToString,
 {
     type Error = crate::format::Error;
 
-    fn try_from(response: Response<E>) -> Result<Self, Self::Error> {
-        match response.response {
-            Ok(reply) => Ok(Message::reply(response.id, response.subject)
-                .set_payload(reply.payload)
+    fn try_from(response: Response<T, E>) -> Result<Self, Self::Error> {
+        match response.result {
+            Ok(value) => Ok(Message::reply(response.id, response.subject)
+                .set_content(value.into())
                 .build()),
             Err(CallTermination::Canceled) => {
                 Ok(Message::canceled(response.id, response.subject).build())
@@ -76,11 +80,11 @@ mod tests {
     use super::*;
     use crate::{
         message,
-        messaging::{Call, Request},
+        messaging::Call,
         service,
+        types::object::{ActionId, ObjectId, ServiceId},
     };
     use assert_matches::assert_matches;
-    use bytes::Bytes;
     use futures::{
         future::{poll_immediate, BoxFuture},
         FutureExt,
@@ -99,8 +103,9 @@ mod tests {
     }
 
     impl<N> service::Service<CallWithId, N> for Service {
+        type CallReply = RequestId;
         type Error = String;
-        type CallFuture = BoxFuture<'static, Result<Reply, CallTermination<Self::Error>>>;
+        type CallFuture = BoxFuture<'static, CallResult<Self::CallReply, Self::Error>>;
         type NotifyFuture = BoxFuture<'static, Result<(), Self::Error>>;
 
         fn call(&mut self, call: CallWithId) -> Self::CallFuture {
@@ -110,7 +115,7 @@ mod tests {
                 if let Some(barrier) = barrier {
                     barrier.wait().await;
                 }
-                Ok(Reply::with_value(&id).map_err(|err| err.to_string())?)
+                Ok(id)
             }
             .boxed()
         }
@@ -145,39 +150,26 @@ mod tests {
         pin!(serve);
 
         // Send 3 call requests.
-        let subject = message::Subject::new(
-            message::Service::new(1),
-            message::Object::new(2),
-            message::Action::new(3),
-        );
+        let subject = message::Subject::new(ServiceId::new(1), ObjectId::new(2), ActionId::new(3));
         requests_tx
-            .send(RequestWithId {
-                id: RequestId::from(1),
-                inner: Request::Call(Call {
-                    subject,
-                    payload: Bytes::new(),
-                }),
-            })
+            .send(RequestWithId::new(
+                RequestId::from(1),
+                Call::new(subject).into(),
+            ))
             .await
             .unwrap();
         requests_tx
-            .send(RequestWithId {
-                id: RequestId::from(2),
-                inner: Request::Call(Call {
-                    subject,
-                    payload: Bytes::new(),
-                }),
-            })
+            .send(RequestWithId::new(
+                RequestId::from(2),
+                Call::new(subject).into(),
+            ))
             .await
             .unwrap();
         requests_tx
-            .send(RequestWithId {
-                id: RequestId::from(3),
-                inner: Request::Call(Call {
-                    subject,
-                    payload: Bytes::new(),
-                }),
-            })
+            .send(RequestWithId::new(
+                RequestId::from(3),
+                Call::new(subject).into(),
+            ))
             .await
             .unwrap();
 
@@ -189,23 +181,38 @@ mod tests {
         // Unblock request no.3, its response is received.
         assert_matches!(poll_immediate(barrier_3.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(3), response: Ok(Reply { payload }), .. }) => {
-            assert_eq!(payload, [3, 0, 0, 0].as_slice())
-        });
+        assert_matches!(
+            responses_rx.try_recv(),
+            Ok(Response {
+                id: RequestId(3),
+                result: Ok(RequestId(3)),
+                ..
+            })
+        );
 
         // Unblock request no.1, its response is received.
         assert_matches!(poll_immediate(barrier_1.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(1), response: Ok(Reply { payload }), .. }) => {
-            assert_eq!(payload, [1, 0, 0, 0].as_slice())
-        });
+        assert_matches!(
+            responses_rx.try_recv(),
+            Ok(Response {
+                id: RequestId(1),
+                result: Ok(RequestId(1)),
+                ..
+            })
+        );
 
         // Unblock request no.2, its response is received.
         assert_matches!(poll_immediate(barrier_2.wait()).await, Some(_));
         assert_matches!(poll_immediate(&mut serve).await, None);
-        assert_matches!(responses_rx.try_recv(), Ok(Response{ id: RequestId(2), response: Ok(Reply { payload }), .. }) => {
-            assert_eq!(payload, [2, 0, 0, 0].as_slice())
-        });
+        assert_matches!(
+            responses_rx.try_recv(),
+            Ok(Response {
+                id: RequestId(2),
+                result: Ok(RequestId(2)),
+                ..
+            })
+        );
 
         // Terminate the server by closing the messages stream.
         drop(requests_tx);
@@ -230,13 +237,10 @@ mod tests {
 
         // Send a call request, causing the server to try to put a response in the sink.
         requests_tx
-            .send(RequestWithId {
-                id: RequestId::from(1),
-                inner: Request::Call(Call {
-                    subject: Subject::default(),
-                    payload: Bytes::new(),
-                }),
-            })
+            .send(RequestWithId::new(
+                RequestId::from(1),
+                Call::new(Subject::default()).into(),
+            ))
             .await
             .unwrap();
 

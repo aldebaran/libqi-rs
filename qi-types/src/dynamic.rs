@@ -10,7 +10,7 @@ use crate::{
 /// [`Dynamic`] represents a `dynamic` value in the `qi` type system.
 ///
 /// It is a value associated with its type information.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, derive_more::From, derive_more::TryInto)]
+#[derive(Clone, PartialEq, Eq, Debug, derive_more::From, derive_more::TryInto)]
 pub enum Dynamic {
     #[from]
     Unit,
@@ -41,7 +41,7 @@ impl Dynamic {
         if !value.has_type(t.as_ref()) {
             return Err(TypeMismatchError {
                 expected: t,
-                actual: value.ty(),
+                actual: value.dynamic_type(),
             });
         }
         let value = match value {
@@ -92,7 +92,7 @@ impl Dynamic {
 
     pub fn from_value(value: Value) -> Self {
         use ty::DynamicGetType;
-        let t = value.ty();
+        let t = value.dynamic_type();
         Self::new(value, t).unwrap()
     }
 
@@ -252,6 +252,58 @@ impl Default for Dynamic {
     }
 }
 
+impl PartialOrd for Dynamic {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Dynamic::Unit, Dynamic::Unit) => Some(Ordering::Equal),
+            (Dynamic::Unit, _) => Some(Ordering::Less),
+            (Dynamic::Bool(b1), Dynamic::Bool(b2)) => b1.partial_cmp(b2),
+            (Dynamic::Bool(_), Dynamic::Unit) => Some(Ordering::Greater),
+            (Dynamic::Bool(_), _) => Some(Ordering::Less),
+            (Dynamic::Number(n1), Dynamic::Number(n2)) => n1.partial_cmp(n2),
+            (Dynamic::Number(_), Dynamic::Unit | Dynamic::Bool(_)) => Some(Ordering::Greater),
+            (Dynamic::Number(_), _) => Some(Ordering::Less),
+            (Dynamic::String(s1), Dynamic::String(s2)) => s1.partial_cmp(s2),
+            (Dynamic::String(_), Dynamic::Unit | Dynamic::Bool(_) | Dynamic::Number(_)) => {
+                Some(Ordering::Greater)
+            }
+            (Dynamic::String(_), _) => Some(Ordering::Less),
+            (Dynamic::Raw(r1), Dynamic::Raw(r2)) => r1.partial_cmp(r2),
+            (
+                Dynamic::Raw(_),
+                Dynamic::Unit | Dynamic::Bool(_) | Dynamic::Number(_) | Dynamic::String(_),
+            ) => Some(Ordering::Greater),
+            (Dynamic::Raw(_), _) => Some(Ordering::Less),
+            (Dynamic::Option(o1), Dynamic::Option(o2)) => o1.partial_cmp(o2),
+            (
+                Dynamic::Option(_),
+                Dynamic::Unit | Dynamic::Bool(_) | Dynamic::String(_) | Dynamic::Raw(_),
+            ) => Some(Ordering::Greater),
+            (Dynamic::Option(_), _) => Some(Ordering::Less),
+            (Dynamic::List(l1), Dynamic::List(l2)) => l1.partial_cmp(l2),
+            (
+                Dynamic::List(_),
+                Dynamic::Map(_) | Dynamic::Tuple(_) | Dynamic::Object(_) | Dynamic::Dynamic(_),
+            ) => Some(Ordering::Less),
+            (Dynamic::List(_), _) => Some(Ordering::Greater),
+            (Dynamic::Map(m1), Dynamic::Map(m2)) => m1.partial_cmp(m2),
+            (Dynamic::Map(_), Dynamic::Tuple(_) | Dynamic::Object(_) | Dynamic::Dynamic(_)) => {
+                Some(Ordering::Less)
+            }
+            (Dynamic::Map(_), _) => Some(Ordering::Greater),
+            (Dynamic::Tuple(t1), Dynamic::Tuple(t2)) => t1.partial_cmp(t2),
+            (Dynamic::Tuple(_), Dynamic::Object(_) | Dynamic::Dynamic(_)) => Some(Ordering::Less),
+            (Dynamic::Tuple(_), _) => Some(Ordering::Greater),
+            (Dynamic::Object(_), Dynamic::Object(_)) => None,
+            (Dynamic::Object(_), Dynamic::Dynamic(_)) => Some(Ordering::Less),
+            (Dynamic::Object(_), _) => Some(Ordering::Greater),
+            (Dynamic::Dynamic(d1), Dynamic::Dynamic(d2)) => d1.partial_cmp(d2),
+            (Dynamic::Dynamic(_), _) => Some(Ordering::Greater),
+        }
+    }
+}
+
 impl From<&str> for Dynamic {
     fn from(s: &str) -> Self {
         Dynamic::String(s.to_owned())
@@ -271,24 +323,8 @@ impl From<Object> for Dynamic {
 }
 
 impl ty::DynamicGetType for Dynamic {
-    fn ty(&self) -> Option<Type> {
+    fn dynamic_type(&self) -> Option<Type> {
         None
-    }
-
-    fn deep_ty(&self) -> Type {
-        match self {
-            Self::Unit => ().deep_ty(),
-            Self::Bool(b) => b.deep_ty(),
-            Self::Number(n) => n.deep_ty(),
-            Self::String(s) => s.deep_ty(),
-            Self::Raw(r) => r.deep_ty(),
-            Self::Option(o) => o.deep_ty(),
-            Self::List(l) => l.deep_ty(),
-            Self::Map(m) => m.deep_ty(),
-            Self::Tuple(t) => t.deep_ty(),
-            Self::Object(o) => o.deep_ty(),
-            Self::Dynamic(d) => d.deep_ty(),
-        }
     }
 }
 
@@ -330,17 +366,17 @@ impl serde::Serialize for Dynamic {
     {
         use ty::DynamicGetType;
         match self {
-            Self::Unit => serialize_signed_value(serializer, ().ty(), &()),
-            Self::Bool(b) => serialize_signed_value(serializer, b.ty(), b),
+            Self::Unit => serialize_signed_value(serializer, ().dynamic_type(), &()),
+            Self::Bool(b) => serialize_signed_value(serializer, b.dynamic_type(), b),
             Self::Number(n) => serialize_signed_value(serializer, n.ty(), n),
-            Self::String(s) => serialize_signed_value(serializer, s.ty(), s),
-            Self::Raw(r) => serialize_signed_value(serializer, r.ty(), r),
+            Self::String(s) => serialize_signed_value(serializer, s.dynamic_type(), s),
+            Self::Raw(r) => serialize_signed_value(serializer, r.dynamic_type(), r),
             Self::Option(o) => o.serialize(serializer),
             Self::List(l) => l.serialize(serializer),
             Self::Map(m) => m.serialize(serializer),
             Self::Tuple(t) => t.serialize(serializer),
-            Self::Object(o) => serialize_signed_value(serializer, o.ty(), o.as_ref()),
-            Self::Dynamic(d) => serialize_signed_value(serializer, d.ty(), d.as_ref()),
+            Self::Object(o) => serialize_signed_value(serializer, o.dynamic_type(), o.as_ref()),
+            Self::Dynamic(d) => serialize_signed_value(serializer, d.dynamic_type(), d.as_ref()),
         }
     }
 }
@@ -487,7 +523,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for DynamicSeed {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Debug)]
 pub struct OptionDynamic(Option<Value>, Option<Type>);
 
 impl OptionDynamic {
@@ -505,12 +541,8 @@ impl OptionDynamic {
 }
 
 impl ty::DynamicGetType for OptionDynamic {
-    fn ty(&self) -> Option<Type> {
+    fn dynamic_type(&self) -> Option<Type> {
         Some(self.ty())
-    }
-
-    fn deep_ty(&self) -> Type {
-        self.ty()
     }
 }
 
@@ -522,7 +554,7 @@ impl std::fmt::Display for OptionDynamic {
 
 impl From<Option<Value>> for OptionDynamic {
     fn from(v: Option<Value>) -> Self {
-        let ty = v.as_ref().and_then(ty::DynamicGetType::ty);
+        let ty = v.as_ref().and_then(ty::DynamicGetType::dynamic_type);
         Self(v, ty)
     }
 }
@@ -587,7 +619,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for OptionDynamicSeed {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Debug)]
 pub struct ListDynamic(List<Value>, Option<Type>);
 
 impl ListDynamic {
@@ -605,12 +637,8 @@ impl ListDynamic {
 }
 
 impl ty::DynamicGetType for ListDynamic {
-    fn ty(&self) -> Option<Type> {
+    fn dynamic_type(&self) -> Option<Type> {
         Some(self.ty())
-    }
-
-    fn deep_ty(&self) -> Type {
-        self.ty()
     }
 }
 
@@ -674,7 +702,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for ListDynamicSeed {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Debug)]
 pub struct MapDynamic {
     value: Map<Value, Value>,
     key_type: Option<Type>,
@@ -699,12 +727,8 @@ impl MapDynamic {
 }
 
 impl ty::DynamicGetType for MapDynamic {
-    fn ty(&self) -> Option<Type> {
+    fn dynamic_type(&self) -> Option<Type> {
         Some(self.ty())
-    }
-
-    fn deep_ty(&self) -> Type {
-        self.ty()
     }
 }
 
@@ -788,7 +812,7 @@ impl<'de> serde::de::DeserializeSeed<'de> for MapDynamicSeed {
     }
 }
 
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Debug)]
 pub struct TupleDynamic(Tuple, ty::TupleType);
 
 impl TupleDynamic {
@@ -806,12 +830,8 @@ impl TupleDynamic {
 }
 
 impl ty::DynamicGetType for TupleDynamic {
-    fn ty(&self) -> Option<Type> {
+    fn dynamic_type(&self) -> Option<Type> {
         Some(self.ty())
-    }
-
-    fn deep_ty(&self) -> Type {
-        self.ty()
     }
 }
 

@@ -1,7 +1,7 @@
-use crate::{write::*, Error, Result};
-use bytes::{BufMut, Bytes, BytesMut};
+use crate::{write::*, Error, Result, Value};
+use bytes::{BufMut, BytesMut};
 
-pub fn to_writer<W, T>(writer: W, value: &T) -> Result<()>
+fn to_writer<W, T>(writer: W, value: &T) -> Result<()>
 where
     W: std::io::Write,
     T: ?Sized + serde::Serialize,
@@ -11,22 +11,13 @@ where
     Ok(())
 }
 
-pub fn to_byte_vec<T>(value: &T) -> Result<Vec<u8>>
-where
-    T: ?Sized + serde::Serialize,
-{
-    let mut buf = Vec::new();
-    to_writer(&mut buf, value)?;
-    Ok(buf)
-}
-
-pub fn to_bytes<T>(value: &T) -> Result<Bytes>
+pub fn to_value<T>(serializable: &T) -> Result<Value>
 where
     T: serde::Serialize,
 {
     let mut writer = BytesMut::new().writer();
-    to_writer(&mut writer, value)?;
-    Ok(writer.into_inner().freeze())
+    to_writer(&mut writer, serializable)?;
+    Ok(Value::from_bytes(writer.into_inner().freeze()))
 }
 
 #[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]

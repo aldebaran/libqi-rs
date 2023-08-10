@@ -3,6 +3,7 @@ members = [
     "qi-types",
     "qi-format",
     "qi-messaging",
-    "qi-nodes",
+    "qi-object",
     "qi-tools",
+    "qi",
 ]

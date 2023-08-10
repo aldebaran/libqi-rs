@@ -7,7 +7,7 @@ use crate::{
 
 /// The [`Value`] structure represents any value of `qi` type system and
 /// is is an enumeration of every types of values.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, derive_more::From, derive_more::TryInto)]
+#[derive(Clone, PartialEq, Eq, Debug, derive_more::From, derive_more::TryInto)]
 pub enum Value {
     #[from]
     Unit,
@@ -173,6 +173,56 @@ impl Default for Value {
     }
 }
 
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Value::Unit, Value::Unit) => Some(Ordering::Equal),
+            (Value::Unit, _) => Some(Ordering::Less),
+            (Value::Bool(b1), Value::Bool(b2)) => b1.partial_cmp(b2),
+            (Value::Bool(_), Value::Unit) => Some(Ordering::Greater),
+            (Value::Bool(_), _) => Some(Ordering::Less),
+            (Value::Number(n1), Value::Number(n2)) => n1.partial_cmp(n2),
+            (Value::Number(_), Value::Unit | Value::Bool(_)) => Some(Ordering::Greater),
+            (Value::Number(_), _) => Some(Ordering::Less),
+            (Value::String(s1), Value::String(s2)) => s1.partial_cmp(s2),
+            (Value::String(_), Value::Unit | Value::Bool(_) | Value::Number(_)) => {
+                Some(Ordering::Greater)
+            }
+            (Value::String(_), _) => Some(Ordering::Less),
+            (Value::Raw(r1), Value::Raw(r2)) => r1.partial_cmp(r2),
+            (Value::Raw(_), Value::Unit | Value::Bool(_) | Value::Number(_) | Value::String(_)) => {
+                Some(Ordering::Greater)
+            }
+            (Value::Raw(_), _) => Some(Ordering::Less),
+            (Value::Option(o1), Value::Option(o2)) => o1.partial_cmp(o2),
+            (Value::Option(_), Value::Unit | Value::Bool(_) | Value::String(_) | Value::Raw(_)) => {
+                Some(Ordering::Greater)
+            }
+            (Value::Option(_), _) => Some(Ordering::Less),
+            (Value::List(l1), Value::List(l2)) => l1.partial_cmp(l2),
+            (
+                Value::List(_),
+                Value::Map(_) | Value::Tuple(_) | Value::Object(_) | Value::Dynamic(_),
+            ) => Some(Ordering::Less),
+            (Value::List(_), _) => Some(Ordering::Greater),
+            (Value::Map(m1), Value::Map(m2)) => m1.partial_cmp(m2),
+            (Value::Map(_), Value::Tuple(_) | Value::Object(_) | Value::Dynamic(_)) => {
+                Some(Ordering::Less)
+            }
+            (Value::Map(_), _) => Some(Ordering::Greater),
+            (Value::Tuple(t1), Value::Tuple(t2)) => t1.partial_cmp(t2),
+            (Value::Tuple(_), Value::Object(_) | Value::Dynamic(_)) => Some(Ordering::Less),
+            (Value::Tuple(_), _) => Some(Ordering::Greater),
+            (Value::Object(_), Value::Object(_)) => None,
+            (Value::Object(_), Value::Dynamic(_)) => Some(Ordering::Less),
+            (Value::Object(_), _) => Some(Ordering::Greater),
+            (Value::Dynamic(d1), Value::Dynamic(d2)) => d1.partial_cmp(d2),
+            (Value::Dynamic(_), _) => Some(Ordering::Greater),
+        }
+    }
+}
+
 impl From<&str> for Value {
     fn from(s: &str) -> Self {
         Self::String(s.to_owned())
@@ -201,35 +251,19 @@ impl From<Object> for Value {
 }
 
 impl ty::DynamicGetType for Value {
-    fn ty(&self) -> Option<Type> {
+    fn dynamic_type(&self) -> Option<Type> {
         match self {
-            Self::Unit => ().ty(),
-            Self::Bool(b) => b.ty(),
+            Self::Unit => ().dynamic_type(),
+            Self::Bool(b) => b.dynamic_type(),
             Self::Number(n) => Some(n.ty()),
-            Self::String(s) => s.ty(),
-            Self::Raw(r) => r.ty(),
-            Self::Option(o) => o.ty(),
-            Self::List(l) => l.ty(),
-            Self::Map(m) => m.ty(),
-            Self::Tuple(t) => t.ty(),
-            Self::Object(o) => o.ty(),
-            Self::Dynamic(d) => d.ty(),
-        }
-    }
-
-    fn deep_ty(&self) -> Type {
-        match self {
-            Self::Unit => ().deep_ty(),
-            Self::Bool(b) => b.deep_ty(),
-            Self::Number(n) => n.deep_ty(),
-            Self::String(s) => s.deep_ty(),
-            Self::Raw(r) => r.deep_ty(),
-            Self::Option(o) => o.deep_ty(),
-            Self::List(l) => l.deep_ty(),
-            Self::Map(m) => m.deep_ty(),
-            Self::Tuple(t) => t.deep_ty(),
-            Self::Object(o) => o.deep_ty(),
-            Self::Dynamic(d) => d.deep_ty(),
+            Self::String(s) => s.dynamic_type(),
+            Self::Raw(r) => r.dynamic_type(),
+            Self::Option(o) => o.dynamic_type(),
+            Self::List(l) => l.dynamic_type(),
+            Self::Map(m) => m.dynamic_type(),
+            Self::Tuple(t) => t.dynamic_type(),
+            Self::Object(o) => o.dynamic_type(),
+            Self::Dynamic(d) => d.dynamic_type(),
         }
     }
 }

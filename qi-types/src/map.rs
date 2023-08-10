@@ -1,7 +1,16 @@
-use crate::{ty, Dynamic, Type, Value};
+use crate::{ty, Type};
 use derive_more::{From, Index, Into, IntoIterator};
 
 /// The [`Map`] value represents an association of keys to values in the `qi` type system.
+///
+/// # Order
+///
+/// The key-value pairs have a consistent order that is determined by the sequence of insertion and
+/// removal calls on the map. The order does not depend on the keys.
+///
+/// All iterators traverse the map in the order.
+///
+/// # Unicity of keys
 ///
 /// This type guarantees the unicity of keys. When an insertion is done, if the key already exists
 /// in the map, its value is overwritten with the inserted one.
@@ -33,10 +42,19 @@ impl<K, V> Map<K, V> {
 
     pub fn get<'s, Q>(&'s self, key: &Q) -> Option<&'s V>
     where
-        Q: PartialEq<K>,
+        Q: PartialEq<K> + ?Sized,
     {
         self.0
             .iter()
+            .find_map(|(k, v)| if key == k { Some(v) } else { None })
+    }
+
+    pub fn get_mut<'s, Q>(&'s mut self, key: &Q) -> Option<&'s mut V>
+    where
+        Q: PartialEq<K> + ?Sized,
+    {
+        self.0
+            .iter_mut()
             .find_map(|(k, v)| if key == k { Some(v) } else { None })
     }
 
@@ -63,7 +81,7 @@ impl<K, V> Map<K, V> {
 
     fn position<Q>(&self, key: &Q) -> Option<usize>
     where
-        Q: PartialEq<K>,
+        Q: PartialEq<K> + ?Sized,
     {
         self.0.iter().position(|(k, _)| key == k)
     }
@@ -84,7 +102,14 @@ impl<K, V> Map<K, V> {
         }
     }
 
-    fn ty_with<F>(&self, f: F) -> Type
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&K, &mut V) -> bool,
+    {
+        self.0.retain_mut(|(key, value)| f(key, value))
+    }
+
+    fn type_reduce<F>(&self, f: F) -> Type
     where
         F: FnMut((&K, &V)) -> (Option<Type>, Option<Type>),
     {
@@ -104,20 +129,19 @@ impl<K, V> Map<K, V> {
         ty::map_of(key, value)
     }
 
-    fn ty(&self) -> Option<Type>
+    pub(crate) fn get_dynamic_type(&self) -> Option<Type>
     where
         K: ty::DynamicGetType,
         V: ty::DynamicGetType,
     {
-        Some(self.ty_with(|(key, value)| (key.ty(), value.ty())))
+        Some(self.type_reduce(|(key, value)| (key.dynamic_type(), value.dynamic_type())))
     }
 
-    fn current_ty(&self) -> Type
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
-        K: ty::DynamicGetType,
-        V: ty::DynamicGetType,
+        Q: PartialEq<K> + ?Sized,
     {
-        self.ty_with(|(key, value)| (Some(key.deep_ty()), Some(value.deep_ty())))
+        self.0.iter().any(|(key_in, _)| key == key_in)
     }
 }
 
@@ -244,56 +268,6 @@ where
     }
 }
 
-impl<K, V> ty::StaticGetType for Map<K, V>
-where
-    K: ty::StaticGetType,
-    V: ty::StaticGetType,
-{
-    fn ty() -> crate::Type {
-        ty::map_of(Some(K::ty()), Some(V::ty()))
-    }
-}
-
-impl ty::DynamicGetType for Map<Dynamic, Dynamic> {
-    fn ty(&self) -> Option<Type> {
-        self.ty()
-    }
-
-    fn deep_ty(&self) -> Type {
-        self.current_ty()
-    }
-}
-
-impl ty::DynamicGetType for Map<Dynamic, Value> {
-    fn ty(&self) -> Option<Type> {
-        self.ty()
-    }
-
-    fn deep_ty(&self) -> Type {
-        self.current_ty()
-    }
-}
-
-impl ty::DynamicGetType for Map<Value, Dynamic> {
-    fn ty(&self) -> Option<Type> {
-        self.ty()
-    }
-
-    fn deep_ty(&self) -> Type {
-        self.current_ty()
-    }
-}
-
-impl ty::DynamicGetType for Map<Value, Value> {
-    fn ty(&self) -> Option<Type> {
-        self.ty()
-    }
-
-    fn deep_ty(&self) -> Type {
-        self.current_ty()
-    }
-}
-
 impl<K, V> serde::Serialize for Map<K, V>
 where
     K: serde::Serialize,
@@ -352,16 +326,6 @@ where
             }
         }
         deserializer.deserialize_map(Visitor::new())
-    }
-}
-
-#[macro_export]
-macro_rules! map {
-    ($($k:expr => $v:expr),+ $(,)*) => {
-        $crate::Map::from_iter([$(($k, $v)),+])
-    };
-    () => {
-        $crate::Map::new()
     }
 }
 

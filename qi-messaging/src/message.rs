@@ -14,7 +14,7 @@
 //! ║ ├───────────────────────────────────────────────────────────────┤ ║
 //! ║ │                          identifier                           │ ║
 //! ║ ├───────────────────────────────────────────────────────────────┤ ║
-//! ║ │                         payload size                          │ ║
+//! ║ │                           body size                           │ ║
 //! ║ ├───────────────────────────────┬───────────────┬───────────────┤ ║
 //! ║ │            version            │     type      │    flags      │ ║
 //! ║ ├───────────────────────────────┴───────────────┴───────────────┤ ║
@@ -24,14 +24,14 @@
 //! ║ ├ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ┤ ║
 //! ║ │                            action                             │ ║
 //! ╠═╧═══════════════════════════════════════════════════════════════╧═╣
-//! ║                             PAYLOAD                               ║
+//! ║                               BODY                                ║
 //! ╚═══════════════════════════════════════════════════════════════════╝
 //! ```
 //!
 //! ### Header fields
 //!  - magic cookie: 4 bytes, 0x42dead42 as big endian
 //!  - id: 4 bytes unsigned integer, little endian
-//!  - size/len: 4 bytes unsigned integer, size of the payload. may be 0, little endian
+//!  - size/len: 4 bytes unsigned integer, size of the body. may be 0, little endian
 //!  - version: 2 bytes unsigned integer, little endian
 //!  - type: 1 byte unsigned integer
 //!  - flags: 1 byte unsigned integer
@@ -44,38 +44,12 @@
 
 pub(crate) mod codec;
 
-use crate::{capabilities, format};
-use bytes::{Buf, BufMut, Bytes};
-use qi_types::Dynamic;
-
-macro_rules! impl_u32_le_field {
-    ($($name:ident),+) => {
-        $(
-            impl $name {
-                const SIZE: usize = std::mem::size_of::<u32>();
-
-                #[allow(unused)]
-                pub const fn new(value: u32) -> Self {
-                    Self(value)
-                }
-
-                fn read<B>(buf: &mut B) -> Self
-                where
-                    B: Buf,
-                {
-                    Self(buf.get_u32_le())
-                }
-
-                fn write<B>(self, buf: &mut B)
-                where
-                    B: BufMut,
-                {
-                    buf.put_u32_le(self.0)
-                }
-            }
-        )+
-    }
-}
+use crate::{capabilities, format, types};
+use bytes::{Buf, BufMut};
+use types::{
+    object::{ActionId, ObjectId, ServiceId},
+    Dynamic,
+};
 
 #[derive(
     Debug,
@@ -98,6 +72,29 @@ pub struct Id(pub(crate) u32);
 impl Default for Id {
     fn default() -> Self {
         Self(1)
+    }
+}
+
+impl Id {
+    const SIZE: usize = std::mem::size_of::<u32>();
+
+    #[allow(unused)]
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    fn read<B>(buf: &mut B) -> Self
+    where
+        B: Buf,
+    {
+        Self(buf.get_u32_le())
+    }
+
+    fn write<B>(self, buf: &mut B)
+    where
+        B: BufMut,
+    {
+        buf.put_u32_le(self.0)
     }
 }
 
@@ -140,23 +137,23 @@ impl Version {
 )]
 #[display(fmt = "({service}, {object}, {action})")]
 pub(crate) struct Subject {
-    service: Service,
-    object: Object,
-    action: Action,
+    service: ServiceId,
+    object: ObjectId,
+    action: ActionId,
 }
 
 impl Subject {
-    const SIZE: usize = Service::SIZE + Object::SIZE + Action::SIZE;
+    const SIZE: usize = std::mem::size_of::<u32>() * 3;
 
-    pub(crate) const fn service(&self) -> Service {
+    pub(crate) const fn service(&self) -> ServiceId {
         self.service
     }
 
-    pub(crate) const fn object(&self) -> Object {
+    pub(crate) const fn object(&self) -> ObjectId {
         self.object
     }
 
-    pub(crate) const fn action(&self) -> Action {
+    pub(crate) const fn action(&self) -> ActionId {
         self.action
     }
 
@@ -164,9 +161,9 @@ impl Subject {
     where
         B: Buf,
     {
-        let service = Service::read(buf);
-        let object = Object::read(buf);
-        let action = Action::read(buf);
+        let service = ServiceId::new(buf.get_u32_le());
+        let object = ObjectId::new(buf.get_u32_le());
+        let action = ActionId::new(buf.get_u32_le());
         Self {
             service,
             object,
@@ -178,28 +175,11 @@ impl Subject {
     where
         B: BufMut,
     {
-        self.service().write(buf);
-        self.object().write(buf);
-        self.action().write(buf);
+        buf.put_u32_le(self.service.into());
+        buf.put_u32_le(self.object.into());
+        buf.put_u32_le(self.action.into());
     }
 }
-
-#[derive(
-    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
-)]
-pub struct Service(u32);
-
-#[derive(
-    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
-)]
-pub struct Object(u32);
-
-#[derive(
-    Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
-)]
-pub struct Action(u32);
-
-impl_u32_le_field!(Id, Service, Object, Action);
 
 #[derive(
     Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::UpperHex,
@@ -236,30 +216,30 @@ impl MagicCookie {
 pub(crate) struct InvalidMagicCookieValueError(u32);
 
 #[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-struct PayloadSize(usize);
+struct BodySize(usize);
 
-impl PayloadSize {
+impl BodySize {
     const SIZE: usize = std::mem::size_of::<u32>();
 
-    fn read<B>(buf: &mut B) -> Result<Self, PayloadCannotBeRepresentedAsUSizeError>
+    fn read<B>(buf: &mut B) -> Result<Self, BodyCannotBeRepresentedAsUSizeError>
     where
         B: Buf,
     {
         let size = buf.get_u32_le();
         if size > (usize::MAX as u32) {
-            return Err(PayloadCannotBeRepresentedAsUSizeError(size));
+            return Err(BodyCannotBeRepresentedAsUSizeError(size));
         }
         let size = size as usize;
         Ok(Self(size))
     }
 
-    fn write<B>(self, buf: &mut B) -> Result<(), PayloadCannotBeRepresentedAsU32Error>
+    fn write<B>(self, buf: &mut B) -> Result<(), BodyCannotBeRepresentedAsU32Error>
     where
         B: BufMut,
     {
         let size = self.0;
         if size > (u32::MAX as usize) {
-            return Err(PayloadCannotBeRepresentedAsU32Error(size));
+            return Err(BodyCannotBeRepresentedAsU32Error(size));
         }
         let size = size as u32;
         buf.put_u32_le(size);
@@ -269,17 +249,17 @@ impl PayloadSize {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error(
-    "message payload size {0} cannot be represented as an usize (the maximum for this system is {})",
+    "message body size {0} cannot be represented as an usize (the maximum for this system is {})",
     usize::MAX
 )]
-pub(crate) struct PayloadCannotBeRepresentedAsUSizeError(u32);
+pub(crate) struct BodyCannotBeRepresentedAsUSizeError(u32);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 #[error(
-    "message payload size {0} cannot be represented as an u32 (the maximum for this system is {})",
+    "message body size {0} cannot be represented as an u32 (the maximum for this system is {})",
     u32::MAX
 )]
-pub(crate) struct PayloadCannotBeRepresentedAsU32Error(usize);
+pub(crate) struct BodyCannotBeRepresentedAsU32Error(usize);
 
 #[derive(
     Clone,
@@ -403,7 +383,7 @@ pub(crate) struct InvalidFlagsValueError(u8);
 struct Header {
     id: Id,
     kind: Kind,
-    payload_size: usize,
+    body_size: usize,
     flags: Flags,
     subject: Subject,
 }
@@ -411,8 +391,8 @@ struct Header {
 impl Header {
     const MAGIC_COOKIE_OFFSET: usize = 0;
     const ID_OFFSET: usize = Self::MAGIC_COOKIE_OFFSET + MagicCookie::SIZE;
-    const PAYLOAD_SIZE_OFFSET: usize = Self::ID_OFFSET + Id::SIZE;
-    const VERSION_OFFSET: usize = Self::PAYLOAD_SIZE_OFFSET + PayloadSize::SIZE;
+    const BODY_SIZE_OFFSET: usize = Self::ID_OFFSET + Id::SIZE;
+    const VERSION_OFFSET: usize = Self::BODY_SIZE_OFFSET + BodySize::SIZE;
     const TYPE_OFFSET: usize = Self::VERSION_OFFSET + Version::SIZE;
     const FLAGS_OFFSET: usize = Self::TYPE_OFFSET + Kind::SIZE;
     const SUBJECT_OFFSET: usize = Self::FLAGS_OFFSET + Flags::SIZE;
@@ -424,7 +404,7 @@ impl Header {
     {
         MagicCookie::read(buf)?;
         let id = Id::read(buf);
-        let payload_size = PayloadSize::read(buf)?.0;
+        let body_size = BodySize::read(buf)?.0;
         let version = Version::read(buf);
         if version != Version::CURRENT {
             return Err(ReadHeaderError::UnsupportedVersion(version.0));
@@ -435,7 +415,7 @@ impl Header {
         Ok(Self {
             id,
             kind: ty,
-            payload_size,
+            body_size,
             flags,
             subject,
         })
@@ -449,7 +429,7 @@ impl Header {
         let mut hbuf_ref = hbuf.as_mut();
         MagicCookie.write(&mut hbuf_ref);
         self.id.write(&mut hbuf_ref);
-        PayloadSize(self.payload_size).write(&mut hbuf_ref)?;
+        BodySize(self.body_size).write(&mut hbuf_ref)?;
         Version::CURRENT.write(&mut hbuf_ref);
         self.kind.write(&mut hbuf_ref);
         self.flags.write(&mut hbuf_ref);
@@ -465,7 +445,7 @@ pub(crate) enum ReadHeaderError {
     MagicCookie(#[from] InvalidMagicCookieValueError),
 
     #[error(transparent)]
-    PayloadSize(#[from] PayloadCannotBeRepresentedAsUSizeError),
+    BodySize(#[from] BodyCannotBeRepresentedAsUSizeError),
 
     #[error("unsupported message version {0}")]
     UnsupportedVersion(u16),
@@ -480,7 +460,7 @@ pub(crate) enum ReadHeaderError {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
 pub(crate) enum WriteHeaderError {
     #[error(transparent)]
-    PayloadSize(#[from] PayloadCannotBeRepresentedAsU32Error),
+    BodySize(#[from] BodyCannotBeRepresentedAsU32Error),
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, derive_more::Display)]
@@ -490,17 +470,17 @@ pub(crate) struct Message {
     kind: Kind,
     subject: Subject,
     flags: Flags,
-    payload: Bytes,
+    content: format::Value,
 }
 
 impl Message {
-    fn new(header: Header, payload: Bytes) -> Self {
+    fn new(header: Header, body: format::Value) -> Self {
         Self {
             id: header.id,
             kind: header.kind,
             subject: header.subject,
             flags: header.flags,
-            payload,
+            content: body,
         }
     }
 
@@ -603,12 +583,12 @@ impl Message {
         Header {
             id: self.id,
             kind: self.kind,
-            payload_size: self.payload.len(),
+            body_size: self.content.to_bytes().len(),
             flags: self.flags,
             subject: self.subject,
         }
         .write(buf)?;
-        buf.put(self.payload);
+        buf.put(self.content.to_bytes());
         Ok(())
     }
 
@@ -624,23 +604,24 @@ impl Message {
         self.subject
     }
 
-    pub(crate) fn into_payload(self) -> Bytes {
-        self.payload
+    pub(crate) fn into_content(self) -> format::Value {
+        self.content
     }
 
     pub(crate) fn size(&self) -> usize {
-        Header::SIZE + self.payload.len()
+        Header::SIZE + self.content.as_bytes().len()
     }
 
-    pub(crate) fn content<T>(&self) -> Result<T, format::Error>
+    pub(crate) fn deserialize_content<T>(&self) -> Result<T, format::Error>
     where
         T: serde::de::DeserializeOwned,
     {
-        format::from_bytes(&self.payload)
+        // TODO: Check DYNAMIC_PAYLOAD flag
+        self.content.to_deserializable()
     }
 
-    pub(crate) fn error_description(&self) -> Result<String, GetErrorDescriptionError> {
-        let dynamic: Dynamic = self.content()?;
+    pub(crate) fn deserialize_error_description(&self) -> Result<String, GetErrorDescriptionError> {
+        let dynamic: Dynamic = self.deserialize_content()?;
         match dynamic {
             Dynamic::String(s) => Ok(s),
             d => Err(GetErrorDescriptionError::DynamicValueIsNotAString(d)),
@@ -686,23 +667,20 @@ impl Builder {
         self
     }
 
-    pub(crate) fn set_payload(mut self, content: Bytes) -> Self {
-        self.0.payload = content;
+    pub(crate) fn set_content(mut self, content: format::Value) -> Self {
+        self.0.content = content;
         self
     }
 
-    /// Sets the serialized representation of the value in the format as the payload of the message.
+    /// Sets the serialized representation of the value in the format as the content of the message.
     /// It checks if the "dynamic payload" flag is set on the message to know how to serialize the value.
     /// If the flag is set after calling this value, the value will not be serialized coherently with the flag.
     pub(crate) fn set_value<T>(mut self, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
-        if self.0.flags.contains(Flags::DYNAMIC_PAYLOAD) {
-            todo!("serialize a value as a dynamic")
-        } else {
-            self.0.payload = format::to_bytes(value)?;
-        };
+        // TODO: if flags has dynamic_payload bit, serialize the value as a dynamic.
+        self.0.content = format::Value::from_serializable(value)?;
         Ok(self)
     }
 
@@ -736,11 +714,11 @@ mod tests {
             Ok(Header {
                 id: Id(990340),
                 kind: Kind::Error,
-                payload_size: 35,
+                body_size: 35,
                 subject: Subject {
-                    service: Service(47),
-                    object: Object(1),
-                    action: Action(178)
+                    service: ServiceId::new(47),
+                    object: ObjectId::new(1),
+                    action: ActionId::new(178)
                 },
                 flags: Flags::empty(),
             })
@@ -753,12 +731,12 @@ mod tests {
             id: Id(329),
             kind: Kind::Capabilities,
             subject: Subject {
-                service: Service(1),
-                object: Object(1),
-                action: Action(104),
+                service: ServiceId::new(1),
+                object: ObjectId::new(1),
+                action: ActionId::new(104),
             },
             flags: Flags::RETURN_TYPE,
-            payload: Bytes::from_static(&[0x17, 0x2b, 0xe6, 0x01, 0x5f]),
+            content: [0x17, 0x2b, 0xe6, 0x01, 0x5f].into(),
         };
         let mut buf = Vec::new();
         msg.write(&mut buf).unwrap();
@@ -772,7 +750,7 @@ mod tests {
                 0x00, 0x00, 0x06, 0x02, // version, type, flags
                 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00,
                 0x00, // subject,
-                0x17, 0x2b, 0xe6, 0x01, 0x5f, // payload
+                0x17, 0x2b, 0xe6, 0x01, 0x5f, // body
             ]
         );
     }

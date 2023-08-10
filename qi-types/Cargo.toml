@@ -1,19 +1,20 @@
 [package]
 name = "qi-types"
 description = "Types of the `qi` type system"
-keywords = ["qi", "type", "typesystem"]
-license-file = "LICENSE.txt"
+
+license-file = "../LICENSE.txt"
 repository = "https://github.com/nyibbang/libqi-rs"
 version = "0.1.0-dev"
 edition = "2021"
 rust-version = "1.63"
 
 [dependencies]
-derive_more = "0.99.17"
-ordered-float = { version = "3.4.0", features = ["serde"] }
-thiserror = "1.0.39"
 bytes = { version = "1.4.0", features = ["serde"] }
+derive_more = "0.99.17"
 serde = { version = "1.0.152", features = ["derive"] }
+thiserror = "1.0.39"
+ordered-float = { version = "3.4.0", features = ["serde"] }
+derive-new = "0.5.9"
 
 [dev-dependencies]
 assert_matches = "1.5.0"

@@ -215,7 +215,7 @@ impl<'b> Read for SliceRead<'b> {
         if size > self.data.len() {
             return Err(Error::Io(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
-                "data length inconsistent with raw/string size",
+                format!("data length inconsistent with raw/string size (expected at least {size}, found only {len}", len = self.data.len()),
             )));
         }
         let (head, tail) = self.data.split_at(size);

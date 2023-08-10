@@ -3,29 +3,31 @@ pub(super) mod capabilities;
 
 use self::authentication::authenticate;
 use crate::{
-    channel::RequestIdSequenceRef,
     client, format, messaging,
-    service::{CallTermination, Reply},
-    Client,
+    service::{CallResult, CallTermination},
+    types::object::ActionId,
+    GetSubject,
 };
 use capabilities::{CapabilitiesMap, CapabilitiesMapExt};
 use futures::{future, FutureExt, TryFutureExt};
 use std::{future::Future, sync::Arc};
 use tokio::sync::{watch, Mutex};
-use tracing::{debug, instrument};
+use tracing::{instrument, trace};
 
 mod subject {
-    use crate::messaging;
-    pub(super) use crate::messaging::subject::{Action, Object, Service};
+    use crate::{
+        messaging,
+        types::object::{ActionId, ObjectId, ServiceId},
+    };
 
-    const CONTROL_SERVICE: Service = Service::new(0);
-    const CONTROL_OBJECT: Object = Object::new(0);
+    const CONTROL_SERVICE: ServiceId = ServiceId::new(0);
+    const CONTROL_OBJECT: ObjectId = ObjectId::new(0);
 
-    pub(crate) fn is_service(service: Service) -> bool {
+    pub(crate) fn is_service(service: ServiceId) -> bool {
         service == CONTROL_SERVICE
     }
 
-    pub(crate) fn is_object(object: Object) -> bool {
+    pub(crate) fn is_object(object: ObjectId) -> bool {
         object == CONTROL_OBJECT
     }
 
@@ -36,7 +38,7 @@ mod subject {
     #[derive(
         Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::Display,
     )]
-    pub(crate) struct Subject(pub(super) Action);
+    pub(crate) struct Subject(pub(super) ActionId);
 
     impl Subject {
         pub(super) fn from_message(subject: messaging::Subject) -> Option<Self> {
@@ -86,28 +88,27 @@ pub(super) struct Control {
 }
 
 impl Control {
-    #[instrument(name = "authenticate", level = "debug", skip_all, ret)]
+    #[instrument(name = "authenticate", level = "trace", skip_all, ret)]
     pub(super) async fn authenticate_to_remote(
         &self,
-        client: &mut Client,
-        id_sequence: &RequestIdSequenceRef,
+        client: &mut client::Client,
     ) -> Result<(), AuthenticateToRemoteError> {
         use crate::service::Service;
         let authenticate = Authenticate::new_outgoing();
         let call = authenticate
             .to_messaging_call()
             .map_err(AuthenticateToRemoteError::SerializeLocalCapabilities)?;
-        debug!("sending authentication request to server");
-        let reply = client.call(id_sequence.pair_with_new_id(call)).await?;
+        trace!("sending authentication request to server");
+        let reply = client.call(call).await?;
         let result_capabilities = reply
             .value()
             .map_err(AuthenticateToRemoteError::DeserializeRemoteCapabilities)?;
-        debug!(capabilities = ?result_capabilities, "received authentication result and capabilities from server");
+        trace!(capabilities = ?result_capabilities, "received authentication result and capabilities from server");
         authentication::verify_result(&result_capabilities)?;
         let capabilities = result_capabilities
             .check_intersect_with_local()
             .map_err(AuthenticateToRemoteError::MissingRequiredCapabilities)?;
-        debug!(
+        trace!(
             ?capabilities,
             "resolved capabilities between local and remote"
         );
@@ -115,12 +116,12 @@ impl Control {
         Ok(())
     }
 
-    #[instrument(level = "debug", name = "authentication", skip_all, ret)]
+    #[instrument(name = "authentication", level = "trace", skip_all, ret)]
     pub(super) async fn remote_authentication(&mut self) -> Result<(), RemoteAuthenticationError> {
         match self
             .remote_authentication_receiver
             .wait_for(|auth| {
-                debug!(result = auth, "received remote authentication result");
+                trace!(result = auth, "received remote authentication result");
                 *auth
             })
             .await
@@ -201,18 +202,15 @@ impl Service {
 }
 
 impl crate::Service<Call, Notification> for Service {
+    type CallReply = CapabilitiesMap;
     type Error = Error;
-    type CallFuture = future::Ready<Result<Reply, CallTermination<Error>>>;
-    type NotifyFuture = future::BoxFuture<'static, Result<(), Error>>;
+    type CallFuture = future::Ready<CallResult<Self::CallReply, Self::Error>>;
+    type NotifyFuture = future::BoxFuture<'static, Result<(), Self::Error>>;
 
     fn call(&mut self, call: Call) -> Self::CallFuture {
         match call {
             Call::Authenticate(Authenticate(parameters)) => {
-                let auth_result = self.authenticate(&parameters);
-                let reply = Reply::with_value(&auth_result).map_err(|err| {
-                    CallTermination::Error(Error::SerializeAuthenticationResult(err))
-                });
-                future::ready(reply)
+                future::ok(self.authenticate(&parameters))
             }
         }
     }
@@ -234,9 +232,9 @@ pub(super) enum Call {
 
 impl Call {
     pub(super) fn from_messaging(call: &messaging::Call) -> Result<Option<Self>, format::Error> {
-        Ok(match Subject::from_message(call.subject) {
+        Ok(match Subject::from_message(*call.subject()) {
             Some(Authenticate::SUBJECT) => {
-                let capabilities = format::from_bytes(&call.payload)?;
+                let capabilities = call.value()?;
                 Some(Self::Authenticate(Authenticate(capabilities)))
             }
             Some(_) | None => None,
@@ -248,17 +246,14 @@ impl Call {
 pub(super) struct Authenticate(CapabilitiesMap);
 
 impl Authenticate {
-    const SUBJECT: Subject = Subject(subject::Action::new(8));
+    const SUBJECT: Subject = Subject(ActionId::new(8));
 
     pub(super) fn new_outgoing() -> Self {
         Self(capabilities::local().clone())
     }
 
     pub(super) fn to_messaging_call(&self) -> Result<messaging::Call, format::Error> {
-        Ok(messaging::Call {
-            subject: Self::SUBJECT.into(),
-            payload: format::to_bytes(&self.0)?,
-        })
+        messaging::Call::new(Self::SUBJECT.into()).with_value(&self.0)
     }
 }
 
@@ -272,11 +267,10 @@ impl Notification {
         notif: messaging::Notification,
     ) -> Result<Self, messaging::Notification> {
         match notif {
-            messaging::Notification::Capabilities(messaging::Capabilities {
-                subject,
-                capabilities,
-            }) if subject == Capabilities::SUBJECT => {
-                Ok(Self::Capabilities(Capabilities(capabilities)))
+            messaging::Notification::Capabilities(capabilities_notif)
+                if capabilities_notif.subject() == &Capabilities::SUBJECT =>
+            {
+                Ok(Self::Capabilities(Capabilities(capabilities_notif.into())))
             }
             _ => Err(notif),
         }
@@ -287,14 +281,11 @@ impl Notification {
 pub(super) struct Capabilities(CapabilitiesMap);
 
 impl Capabilities {
-    const SUBJECT: Subject = Subject(subject::Action::new(0));
+    const SUBJECT: Subject = Subject(ActionId::new(0));
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum Error {
-    #[error("error during serialization of authentication result")]
-    SerializeAuthenticationResult(#[source] format::Error),
-
     #[error(transparent)]
     Capabilities(#[from] UpdateCapabilitiesError),
 }

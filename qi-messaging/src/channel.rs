@@ -5,19 +5,12 @@ use crate::{
         codec::{DecodeError, Decoder, EncodeError, Encoder},
     },
     messaging::{
-        self, CallTermination, CallWithId, NotificationWithId, Reply, RequestId, RequestWithId,
-        Service, WithRequestId,
+        self, CallTermination, CallWithId, NotificationWithId, Reply, RequestWithId, Service,
     },
     server,
 };
 use futures::{SinkExt, StreamExt};
-use std::{
-    fmt::Debug,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
-    },
-};
+use std::fmt::Debug;
 use tokio::{
     io::{split, AsyncRead, AsyncWrite},
     pin, select,
@@ -28,20 +21,20 @@ use tokio_util::{
     codec::{FramedRead, FramedWrite},
     sync::{PollSendError, PollSender},
 };
-use tracing::debug;
+use tracing::trace;
 
 pub(crate) fn open<IO, Svc>(
     io: IO,
     service: Svc,
 ) -> (
     client::Client,
-    RequestIdSequenceRef,
-    impl std::future::Future<Output = Result<(), Error<Svc::Error>>>,
+    impl std::future::Future<Output = Result<(), Error<Svc::CallReply, Svc::Error>>>,
 )
 where
     IO: AsyncWrite + AsyncRead,
     Svc: Service<CallWithId, NotificationWithId>,
     Svc::Error: ToString + std::fmt::Debug + Send + 'static,
+    Svc::CallReply: Into<format::Value> + Send + 'static,
 {
     let (input, output) = split(io);
     let mut stream = FramedRead::new(input, Decoder::new()).fuse();
@@ -53,7 +46,7 @@ where
     let (server_requests_tx, server_requests_rx) = mpsc::channel(DISPATCH_CHANNEL_SIZE);
     let (server_responses_tx, mut server_responses_rx) = mpsc::channel(DISPATCH_CHANNEL_SIZE);
 
-    let (client_request_sender, client) = client::setup(
+    let (client, client_dispatch) = client::setup(
         ReceiverStream::new(client_responses_rx),
         PollSender::new(client_requests_tx),
     );
@@ -64,7 +57,7 @@ where
     );
 
     let dispatch = async move {
-        pin!(client, server);
+        pin!(client_dispatch, server);
         loop {
             select! {
                 Some(message) = stream.next() => {
@@ -79,14 +72,14 @@ where
                             let id = message.id();
                             let send_response = match message.kind() {
                                 message::Kind::Reply => {
-                                    let reply = Reply{ payload: message.into_payload() };
+                                    let reply = Reply::new(message.into_content());
                                     client_responses_tx.send((id, Ok(reply)))
                                 },
                                 message::Kind::Canceled => {
                                     client_responses_tx.send((id, Err(CallTermination::Canceled)))
                                 },
                                 message::Kind::Error => {
-                                    let error_description = message.error_description().map_err(Error::GetErrorDescription)?;
+                                    let error_description = message.deserialize_error_description().map_err(Error::GetErrorDescription)?;
                                     let error = messaging::Error(error_description);
                                     client_responses_tx.send((id, Err(CallTermination::Error(error))))
                                 },
@@ -106,46 +99,25 @@ where
                     let message = response.try_into().map_err(Error::ResponseIntoMessage)?;
                     sink.send(message).await?;
                 }
-                res = &mut client => {
+                res = &mut client_dispatch => {
                     res.map_err(Error::ClientDispatch)?;
-                    debug!("client dispatch has terminated with success");
+                    trace!("client dispatch has terminated with success");
                     break Ok(());
                 }
                 res = &mut server => {
                     res.map_err(Error::Server)?;
-                    debug!("server has terminated with success");
+                    trace!("server has terminated with success");
                     break Ok(());
                 }
             }
         }
     };
 
-    (client_request_sender, RequestIdSequenceRef::new(), dispatch)
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RequestIdSequenceRef {
-    current_id: Arc<AtomicU32>,
-}
-
-impl RequestIdSequenceRef {
-    fn new() -> Self {
-        Self {
-            current_id: Arc::new(AtomicU32::new(1)),
-        }
-    }
-
-    pub(crate) fn pair_with_new_id<T>(&self, request: T) -> WithRequestId<T> {
-        let id = self.current_id.fetch_add(1, Ordering::SeqCst);
-        WithRequestId {
-            id: RequestId::new(id),
-            inner: request,
-        }
-    }
+    (client, dispatch)
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum Error<SvcErr> {
+pub(crate) enum Error<SvcRep, SvcErr> {
     #[error("messaging decoding error")]
     Decode(#[from] DecodeError),
 
@@ -156,12 +128,12 @@ pub(crate) enum Error<SvcErr> {
     ClientDispatch(#[source] PollSendError<RequestWithId>),
 
     #[error("server error")]
-    Server(#[source] PollSendError<server::Response<SvcErr>>),
+    Server(#[source] PollSendError<server::Response<SvcRep, SvcErr>>),
 
     #[error("error converting a message into a request")]
     MessageIntoRequest(#[source] format::Error),
 
-    #[error("error converting an error message payload into an error description")]
+    #[error("error converting an error message content into an error description")]
     GetErrorDescription(#[source] message::GetErrorDescriptionError),
 
     #[error("error converting a client request into a message")]

@@ -35,6 +35,7 @@
     clippy::string_to_string,
     clippy::todo,
     clippy::try_err,
+    clippy::unimplemented,
     clippy::unnecessary_self_imports,
     clippy::unneeded_field_pattern,
     clippy::use_debug
@@ -43,18 +44,7 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-mod capabilities;
-mod channel;
-mod client;
-mod message;
-mod messaging;
-mod server;
-mod service;
-pub mod session;
-
-use qi_format as format;
-use qi_types as types;
-
-pub use service::{CallResult, CallTermination, GetSubject, Service, ToRequestId};
-#[doc(inline)]
-pub use {capabilities::CapabilitiesMap, service::RequestId};
+pub use qi_format as format;
+pub use qi_messaging::{self as messaging, session};
+pub use qi_object::{self as object, Node, ServiceDirectory, ServiceInfo, Uri};
+pub use qi_types as types;

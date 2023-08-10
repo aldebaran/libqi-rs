@@ -6,21 +6,25 @@
 const FALSE_BOOL: u8 = 0;
 const TRUE_BOOL: u8 = 1;
 
+mod value;
+#[doc(inline)]
+pub use value::Value;
+
 mod read;
 
 mod write;
 
 pub mod ser;
 #[doc(inline)]
-pub use ser::{to_byte_vec, to_bytes, to_writer, Serializer};
+pub use ser::{to_value, Serializer};
 
 pub mod de;
 #[doc(inline)]
-pub use de::{from_bytes, from_reader, Deserializer};
+pub use de::{from_value, Deserializer};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error(transparent)]
+    #[error("input/output error")]
     Io(#[from] std::io::Error),
 
     #[error("the value '{0}' is not a `bool` value")]

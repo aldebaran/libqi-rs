@@ -1,15 +1,9 @@
 use crate::{ty, Type, Value};
 use derive_more::{AsRef, From, Index, Into, IntoIterator};
 
-impl ty::StaticGetType for () {
-    fn ty() -> Type {
-        Type::Unit
-    }
-}
-
 /// [`Tuple`] represents a `tuple` value in the `qi` type system.
 #[derive(
-    Default, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Index, IntoIterator, AsRef, Debug,
+    Default, Clone, PartialEq, Eq, PartialOrd, From, Into, Index, IntoIterator, AsRef, Debug,
 )]
 #[into_iterator(owned, ref)]
 pub struct Tuple(Vec<Value>);
@@ -60,19 +54,13 @@ impl std::fmt::Display for Tuple {
 }
 
 impl ty::DynamicGetType for Tuple {
-    fn ty(&self) -> Option<Type> {
+    fn dynamic_type(&self) -> Option<Type> {
         Some(Type::Tuple(ty::TupleType::Tuple(
-            self.0.iter().map(|element| element.ty()).collect(),
-        )))
-    }
-
-    fn deep_ty(&self) -> Type {
-        Type::Tuple(ty::TupleType::Tuple(
             self.0
                 .iter()
-                .map(|element| Some(element.deep_ty()))
+                .map(|element| element.dynamic_type())
                 .collect(),
-        ))
+        )))
     }
 }
 

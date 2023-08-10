@@ -1,20 +1,29 @@
-use crate::messaging::{
-    self, Call, CallTermination, CallWithId, Notification, NotificationWithId, Reply, RequestId,
-    RequestWithId, Service, ToRequestId, WithRequestId,
+use crate::{
+    messaging::{
+        self, Call, CallResult, Cancel, Notification, Reply, RequestId, RequestWithId, Service,
+        Subject, ToRequestId,
+    },
+    GetSubject,
 };
-use futures::{ready, FutureExt, Sink, SinkExt, Stream, StreamExt};
+use futures::{
+    future::{BoxFuture, FusedFuture},
+    ready, FutureExt, Sink, SinkExt, Stream, StreamExt,
+};
 use std::{
     collections::HashMap,
     fmt::Debug,
     future::Future,
+    pin::Pin,
+    sync::{atomic::AtomicU32, Arc},
     task::{Context, Poll},
 };
 use tokio::{
     pin, select,
     sync::{mpsc, oneshot},
+    task,
 };
 use tokio_util::sync::PollSender;
-use tracing::debug;
+use tracing::trace;
 
 pub(crate) fn setup<Si, St>(
     responses_stream: St,
@@ -23,7 +32,7 @@ pub(crate) fn setup<Si, St>(
 where
     Si: Sink<RequestWithId>,
     Si::Error: std::error::Error,
-    St: Stream<Item = (RequestId, Result<Reply, CallTermination<messaging::Error>>)>,
+    St: Stream<Item = (RequestId, CallResult<Reply, messaging::Error>)>,
 {
     const DISPATCH_CHANNEL_SIZE: usize = 1;
     let (dispatch_sender, dispatch_receiver) = mpsc::channel(DISPATCH_CHANNEL_SIZE);
@@ -32,6 +41,7 @@ where
     (
         Client {
             dispatch_request_sender: dispatch_sender,
+            id_factory: IdFactory::new(),
         },
         dispatch,
     )
@@ -40,116 +50,246 @@ where
 #[derive(Debug, Clone)]
 pub(crate) struct Client {
     dispatch_request_sender: PollSender<DispatchRequest>,
+    id_factory: IdFactory,
 }
 
-impl Client {
-    fn take_sender(&mut self) -> PollSender<DispatchRequest> {
-        let clone = self.dispatch_request_sender.clone();
-        std::mem::replace(&mut self.dispatch_request_sender, clone)
-    }
-}
-
-impl Service<CallWithId, NotificationWithId> for Client {
+impl Service<Call, Notification> for Client {
+    type CallReply = Reply;
     type Error = Error;
     type CallFuture = CallFuture;
     type NotifyFuture = NotifyFuture;
 
-    fn call(&mut self, WithRequestId { id, inner: call }: CallWithId) -> CallFuture {
-        CallFuture::Begin {
+    fn call(&mut self, call: Call) -> CallFuture {
+        let mut this = &*self;
+        this.call(call)
+    }
+
+    fn notify(&mut self, notif: Notification) -> NotifyFuture {
+        let mut this = &*self;
+        this.notify(notif)
+    }
+}
+
+impl Service<Call, Notification> for &Client {
+    type CallReply = Reply;
+    type Error = Error;
+    type CallFuture = CallFuture;
+    type NotifyFuture = NotifyFuture;
+
+    fn call(&mut self, call: Call) -> CallFuture {
+        CallFuture::new(
+            self.id_factory.create(),
+            call,
+            self.id_factory.clone(),
+            self.dispatch_request_sender.clone(),
+        )
+    }
+
+    fn notify(&mut self, notif: Notification) -> NotifyFuture {
+        let id = self.id_factory.create();
+        NotifyFuture {
             id,
-            call: Some(call),
-            dispatch_request_sender: self.take_sender(),
+            notification: Some(notif),
+            dispatch_request_sender: self.dispatch_request_sender.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct IdFactory {
+    current_id: Arc<AtomicU32>,
+}
+
+impl IdFactory {
+    fn new() -> Self {
+        Self {
+            current_id: Arc::new(AtomicU32::new(1)),
         }
     }
 
-    fn notify(&mut self, notification: NotificationWithId) -> NotifyFuture {
-        NotifyFuture {
-            id: notification.to_request_id(),
-            notification: Some(notification.into_inner()),
-            dispatch_request_sender: self.take_sender(),
-        }
+    fn create(&self) -> RequestId {
+        let id = self
+            .current_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        RequestId::new(id)
     }
 }
 
 #[derive(Debug)]
 #[must_use = "futures do nothing until polled"]
-pub(crate) enum CallFuture {
-    Begin {
-        id: RequestId,
-        call: Option<Call>,
-        dispatch_request_sender: PollSender<DispatchRequest>,
-    },
-    WaitForResponse {
-        id: RequestId,
-        response_receiver: oneshot::Receiver<Result<Reply, CallTermination<messaging::Error>>>,
-    },
-    Done {
-        id: RequestId,
-    },
+pub(crate) struct CallFuture {
+    request_id: RequestId,
+    subject: Subject,
+    id_factory: IdFactory,
+    dispatch_request_sender: PollSender<DispatchRequest>,
+    running: Option<CallFutureRunning>,
 }
 
-impl ToRequestId for CallFuture {
-    fn to_request_id(&self) -> RequestId {
-        match self {
-            CallFuture::Begin { id, .. }
-            | CallFuture::WaitForResponse { id, .. }
-            | CallFuture::Done { id } => *id,
+impl CallFuture {
+    fn new(
+        request_id: RequestId,
+        call: Call,
+        id_factory: IdFactory,
+        dispatch_request_sender: PollSender<DispatchRequest>,
+    ) -> Self {
+        let subject = *call.subject();
+        let running = CallFutureRunning::SendDispatchRequest(Some(call));
+        Self {
+            request_id,
+            subject,
+            id_factory,
+            dispatch_request_sender,
+            running: Some(running),
+        }
+    }
+
+    pub(crate) fn cancel(&mut self) -> CancelFuture {
+        match self.running.take() {
+            Some(running) => running.cancel(
+                self.subject,
+                self.request_id,
+                &self.id_factory,
+                &self.dispatch_request_sender,
+            ),
+            None => CancelFuture(None),
         }
     }
 }
 
-impl Future for CallFuture {
-    type Output = Result<Reply, CallTermination<Error>>;
+impl ToRequestId for CallFuture {
+    fn to_request_id(&self) -> RequestId {
+        self.request_id
+    }
+}
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+impl Future for CallFuture {
+    type Output = CallResult<Reply, Error>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        loop {
-            match this {
-                Self::Begin {
-                    id,
-                    call,
-                    dispatch_request_sender,
-                } => {
-                    let call = match call.take() {
-                        Some(call) => call,
-                        None => return Poll::Pending,
-                    };
-                    ready!(dispatch_request_sender.poll_reserve(cx))
-                        .map_err(|_err| Error::DispatchTerminated)?;
-                    let (response_sender, response_receiver) = oneshot::channel();
-                    dispatch_request_sender
-                        .send_item(DispatchRequest::Call {
-                            id: *id,
-                            call,
-                            response_sender,
-                        })
-                        .map_err(|_err| Error::DispatchDroppedResponse)?;
-                    *this = Self::WaitForResponse {
-                        id: *id,
-                        response_receiver,
-                    };
-                }
-                Self::WaitForResponse {
-                    id,
-                    response_receiver,
-                } => {
-                    let reply = ready!(response_receiver.poll_unpin(cx))
-                        .map_err(|_err| Error::DispatchDroppedResponse)?
-                        .map_err(|err| err.map_err(Error::Messaging))?;
-                    *this = Self::Done { id: *id };
-                    break Poll::Ready(Ok(reply));
-                }
-                Self::Done { .. } => {
-                    break Poll::Pending;
-                }
+        match &mut this.running {
+            Some(running) => {
+                let result = ready!(running.poll_run(
+                    this.request_id,
+                    &mut this.dispatch_request_sender,
+                    cx
+                ));
+                this.running = None;
+                Poll::Ready(result)
             }
+            None => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for CallFuture {
+    fn drop(&mut self) {
+        let cancel = self.cancel();
+        // Spawn the cancel task if it's not already terminated.
+        if !cancel.is_terminated() {
+            task::spawn(cancel);
         }
     }
 }
 
 impl futures::future::FusedFuture for CallFuture {
     fn is_terminated(&self) -> bool {
-        matches!(self, Self::Done { .. })
+        self.running.is_none()
+    }
+}
+
+#[derive(Debug)]
+enum CallFutureRunning {
+    SendDispatchRequest(Option<Call>),
+    WaitForResponse(oneshot::Receiver<CallResult<Reply, messaging::Error>>),
+}
+
+impl CallFutureRunning {
+    fn poll_run(
+        &mut self,
+        id: RequestId,
+        dispatch_request_sender: &mut PollSender<DispatchRequest>,
+        cx: &mut Context<'_>,
+    ) -> Poll<CallResult<Reply, Error>> {
+        loop {
+            match self {
+                Self::SendDispatchRequest(call) => {
+                    ready!(dispatch_request_sender.poll_reserve(cx))
+                        .map_err(|_err| Error::DispatchTerminated)?;
+                    let (response_sender, response_receiver) = oneshot::channel();
+                    let call = match call.take() {
+                        Some(call) => call,
+                        // Theoretically should not occur. The only possible case that
+                        // it could happen is if `send_item` fails and user polls the
+                        // future once again after the error was returned.
+                        None => break Poll::Pending,
+                    };
+                    dispatch_request_sender
+                        .send_item(DispatchRequest::Call {
+                            id,
+                            call,
+                            response_sender,
+                        })
+                        .map_err(|_err| Error::DispatchDroppedResponse)?;
+                    *self = Self::WaitForResponse(response_receiver);
+                }
+                Self::WaitForResponse(response_receiver) => {
+                    let reply = ready!(response_receiver.poll_unpin(cx))
+                        .map_err(|_err| Error::DispatchDroppedResponse)?
+                        .map_err(|err| err.map_err(Error::Messaging))?;
+                    break Poll::Ready(Ok(reply));
+                }
+            }
+        }
+    }
+
+    fn cancel(
+        self,
+        subject: Subject,
+        call_id: RequestId,
+        id_factory: &IdFactory,
+        dispatch_request_sender: &PollSender<DispatchRequest>,
+    ) -> CancelFuture {
+        match self {
+            // Nothing, no request has been sent yet.
+            Self::SendDispatchRequest(..) => CancelFuture(None),
+            Self::WaitForResponse(..) => {
+                let cancel = Cancel::new(subject, call_id);
+                let id = id_factory.create();
+                let notification = DispatchRequest::Notification {
+                    id,
+                    notif: cancel.into(),
+                };
+                let mut sender = dispatch_request_sender.clone();
+                let send_cancel = async move {
+                    // This is a best effort function, so ignore the result, even if it is in error.
+                    let _result = sender.send(notification).await;
+                }
+                .boxed();
+                CancelFuture(Some(send_cancel))
+            }
+        }
+    }
+}
+
+#[must_use = "futures do nothing until polled"]
+pub struct CancelFuture(Option<BoxFuture<'static, ()>>);
+
+impl Future for CancelFuture {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        if let Some(future) = &mut self.as_mut().0 {
+            ready!(future.poll_unpin(cx));
+            self.0 = None;
+        }
+        Poll::Ready(())
+    }
+}
+
+impl FusedFuture for CancelFuture {
+    fn is_terminated(&self) -> bool {
+        self.0.is_none()
     }
 }
 
@@ -170,7 +310,7 @@ impl ToRequestId for NotifyFuture {
 impl Future for NotifyFuture {
     type Output = Result<(), Error>;
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         let notif = match this.notification.take() {
             Some(notif) => notif,
@@ -205,7 +345,7 @@ async fn dispatch<St, Si>(
 where
     Si: Sink<RequestWithId>,
     Si::Error: std::error::Error,
-    St: Stream<Item = (RequestId, Result<Reply, CallTermination<messaging::Error>>)>,
+    St: Stream<Item = (RequestId, CallResult<Reply, messaging::Error>)>,
 {
     let mut ongoing_call_requests = HashMap::new();
     let requests_sink = requests_sink;
@@ -221,7 +361,7 @@ where
                         call,
                         response_sender,
                     } => {
-                        debug!(%id, "registering a call request waiting for a response from the server");
+                        trace!(%id, "registering a call request waiting for a response from the server");
                         ongoing_call_requests.insert(id, response_sender);
                         (id, call.into())
                     }
@@ -230,15 +370,15 @@ where
                 requests_sink.send(RequestWithId::new(id, request)).await?;
             }
             Some((id, response)) = responses_stream.next() => {
-                debug!(response = ?response, "received a call response from the server");
+                trace!(response = ?response, "received a call response from the server");
                 if let Some(response_sender) = ongoing_call_requests.remove(&id) {
                     if let Err(response) = response_sender.send(response) {
-                        debug!(response = ?response, "the client for a call request response has dropped, discarding response");
+                        trace!(response = ?response, "the client for a call request response has dropped, discarding response");
                     }
                 }
             }
             else => {
-                debug!("client dispatch is finished");
+                trace!("client dispatch is finished");
                 break Ok(());
             }
         }
@@ -253,7 +393,7 @@ pub(crate) enum DispatchRequest {
     Call {
         id: RequestId,
         call: Call,
-        response_sender: oneshot::Sender<Result<Reply, CallTermination<messaging::Error>>>,
+        response_sender: oneshot::Sender<CallResult<Reply, messaging::Error>>,
     },
     Notification {
         id: RequestId,
@@ -265,18 +405,17 @@ pub(crate) enum DispatchRequest {
 mod tests {
     use super::*;
     use crate::{
-        messaging::{Post, PostWithId, Request, Subject, WithRequestId},
+        messaging::{CallTermination, Post, Reply, Request, Subject},
         service,
     };
     use assert_matches::assert_matches;
-    use bytes::Bytes;
     use futures::future::{poll_immediate, BoxFuture};
     use tokio_stream::wrappers::ReceiverStream;
     use tokio_util::sync::PollSendError;
 
     struct TestClient {
         requests_rx: mpsc::Receiver<RequestWithId>,
-        responses_tx: mpsc::Sender<(RequestId, Result<Reply, CallTermination<messaging::Error>>)>,
+        responses_tx: mpsc::Sender<(RequestId, CallResult<Reply, messaging::Error>)>,
         client: Client,
         dispatch: BoxFuture<'static, Result<(), PollSendError<RequestWithId>>>,
     }
@@ -305,46 +444,18 @@ mod tests {
 
         let res = test
             .client
-            .call(CallWithId::new(
-                RequestId(1),
-                Call {
-                    subject: Subject::default(),
-                    payload: Bytes::from_static(&[1, 2, 3]),
-                },
-            ))
+            .call(Call::new(Subject::default()).with_formatted_value([1, 2, 3].into()))
             .await;
         assert_matches!(res, Err(CallTermination::Error(Error::DispatchTerminated)));
-
-        // Dropping the dispatch between the `ready` and the `call` doesn't make the `call` fail
-        // as the `ready` will reserve a slot to send to the dispatch, so the send always succeeds
-        // if `ready` succeeds, even if the dispatch is dropped in between.
-        //
-        // drop(dispatch);
-        //
-        // let call = service.call(Call {
-        //     id: RequestId(1),
-        //     subject: Subject::default(),
-        //     payload: Bytes::from_static(&[1, 2, 3, 4]),
-        // });
-        //
-        // assert_matches!(
-        //     poll_immediate(call).await,
-        //     Some(Err(Error::Dispatch(DispatchError::Terminated)))
-        // );
     }
 
     #[tokio::test]
     async fn test_client_drop_dispatch_task_after_call_causes_canceled_error() {
         let mut test = TestClient::new();
 
-        let call = test.client.call(CallWithId::new(
-            RequestId(1),
-            Call {
-                subject: Subject::default(),
-                payload: Bytes::from_static(&[1, 2, 3, 4]),
-            },
-        ));
-        pin!(call);
+        let mut call = test
+            .client
+            .call(Call::new(Subject::default()).with_formatted_value([1, 2, 3, 4].into()));
 
         assert_matches!(poll_immediate(&mut call).await, None);
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
@@ -362,36 +473,19 @@ mod tests {
     async fn test_client_post() {
         let mut test = TestClient::new();
 
-        let post = test.client.notify(
-            PostWithId::new(
-                RequestId(1),
-                Post {
-                    subject: Subject::default(),
-                    payload: Bytes::from_static(&[1, 2, 3, 4]),
-                },
-            )
-            .into(),
-        );
+        let notification_sent: Notification = Post::new(Subject::default())
+            .with_formatted_value([1, 2, 3, 4].into())
+            .into();
+        let mut notify_future = test.client.notify(notification_sent.clone());
 
-        pin!(post);
-
-        assert_matches!(poll_immediate(&mut post).await, Some(Ok(())));
+        assert_matches!(poll_immediate(&mut notify_future).await, Some(Ok(())));
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
 
         assert_matches!(
             poll_immediate(test.requests_rx.recv()).await,
-            Some(Some(
-                WithRequestId {
-                    id: RequestId(1),
-                    inner: Request::Notification(
-                        Notification::Post(Post {
-                            subject,
-                            payload,
-                        })
-                    )
-                })) => {
-                assert_eq!(subject, Subject::default());
-                assert_eq!(payload, Bytes::from_static(&[1, 2, 3, 4]));
+            Some(Some(request)) => {
+                assert_eq!(request.id(),RequestId(1));
+                assert_eq!(request.into_inner(), Request::Notification(notification_sent));
             }
         );
     }
@@ -400,86 +494,131 @@ mod tests {
     async fn test_client_call() {
         let mut test = TestClient::new();
 
-        let call = test.client.call(CallWithId::new(
-            RequestId(1),
-            Call {
-                subject: Subject::default(),
-                payload: Bytes::from_static(&[1, 2, 3, 4]),
-            },
-        ));
-        pin!(call);
+        let call_sent = Call::new(Subject::default()).with_formatted_value([1, 2, 3, 4].into());
+        let mut call_future = test.client.call(call_sent.clone());
 
-        assert_matches!(poll_immediate(&mut call).await, None);
+        assert_matches!(poll_immediate(&mut call_future).await, None);
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
 
         assert_matches!(
             poll_immediate(test.requests_rx.recv()).await,
-            Some(Some(
-                WithRequestId{
-                    id: RequestId(1),
-                    inner: Request::Call(Call {
-                        subject,
-                        payload,
-                    })
-            })) => {
-                assert_eq!(subject, Subject::default());
-                assert_eq!(payload, Bytes::from_static(&[1, 2, 3, 4]));
+            Some(Some(request)) => {
+                assert_eq!(request.id(),RequestId(1));
+                assert_eq!(request.into_inner(), Request::Call(call_sent));
             }
         );
 
         // The call is still waiting for its response.
-        assert_matches!(poll_immediate(&mut call).await, None);
+        assert_matches!(poll_immediate(&mut call_future).await, None);
 
         test.responses_tx
-            .send((
-                RequestId(1),
-                (Ok(Reply {
-                    payload: Bytes::from_static(&[5, 6, 7, 8]),
-                })),
-            ))
+            .send((RequestId(1), Ok(Reply::new([5, 6, 7, 8].into()))))
             .await
             .unwrap();
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
 
         // The call gets its response.
-        assert_matches!(poll_immediate(&mut call).await, Some(Ok(Reply { payload })) => {
-            assert_eq!(payload, Bytes::from_static(&[5, 6, 7, 8]));
+        assert_matches!(poll_immediate(&mut call_future).await, Some(Ok(reply)) => {
+            assert_eq!(reply, Reply::new([5, 6, 7, 8].into()));
         });
+
+        // Trying to cancel the future does nothing because it was terminated.
+        call_future.cancel().await;
+        assert_matches!(poll_immediate(&mut test.dispatch).await, None);
+        assert_matches!(poll_immediate(test.requests_rx.recv()).await, None);
     }
 
     #[tokio::test]
-    async fn test_client_call_error() {
+    async fn test_client_call_cancel() {
         let mut test = TestClient::new();
 
-        let call = test.client.call(CallWithId::new(
-            RequestId(1),
-            Call {
-                subject: Subject::default(),
-                payload: Bytes::from_static(&[1, 2, 3, 4]),
-            },
-        ));
-        pin!(call);
+        let mut call_future = test
+            .client
+            .call(Call::new(Subject::default()).with_formatted_value([1, 2, 3, 4].into()));
 
-        assert_matches!(poll_immediate(&mut call).await, None);
+        assert_matches!(poll_immediate(&mut call_future).await, None);
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
-
         assert_matches!(
             poll_immediate(test.requests_rx.recv()).await,
-            Some(Some(
-                WithRequestId{
-                    id: RequestId(1),
-                    inner: Request::Call(Call {
-                        subject,
-                        payload,
-                    })
-            })) => {
-                assert_eq!(subject, Subject::default());
-                assert_eq!(payload, Bytes::from_static(&[1, 2, 3, 4]));
+            Some(Some(request)) => {
+                assert_eq!(request.id(), RequestId(1));
+            }
+        );
+
+        // Cancel the call.
+        assert_matches!(poll_immediate(call_future.cancel()).await, Some(()));
+
+        // A cancellation of the call has been requested.
+        assert_matches!(poll_immediate(&mut test.dispatch).await, None);
+        assert_matches!(
+            poll_immediate(test.requests_rx.recv()).await,
+            Some(Some(request)) => {
+                assert_eq!(request.id(), RequestId(2));
+                assert_eq!(
+                    request.into_inner(),
+                    Request::Notification(Cancel::new(Subject::default(), RequestId(1)).into())
+                );
             }
         );
 
         // The call is still waiting for its response.
-        assert_matches!(poll_immediate(&mut call).await, None);
+        assert_matches!(poll_immediate(&mut call_future).await, None);
+    }
+
+    #[tokio::test]
+    async fn test_client_call_cancel_on_future_drop() {
+        let mut test = TestClient::new();
+
+        let mut call_future = test
+            .client
+            .call(Call::new(Subject::default()).with_formatted_value([1, 2, 3, 4].into()));
+
+        assert_matches!(poll_immediate(&mut call_future).await, None);
+        assert_matches!(poll_immediate(&mut test.dispatch).await, None);
+        assert_matches!(
+            poll_immediate(test.requests_rx.recv()).await,
+            Some(Some(request)) => {
+                assert_eq!(request.id(), RequestId(1));
+            }
+        );
+
+        drop(call_future);
+        task::yield_now().await; // Yield to let the spawned cancel task execute.
+
+        // A cancellation of the call has been requested.
+        assert_matches!(poll_immediate(&mut test.dispatch).await, None);
+        assert_matches!(
+            poll_immediate(test.requests_rx.recv()).await,
+            Some(Some(request)) => {
+                assert_eq!(request.id(), RequestId(2));
+                assert_eq!(
+                    request.into_inner(),
+                    Request::Notification(Cancel::new(Subject::default(), RequestId(1)).into())
+                );
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_client_call_error_response() {
+        let mut test = TestClient::new();
+
+        let call_sent = Call::new(Subject::default()).with_formatted_value([1, 2, 3, 4].into());
+        let mut call_future = test.client.call(call_sent.clone());
+
+        assert_matches!(poll_immediate(&mut call_future).await, None);
+        assert_matches!(poll_immediate(&mut test.dispatch).await, None);
+
+        assert_matches!(
+            poll_immediate(test.requests_rx.recv()).await,
+            Some(Some(request)) => {
+                assert_eq!(request.id(), RequestId(1));
+                assert_eq!(request.into_inner(), Request::Call(call_sent));
+            }
+        );
+
+        // The call is still waiting for its response.
+        assert_matches!(poll_immediate(&mut call_future).await, None);
 
         test.responses_tx
             .send((
@@ -494,7 +633,7 @@ mod tests {
 
         // The call gets its response.
         assert_matches!(
-            poll_immediate(&mut call).await,
+            poll_immediate(&mut call_future).await,
             Some(Err(CallTermination::Error(Error::Messaging(service::Error(err))))) => {
                 assert_eq!(err, "some error");
             }
@@ -502,38 +641,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_client_call_canceled() {
+    async fn test_client_call_canceled_response() {
         let mut test = TestClient::new();
 
-        let call = test.client.call(CallWithId::new(
-            RequestId(1),
-            Call {
-                subject: Subject::default(),
-                payload: Bytes::from_static(&[1, 2, 3, 4]),
-            },
-        ));
-        pin!(call);
+        let call_sent = Call::new(Subject::default()).with_formatted_value([1, 2, 3, 4].into());
+        let mut call_future = test.client.call(call_sent.clone());
 
-        assert_matches!(poll_immediate(&mut call).await, None);
+        assert_matches!(poll_immediate(&mut call_future).await, None);
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
 
         assert_matches!(
             poll_immediate(test.requests_rx.recv()).await,
-            Some(Some(
-                WithRequestId{
-                    id: RequestId(1),
-                    inner: Request::Call(Call {
-                        subject,
-                        payload,
-                    })
-            })) => {
-                assert_eq!(subject, Subject::default());
-                assert_eq!(payload, Bytes::from_static(&[1, 2, 3, 4]));
+            Some(Some(request)) => {
+                assert_eq!(request.id(), RequestId(1));
+                assert_eq!(request.into_inner(), Request::Call(call_sent));
             }
         );
 
         // The call is still waiting for its response.
-        assert_matches!(poll_immediate(&mut call).await, None);
+        assert_matches!(poll_immediate(&mut call_future).await, None);
 
         test.responses_tx
             .send((RequestId(1), Err(CallTermination::Canceled)))
@@ -543,7 +669,7 @@ mod tests {
 
         // The call gets its response.
         assert_matches!(
-            poll_immediate(&mut call).await,
+            poll_immediate(&mut call_future).await,
             Some(Err(CallTermination::Canceled))
         );
     }
@@ -552,66 +678,44 @@ mod tests {
     async fn test_client_call_ignores_responses_of_other_id() {
         let mut test = TestClient::new();
 
-        let call = &mut test.client.call(CallWithId::new(
-            RequestId(1),
-            Call {
-                subject: Subject::default(),
-                payload: Bytes::from_static(&[1, 2, 3, 4]),
-            },
-        ));
-        pin!(call);
+        let call_sent = Call::new(Subject::default()).with_formatted_value([1, 2, 3, 4].into());
+        let mut call_future = test.client.call(call_sent.clone());
 
-        assert_matches!(poll_immediate(&mut call).await, None);
+        assert_matches!(poll_immediate(&mut call_future).await, None);
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
 
         assert_matches!(
             poll_immediate(test.requests_rx.recv()).await,
-            Some(Some(
-                WithRequestId{
-                    id: RequestId(1),
-                    inner: Request::Call(Call {
-                        subject,
-                        payload,
-                    })
-            })) => {
-                assert_eq!(subject, Subject::default());
-                assert_eq!(payload, Bytes::from_static(&[1, 2, 3, 4]));
+            Some(Some(request)) => {
+                assert_eq!(request.id(), RequestId(1));
+                assert_eq!(request.into_inner(), Request::Call(call_sent));
             }
         );
 
         // The call is still waiting for its response.
-        assert_matches!(poll_immediate(&mut call).await, None);
+        assert_matches!(poll_immediate(&mut call_future).await, None);
 
         // Send a response of request id = 2.
         test.responses_tx
-            .send((
-                RequestId(2),
-                Ok(Reply {
-                    payload: Bytes::from_static(&[5, 6, 7, 8]),
-                }),
-            ))
+            .send((RequestId(2), Ok(Reply::new([5, 6, 7, 8].into()))))
             .await
             .unwrap();
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
 
         // The call is still waiting for its response.
-        assert_matches!(poll_immediate(&mut call).await, None);
+        assert_matches!(poll_immediate(&mut call_future).await, None);
 
         // Send a response of request id = 1.
+        let reply_sent = Reply::new([9, 10, 11, 12].into());
         test.responses_tx
-            .send((
-                RequestId(1),
-                Ok(Reply {
-                    payload: Bytes::from_static(&[9, 10, 11, 12]),
-                }),
-            ))
+            .send((RequestId(1), Ok(reply_sent.clone())))
             .await
             .unwrap();
         assert_matches!(poll_immediate(&mut test.dispatch).await, None);
 
         // The call gets its response.
-        assert_matches!(poll_immediate(&mut call).await, Some(Ok(Reply { payload })) => {
-            assert_eq!(payload, Bytes::from_static(&[9, 10, 11, 12]));
+        assert_matches!(poll_immediate(&mut call_future).await, Some(Ok(reply)) => {
+            assert_eq!(reply, reply_sent);
         });
     }
 
@@ -622,13 +726,7 @@ mod tests {
         // Drop the sink receiver, this will cause errors from the sender.
         drop(test.requests_rx);
 
-        let call = test.client.call(CallWithId::new(
-            RequestId(1),
-            Call {
-                subject: Subject::default(),
-                payload: Bytes::from_static(&[1, 2, 3, 4]),
-            },
-        ));
+        let call = test.client.call(Call::new(Subject::default()));
 
         // The call cannot finish until dispatch is run.
         assert_matches!(poll_immediate(call).await, None);

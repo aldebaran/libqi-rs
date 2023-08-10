@@ -1,81 +1,78 @@
 #![deny(unsafe_code)]
 #![warn(unused_crate_dependencies)]
 
-use anyhow::{bail, Result};
-use iri_string::types::UriString;
-use qi_messaging::{session, Action, CallResult, Object, Params, Service};
-use std::net::Ipv4Addr;
-use tokio::net::TcpStream;
+use anyhow::Result;
+use clap::Parser;
+use colored::Colorize;
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-struct ServiceInfo {
-    name: String,
-    service_id: u32,
-    machine_id: String,
-    process_id: u32,
-    endpoints: Vec<UriString>,
-    session_id: String,
-    object_uid: Vec<u8>,
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    #[clap(short, long)]
+    uri: qi::Uri,
+
+    #[clap(short, long)]
+    verbose: bool,
+}
+
+async fn print_service(service: &qi::ServiceInfo, details: bool) -> Result<()> {
+    const INDENT: &str = "";
+    println!(
+        "{id:0>3} [{name}]",
+        id = format!("{}", service.service_id).magenta(),
+        name = service.name.red(),
+    );
+    if !details {
+        return Ok(());
+    }
+    println!(
+        "{INDENT:level$}{} {}",
+        "*".green(),
+        "Info".magenta(),
+        level = 2
+    );
+    println!(
+        "{INDENT:level$}{} {}",
+        "machine".bold(),
+        service.machine_id,
+        level = 4
+    );
+    println!(
+        "{INDENT:level$}{} {}",
+        "process".bold(),
+        service.process_id,
+        level = 4
+    );
+    println!("{INDENT:level$}{}", "endpoints".bold(), level = 4);
+    for endpoint in &service.endpoints {
+        println!("{INDENT:level$}- {}", endpoint, level = 6);
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let subscriber = tracing_subscriber::fmt()
-        .compact()
-        .with_max_level(tracing::Level::TRACE)
-        .with_thread_ids(true)
-        .with_target(true)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+    let args = Args::parse();
 
-    let tcp_stream = TcpStream::connect((Ipv4Addr::LOCALHOST, 9559)).await?;
-    let (session, connect) = session::connect(tcp_stream);
+    // Activate traces to the console.
+    if args.verbose {
+        let subscriber = tracing_subscriber::fmt()
+            .compact()
+            .with_max_level(tracing::Level::TRACE)
+            .with_thread_ids(true)
+            .with_target(true)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)?;
+    }
 
-    tokio::spawn(async move {
-        if let Err(err) = connect.await {
-            tracing::error!("connection error: {err}");
-        }
-    });
+    let node = qi::Node::to_namespace(args.uri).await?;
+    let service_directory = node.service_directory();
+    let services = service_directory.services().await?;
 
-    let session = session.await?;
-
-    let my_service_info = session
-        .call(
-            Params::builder()
-                .service(Service::from(1))
-                .object(Object::from(1))
-                .action(Action::from(100))
-                .argument("MyService")
-                .build(),
-        )
-        .await?;
-
-    match my_service_info.await? {
-        CallResult::Ok::<ServiceInfo>(info) => {
-            println!("MyService: {info:?}");
-        }
-        CallResult::Err(error) => bail!(error),
-        CallResult::Canceled => bail!("the call to ServiceDirectory.service has been canceled"),
-    };
-
-    let services = session
-        .call(
-            Params::builder()
-                .service(Service::from(1))
-                .object(Object::from(1))
-                .action(Action::from(101))
-                .argument(())
-                .build(),
-        )
-        .await?;
-    let _services = match services.await? {
-        CallResult::Ok::<Vec<ServiceInfo>>(services) => {
-            println!("services: {services:?}");
-            services
-        }
-        CallResult::Err(error) => bail!(error),
-        CallResult::Canceled => bail!("the call to ServiceDirectory.services has been canceled"),
-    };
+    for service in services {
+        print_service(&service, true).await?;
+    }
 
     Ok(())
 }

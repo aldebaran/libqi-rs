@@ -1,17 +1,19 @@
 [package]
 name = "qi-format"
 description = "The `qi` binary format for values of the `qi` type system"
-license-file = "LICENSE.txt"
+
+license-file = "../LICENSE.txt"
 repository = "https://github.com/nyibbang/libqi-rs"
 version = "0.1.0-dev"
 edition = "2021"
 rust-version = "1.63"
 
 [dependencies]
-bytes = { version = "1.4.0" }
-qi-types = { path = "../qi-types" }
-serde = "1.0.152"
+bytes = { version = "1.4.0", features = ["serde"] }
+serde = { version = "1.0.152", features = ["derive"] }
 thiserror = "1.0.39"
+qi-types = { path = "../qi-types" }
+sealed = "0.5.0"
 
 [dev-dependencies]
 assert_matches = "1.5.0"

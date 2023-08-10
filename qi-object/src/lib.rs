@@ -22,7 +22,6 @@
     clippy::mixed_read_write_in_expression,
     clippy::multiple_inherent_impl,
     clippy::mutex_atomic,
-    clippy::panic,
     clippy::print_stderr,
     clippy::print_stdout,
     clippy::rc_buffer,
@@ -43,3 +42,18 @@
 // Deny warnings in doc test.
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
+
+pub mod node;
+pub mod object;
+pub mod service_directory;
+pub mod signal;
+pub mod transport;
+
+pub use iri_string::types::UriString as Uri;
+pub use messaging::CallResult;
+pub use node::Node;
+pub use object::Object;
+use qi_format as format;
+use qi_messaging as messaging;
+use qi_types as value;
+pub use service_directory::{ServiceDirectory, ServiceInfo};

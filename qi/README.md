@@ -1,4 +1,4 @@
-# qi-nodes
+# qi
 
 ## Minimum Rust Required Version (MSRV)
 

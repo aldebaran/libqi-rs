@@ -5,33 +5,6 @@ use ordered_float::OrderedFloat;
 pub type Float32 = OrderedFloat<f32>;
 pub type Float64 = OrderedFloat<f64>;
 
-macro_rules! impl_ty_traits {
-    ($nt:ident => $vt:ident, $($tail:tt)*) => {
-        impl $crate::ty::StaticGetType for $nt {
-            fn ty() -> Type {
-                Type::$vt
-            }
-        }
-
-        impl_ty_traits!{ $($tail)* }
-    };
-    () => {}
-}
-
-impl_ty_traits! {
-    bool => Bool,
-    i16 => Int16,
-    i32 => Int32,
-    i64 => Int64,
-    i8 => Int8,
-    u16 => UInt16,
-    u32 => UInt32,
-    u64 => UInt64,
-    u8 => UInt8,
-    Float32 => Float32,
-    Float64 => Float64,
-}
-
 // Serialize is derived, but Deserialize is not, because of its behavior for untagged enums:
 //   "Serde will try to match the data against each variant in order and the first one that
 //   deserializes successfully is the one returned."
@@ -175,12 +148,8 @@ impl std::fmt::Display for Number {
 }
 
 impl ty::DynamicGetType for Number {
-    fn ty(&self) -> Option<Type> {
+    fn dynamic_type(&self) -> Option<Type> {
         Some(self.ty())
-    }
-
-    fn deep_ty(&self) -> Type {
-        self.ty()
     }
 }
 

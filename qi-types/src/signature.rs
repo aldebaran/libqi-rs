@@ -19,6 +19,12 @@ impl Signature {
     }
 }
 
+impl From<Type> for Signature {
+    fn from(t: Type) -> Self {
+        Self(Some(t))
+    }
+}
+
 impl std::fmt::Display for Signature {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write_type(self.0.as_ref(), f)
@@ -516,7 +522,7 @@ impl<'de> serde::Deserialize<'de> for Signature {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{list_ty, map_ty, option_ty, struct_ty, tuple_ty, varargs_ty, MetaObject};
+    use crate::{list_ty, map_ty, object, option_ty, struct_ty, tuple_ty, varargs_ty};
 
     #[test]
     fn test_signature_to_from_string() {
@@ -818,7 +824,7 @@ mod tests {
                      <MetaObject,methods,signals,properties,description>";
         let sig: Signature = input.parse().unwrap();
         use ty::StaticGetType;
-        assert_eq!(sig, Signature(Some(MetaObject::ty())));
+        assert_eq!(sig, Signature(Some(object::MetaObject::static_type())));
     }
 
     #[test]

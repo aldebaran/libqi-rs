@@ -1,3 +1,5 @@
+mod impls;
+
 /// The type of a value in the `qi` type system.
 ///
 /// The absence of a type equals to the unit `Dynamic` type, which is the set of all types.
@@ -471,38 +473,19 @@ macro_rules! struct_ty {
 
 /// Trait for types that can be statically reflected on.
 pub trait StaticGetType {
-    fn ty() -> Type;
+    fn static_type() -> Type;
 }
 
 /// Trait for types that can be dynamically reflected on.
 pub trait DynamicGetType {
-    fn ty(&self) -> Option<Type>;
-
-    /// This always returns a value, meaning that this function must always
-    /// go as deep into internal types as necessary to return as much type
-    /// information as possible. More specifically, it must inspect dynamic values.
-    fn deep_ty(&self) -> Type;
+    fn dynamic_type(&self) -> Option<Type>;
 
     fn has_type(&self, t: Option<&Type>) -> bool {
-        match (self.ty(), t) {
+        match (self.dynamic_type(), t) {
             (Some(this), Some(t)) => this.is_subtype_of(t),
             (None, None) => true,
             _ => false,
         }
-    }
-}
-
-/// A statically typed value is also dynamically typed.
-impl<T> DynamicGetType for T
-where
-    T: StaticGetType,
-{
-    fn ty(&self) -> Option<Type> {
-        Some(T::ty())
-    }
-
-    fn deep_ty(&self) -> Type {
-        T::ty()
     }
 }
 

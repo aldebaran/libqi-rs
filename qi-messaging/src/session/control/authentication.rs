@@ -1,6 +1,6 @@
 use super::capabilities::{self, CapabilitiesMap};
+use crate::types::{Dynamic, Number};
 use num_traits::{FromPrimitive, ToPrimitive};
-use qi_types::{Dynamic, Number};
 
 macro_rules! declare_prefixed_key {
     ($name:ident, $suffix:literal) => {

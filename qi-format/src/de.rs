@@ -1,25 +1,12 @@
-use crate::{read, Error, Result};
+use crate::{read, Error, Result, Value};
 use qi_types::Raw;
 use serde::de::IntoDeserializer;
 
-/// # Error
-///
-/// In case of an error, the reader is left in the state it was when the error occurred. This means
-/// that the reader state is unspecified.
-pub fn from_reader<R, T>(reader: R) -> Result<T>
+pub fn from_value<'v, T>(value: &'v Value) -> Result<T>
 where
-    R: std::io::Read,
-    T: serde::de::DeserializeOwned,
+    T: serde::de::Deserialize<'v>,
 {
-    let mut de = Deserializer::from_io_reader(reader);
-    T::deserialize(&mut de)
-}
-
-pub fn from_bytes<'b, T>(bytes: &'b [u8]) -> Result<T>
-where
-    T: serde::de::Deserialize<'b>,
-{
-    let mut de = Deserializer::from_slice(bytes);
+    let mut de = Deserializer::from_slice(value.as_bytes());
     T::deserialize(&mut de)
 }
 

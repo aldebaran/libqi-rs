@@ -1,5 +1,4 @@
 use crate::{format, message};
-use bytes::Bytes;
 pub use message::Id as RequestId;
 use pin_project_lite::pin_project;
 use std::{
@@ -9,8 +8,9 @@ use std::{
 };
 
 pub trait Service<C, N> {
+    type CallReply;
     type Error;
-    type CallFuture: Future<Output = Result<Reply, CallTermination<Self::Error>>>;
+    type CallFuture: Future<Output = CallResult<Self::CallReply, Self::Error>>;
     type NotifyFuture: Future<Output = Result<(), Self::Error>>;
 
     fn call(&mut self, call: C) -> Self::CallFuture;
@@ -30,9 +30,10 @@ pub trait Service<C, N> {
         }
     }
 }
-pub trait ToSubject {
+
+pub trait GetSubject {
     type Subject;
-    fn to_subject(&self) -> Self::Subject;
+    fn subject(&self) -> &Self::Subject;
 }
 
 pub trait ToRequestId {
@@ -45,16 +46,16 @@ pub enum Request<C, N> {
     Notification(N),
 }
 
-impl<C, N, S> ToSubject for Request<C, N>
+impl<C, N, S> GetSubject for Request<C, N>
 where
-    C: ToSubject<Subject = S>,
-    N: ToSubject<Subject = S>,
+    C: GetSubject<Subject = S>,
+    N: GetSubject<Subject = S>,
 {
     type Subject = S;
-    fn to_subject(&self) -> Self::Subject {
+    fn subject(&self) -> &Self::Subject {
         match self {
-            Self::Call(call) => call.to_subject(),
-            Self::Notification(notif) => notif.to_subject(),
+            Self::Call(call) => call.subject(),
+            Self::Notification(notif) => notif.subject(),
         }
     }
 }
@@ -84,88 +85,144 @@ impl<C, N> WithRequestId<Request<C, N>> {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Call<S> {
-    pub(crate) subject: S,
-    pub(crate) payload: Bytes,
+    subject: S,
+    formatted_value: format::Value,
 }
 
+pub(crate) type CallWithId<S> = WithRequestId<Call<S>>;
+
 impl<S> Call<S> {
-    pub fn with_value<T>(subject: S, value: &T) -> Result<Self, format::Error>
+    pub fn new(subject: S) -> Self {
+        Self {
+            subject,
+            formatted_value: format::Value::new(),
+        }
+    }
+
+    pub(crate) fn with_formatted_value(mut self, formatted_value: format::Value) -> Self {
+        self.formatted_value = formatted_value;
+        self
+    }
+
+    pub(crate) fn into_formatted_value(self) -> format::Value {
+        self.formatted_value
+    }
+
+    pub fn with_value<T>(mut self, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
-        Ok(Self {
-            subject,
-            payload: format::to_bytes(value)?,
-        })
+        self.formatted_value = format::Value::from_serializable(value)?;
+        Ok(self)
     }
 
     pub fn value<'de, T>(&'de self) -> Result<T, format::Error>
     where
         T: serde::Deserialize<'de>,
     {
-        format::from_bytes(&self.payload)
+        self.formatted_value.to_deserializable()
     }
 }
 
-impl<S> ToSubject for Call<S>
-where
-    S: Copy,
-{
+impl<S> GetSubject for Call<S> {
     type Subject = S;
 
-    fn to_subject(&self) -> Self::Subject {
-        self.subject
+    fn subject(&self) -> &Self::Subject {
+        &self.subject
     }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Post<S> {
-    pub(crate) subject: S,
-    pub(crate) payload: Bytes,
+    subject: S,
+    formatted_value: format::Value,
 }
 
-impl<S> ToSubject for Post<S>
-where
-    S: Copy,
-{
+impl<S> Post<S> {
+    pub(crate) fn new(subject: S) -> Self {
+        Self {
+            subject,
+            formatted_value: format::Value::new(),
+        }
+    }
+
+    pub(crate) fn with_formatted_value(mut self, formatted_value: format::Value) -> Self {
+        self.formatted_value = formatted_value;
+        self
+    }
+
+    pub(crate) fn into_formatted_value(self) -> format::Value {
+        self.formatted_value
+    }
+}
+
+pub(crate) type PostWithId<S> = WithRequestId<Post<S>>;
+
+impl<S> GetSubject for Post<S> {
     type Subject = S;
 
-    fn to_subject(&self) -> Self::Subject {
-        self.subject
+    fn subject(&self) -> &Self::Subject {
+        &self.subject
     }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Event<S> {
-    pub(crate) subject: S,
-    pub(crate) payload: Bytes,
+    subject: S,
+    formatted_value: format::Value,
 }
 
-impl<S> ToSubject for Event<S>
-where
-    S: Copy,
-{
+impl<S> Event<S> {
+    pub(crate) fn new(subject: S) -> Self {
+        Self {
+            subject,
+            formatted_value: format::Value::new(),
+        }
+    }
+
+    pub(crate) fn with_formatted_value(mut self, formatted_value: format::Value) -> Self {
+        self.formatted_value = formatted_value;
+        self
+    }
+
+    pub(crate) fn into_formatted_value(self) -> format::Value {
+        self.formatted_value
+    }
+}
+
+pub(crate) type EventWithId<S> = WithRequestId<Event<S>>;
+
+impl<S> GetSubject for Event<S> {
     type Subject = S;
 
-    fn to_subject(&self) -> Self::Subject {
-        self.subject
+    fn subject(&self) -> &Self::Subject {
+        &self.subject
     }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Cancel<S> {
-    pub(crate) subject: S,
-    pub(crate) call_id: RequestId,
+    subject: S,
+    call_id: RequestId,
 }
 
-impl<S> ToSubject for Cancel<S>
-where
-    S: Copy,
-{
+impl<S> Cancel<S> {
+    pub(crate) fn new(subject: S, call_id: RequestId) -> Self {
+        Self { subject, call_id }
+    }
+
+    pub(crate) fn call_id(&self) -> RequestId {
+        self.call_id
+    }
+}
+
+pub(crate) type CancelWithId<S> = WithRequestId<Cancel<S>>;
+
+impl<S> GetSubject for Cancel<S> {
     type Subject = S;
 
-    fn to_subject(&self) -> Self::Subject {
-        self.subject
+    fn subject(&self) -> &Self::Subject {
+        &self.subject
     }
 }
 
@@ -183,8 +240,8 @@ where
     derive_more::From,
 )]
 pub struct WithRequestId<T> {
-    pub(crate) id: RequestId,
-    pub(crate) inner: T,
+    id: RequestId,
+    inner: T,
 }
 
 impl<T> WithRequestId<T> {
@@ -207,32 +264,38 @@ impl<T> ToRequestId for WithRequestId<T> {
     }
 }
 
-impl<T> ToSubject for WithRequestId<T>
+impl<T> GetSubject for WithRequestId<T>
 where
-    T: ToSubject,
+    T: GetSubject,
 {
     type Subject = T::Subject;
 
-    fn to_subject(&self) -> Self::Subject {
-        self.inner.to_subject()
+    fn subject(&self) -> &Self::Subject {
+        self.inner.subject()
     }
 }
-
-pub(crate) type CallWithId<S> = WithRequestId<Call<S>>;
-pub(crate) type PostWithId<S> = WithRequestId<Post<S>>;
-pub(crate) type EventWithId<S> = WithRequestId<Event<S>>;
-pub(crate) type CancelWithId<S> = WithRequestId<Cancel<S>>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CallTermination<E> {
     #[error("the call request has been canceled")]
     Canceled,
 
-    #[error("the call request ended with an error: {0}")]
+    #[error(transparent)]
     Error(#[from] E),
 }
 
 impl<E> CallTermination<E> {
+    pub fn is_canceled(&self) -> bool {
+        matches!(self, Self::Canceled)
+    }
+
+    pub fn error(&self) -> Option<&E> {
+        match self {
+            Self::Canceled => None,
+            Self::Error(err) => Some(err),
+        }
+    }
+
     pub fn map_err<F, ToE>(self, f: F) -> CallTermination<ToE>
     where
         F: FnOnce(E) -> ToE,
@@ -244,18 +307,22 @@ impl<E> CallTermination<E> {
     }
 }
 
-#[derive(derive_new::new, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, derive_more::Into)]
 pub struct Reply {
-    pub(crate) payload: Bytes,
+    formatted_value: format::Value,
 }
 
 impl Reply {
+    pub(crate) fn new(formatted_value: format::Value) -> Self {
+        Self { formatted_value }
+    }
+
     pub fn with_value<T>(value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
         Ok(Self {
-            payload: format::to_bytes(value)?,
+            formatted_value: format::Value::from_serializable(value)?,
         })
     }
 
@@ -263,13 +330,11 @@ impl Reply {
     where
         T: serde::Deserialize<'de>,
     {
-        format::from_bytes(&self.payload)
-    }
-
-    pub fn payload(&self) -> &Bytes {
-        &self.payload
+        self.formatted_value.to_deserializable()
     }
 }
+
+pub type CallResult<T, E> = Result<T, CallTermination<E>>;
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, thiserror::Error, derive_more::From,
@@ -299,12 +364,12 @@ pin_project! {
     }
 }
 
-impl<Call, Notif, E> Future for RequestFuture<Call, Notif>
+impl<Call, Notif, T, E> Future for RequestFuture<Call, Notif>
 where
-    Call: Future<Output = Result<Reply, CallTermination<E>>>,
+    Call: Future<Output = CallResult<T, E>>,
     Notif: Future<Output = Result<(), E>>,
 {
-    type Output = Result<Option<Reply>, CallTermination<E>>;
+    type Output = Result<Option<T>, CallTermination<E>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {

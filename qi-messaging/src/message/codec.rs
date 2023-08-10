@@ -1,5 +1,6 @@
 use super::{Header, Message, ReadHeaderError, WriteHeaderError};
-use bytes::{Buf, Bytes, BytesMut};
+use crate::format;
+use bytes::{Buf, BytesMut};
 use tracing::instrument;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
@@ -8,7 +9,7 @@ pub(crate) struct Encoder;
 impl tokio_util::codec::Encoder<Message> for Encoder {
     type Error = EncodeError;
 
-    #[instrument(name = "encode", skip_all, err)]
+    #[instrument(level = "trace", name = "encode", skip_all, err)]
     fn encode(&mut self, msg: Message, dst: &mut bytes::BytesMut) -> Result<(), Self::Error> {
         dst.reserve(msg.size());
         msg.write(dst)?;
@@ -48,20 +49,20 @@ impl tokio_util::codec::Decoder for Decoder {
     type Item = Message;
     type Error = DecodeError;
 
-    #[instrument(name = "decode", skip_all, err, level = "debug")]
+    #[instrument(level = "trace", name = "decode", skip_all, err)]
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let msg = loop {
             match self.state {
                 DecoderState::Header => match decode_header(src)? {
                     None => break None,
-                    Some(header) => self.state = DecoderState::Payload(header),
+                    Some(header) => self.state = DecoderState::Body(header),
                 },
-                DecoderState::Payload(header) => match decode_payload(header.payload_size, src) {
+                DecoderState::Body(header) => match decode_body(header.body_size, src) {
                     None => break None,
-                    Some(payload) => {
+                    Some(body) => {
                         self.state = DecoderState::Header;
                         src.reserve(src.len());
-                        break Some(Message::new(header, payload));
+                        break Some(Message::new(header, body));
                     }
                 },
             }
@@ -82,10 +83,10 @@ pub(crate) enum DecodeError {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 enum DecoderState {
     Header,
-    Payload(Header),
+    Body(Header),
 }
 
-#[instrument(skip_all, level = "debug")]
+#[instrument(level = "trace", skip_all)]
 fn decode_header(src: &mut bytes::BytesMut) -> Result<Option<Header>, DecodeError> {
     if src.len() < Header::SIZE {
         src.reserve(Header::SIZE - src.len());
@@ -97,13 +98,15 @@ fn decode_header(src: &mut bytes::BytesMut) -> Result<Option<Header>, DecodeErro
     Ok(Some(header))
 }
 
-#[instrument(skip_all, level = "debug")]
-fn decode_payload(size: usize, src: &mut BytesMut) -> Option<Bytes> {
+#[instrument(level = "trace", skip_all)]
+fn decode_body(size: usize, src: &mut BytesMut) -> Option<format::Value> {
     if src.len() < size {
         src.reserve(size - src.len());
         return None;
     }
-    Some(src.copy_to_bytes(size))
+    let bytes = src.copy_to_bytes(size);
+    let value = format::Value::from_bytes(bytes);
+    Some(value)
 }
 
 #[cfg(test)]
@@ -119,7 +122,7 @@ mod tests {
             kind: message::Kind::Call,
             subject: message::Subject::default(),
             flags: message::Flags::all(),
-            payload: Bytes::from_static(&[1, 2, 3]),
+            content: [1, 2, 3].into(),
         };
         let mut buf = BytesMut::new();
         let mut encoder = Encoder;
@@ -141,14 +144,14 @@ mod tests {
     }
 
     #[test]
-    fn test_decoder_not_enough_data_for_payload() {
+    fn test_decoder_not_enough_data_for_body() {
         let data = [
             0x42, 0xde, 0xad, 0x42, // cookie
             1, 0, 0, 0, // id
             5, 0, 0, 0, // size
             0, 0, 6, 2, // version, type, flags
             1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, // subject,
-            1, 2, 3, // payload
+            1, 2, 3, // body
         ];
         let mut buf = BytesMut::from_iter(data);
         let mut decoder = Decoder::new();
@@ -176,7 +179,7 @@ mod tests {
             4, 0, 0, 0, // size
             0, 0, 6, 2, // version, type, flags
             1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, // subject,
-            1, 2, 3, 4, // payload
+            1, 2, 3, 4, // body
         ];
         let mut buf = BytesMut::from_iter(data);
         let mut decoder = Decoder::new();
