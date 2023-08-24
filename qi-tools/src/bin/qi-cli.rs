@@ -8,7 +8,8 @@ use colored::Colorize;
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(short, long)]
+    /// URI to the namespace to connect to.
+    #[clap(short, long, default_value = "tcp://localhost:9559")]
     uri: qi::Uri,
 
     #[clap(short, long)]

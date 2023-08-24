@@ -58,7 +58,7 @@ impl std::fmt::Debug for Node {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToNamespaceError {
-    #[error("failed to create a transport from an URI")]
+    #[error("failed to create a transport for this URI")]
     TransportFromUri(#[from] transport::ConnectFromUriError),
 
     #[error(transparent)]
