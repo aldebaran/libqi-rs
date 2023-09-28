@@ -12,7 +12,7 @@ rust-version = "1.63"
 bytes = { version = "1.4.0", features = ["serde"] }
 serde = { version = "1.0.152", features = ["derive"] }
 thiserror = "1.0.39"
-qi-types = { path = "../qi-types" }
+qi-value = { path = "../qi-value" }
 sealed = "0.5.0"
 
 [dev-dependencies]

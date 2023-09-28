@@ -43,18 +43,11 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-mod capabilities;
-mod channel;
-mod client;
-mod message;
-mod messaging;
-mod server;
-mod service;
-pub mod session;
+pub mod capabilities;
+pub mod channel;
+pub mod codec;
+pub mod endpoint;
+pub mod message;
 
 use qi_format as format;
-use qi_types as types;
-
-pub use service::{CallResult, CallTermination, GetSubject, Service, ToRequestId};
-#[doc(inline)]
-pub use {capabilities::CapabilitiesMap, service::RequestId};
+use qi_value as value;

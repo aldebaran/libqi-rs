@@ -233,7 +233,7 @@ impl From<&str> for Value {
 ///
 /// # Example
 /// ```
-/// # use qi_types::Value;
+/// # use qi_value::Value;
 /// let opt = Some(Value::from(String::from("abc")));
 /// assert_eq!(Value::from(opt.clone()),
 ///            Value::Option(Box::new(opt)));

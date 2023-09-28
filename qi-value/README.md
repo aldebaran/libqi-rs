@@ -1,6 +1,6 @@
-# qi-types
+# qi-value
 
-The `qi` type system.
+Values of the `qi` type system.
 
 ## Minimum Rust Required Version (MSRV)
 

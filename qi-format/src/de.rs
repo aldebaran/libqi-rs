@@ -1,5 +1,5 @@
 use crate::{read, Error, Result, Value};
-use qi_types::Raw;
+use qi_value::Raw;
 use serde::de::IntoDeserializer;
 
 pub fn from_value<'v, T>(value: &'v Value) -> Result<T>

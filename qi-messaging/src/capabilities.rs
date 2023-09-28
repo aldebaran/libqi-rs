@@ -1,4 +1,4 @@
-use crate::types::{Dynamic, Map};
+use crate::value::{Dynamic, Map};
 use std::cmp::Ordering;
 
 type MapImpl = Map<String, Dynamic>;

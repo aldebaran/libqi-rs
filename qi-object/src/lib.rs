@@ -55,5 +55,5 @@ pub use node::Node;
 pub use object::Object;
 use qi_format as format;
 use qi_messaging as messaging;
-use qi_types as value;
+use qi_value as value;
 pub use service_directory::{ServiceDirectory, ServiceInfo};

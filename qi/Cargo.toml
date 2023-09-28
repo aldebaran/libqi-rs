@@ -11,7 +11,7 @@ rust-version = "1.63"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-qi-types = { path = "../qi-types" }
+qi-value = { path = "../qi-value" }
 qi-format = { path = "../qi-format" }
 qi-object = { path = "../qi-object" }
 qi-messaging = { path = "../qi-messaging" }

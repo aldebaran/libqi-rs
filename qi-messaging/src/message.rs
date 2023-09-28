@@ -1,57 +1,8 @@
-//! Message types and their common binary representation.
-//!
-//! ## Message Structure
-//!
-//! ```text
-//! ╔═══════════════════════════════════════════════════════════════════╗
-//! ║                              HEADER                               ║
-//! ╠═╤═══════════════╤═══════════════╤═══════════════╤═══════════════╤═╣
-//! ║ │       0       │       1       │       2       │       3       │ ║
-//! ║ ├─┬─┬─┬─┬─┬─┬─┬─┼─┬─┬─┬─┬─┬─┬─┬─┼─┬─┬─┬─┬─┬─┬─┬─┼─┬─┬─┬─┬─┬─┬─┬─┤ ║
-//! ║ │0│1│2│3│4│5│6│7│0│1│2│3│4│5│6│7│0│1│2│3│4│5│6│7│0│1│2│3│4│5│6│7│ ║
-//! ║ ├─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┤ ║
-//! ║ │                         magic cookie                          │ ║
-//! ║ ├───────────────────────────────────────────────────────────────┤ ║
-//! ║ │                          identifier                           │ ║
-//! ║ ├───────────────────────────────────────────────────────────────┤ ║
-//! ║ │                           body size                           │ ║
-//! ║ ├───────────────────────────────┬───────────────┬───────────────┤ ║
-//! ║ │            version            │     type      │    flags      │ ║
-//! ║ ├───────────────────────────────┴───────────────┴───────────────┤ ║
-//! ║ │                            service                            │ ║
-//! ║ ├ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ┤ ║
-//! ║ │                            object                             │ ║
-//! ║ ├ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ┤ ║
-//! ║ │                            action                             │ ║
-//! ╠═╧═══════════════════════════════════════════════════════════════╧═╣
-//! ║                               BODY                                ║
-//! ╚═══════════════════════════════════════════════════════════════════╝
-//! ```
-//!
-//! ### Header fields
-//!  - magic cookie: 4 bytes, 0x42dead42 as big endian
-//!  - id: 4 bytes unsigned integer, little endian
-//!  - size/len: 4 bytes unsigned integer, size of the body. may be 0, little endian
-//!  - version: 2 bytes unsigned integer, little endian
-//!  - type: 1 byte unsigned integer
-//!  - flags: 1 byte unsigned integer
-//!  - subject, 3 x 4 bytes unsigned integer, all little endian
-//!    - service
-//!    - object
-//!    - action
-//!
-//!  The total header size is therefore 28 bytes.
-
-pub(crate) mod codec;
-
-use crate::{capabilities, format, types};
-use bytes::{Buf, BufMut};
-use types::{
-    object::{ActionId, ObjectId, ServiceId},
-    Dynamic,
-};
+use crate::{capabilities::CapabilitiesMap, format, value};
+use value::Dynamic;
 
 #[derive(
+    Default,
     Debug,
     Hash,
     PartialEq,
@@ -69,56 +20,98 @@ use types::{
 #[serde(transparent)]
 pub struct Id(pub(crate) u32);
 
-impl Default for Id {
-    fn default() -> Self {
-        Self(1)
-    }
-}
-
 impl Id {
-    const SIZE: usize = std::mem::size_of::<u32>();
-
-    #[allow(unused)]
     pub const fn new(value: u32) -> Self {
         Self(value)
-    }
-
-    fn read<B>(buf: &mut B) -> Self
-    where
-        B: Buf,
-    {
-        Self(buf.get_u32_le())
-    }
-
-    fn write<B>(self, buf: &mut B)
-    where
-        B: BufMut,
-    {
-        buf.put_u32_le(self.0)
     }
 }
 
 #[derive(
-    Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::Display,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Copy,
+    derive_more::Display,
+    serde::Serialize,
+    serde::Deserialize,
 )]
-struct Version(u16);
+pub struct Version(pub(crate) u16);
 
 impl Version {
-    const SIZE: usize = std::mem::size_of::<u16>();
     const CURRENT: Self = Self(0);
 
-    fn read<B>(buf: &mut B) -> Self
-    where
-        B: Buf,
-    {
-        Self(buf.get_u16_le())
+    pub const fn current() -> Self {
+        Self::CURRENT
     }
+}
 
-    fn write<B>(self, buf: &mut B)
-    where
-        B: BufMut,
-    {
-        buf.put_u16_le(self.0)
+impl Default for Version {
+    fn default() -> Self {
+        Self::CURRENT
+    }
+}
+
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Hash,
+    derive_more::Display,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub enum Type {
+    #[display(fmt = "call")]
+    Call,
+    #[display(fmt = "reply")]
+    Reply,
+    #[display(fmt = "error")]
+    Error,
+    #[display(fmt = "post")]
+    Post,
+    #[display(fmt = "event")]
+    Event,
+    #[display(fmt = "capabilities")]
+    Capabilities,
+    #[display(fmt = "cancel")]
+    Cancel,
+    #[display(fmt = "canceled")]
+    Canceled,
+}
+
+impl Default for Type {
+    fn default() -> Self {
+        Self::Call
+    }
+}
+
+bitflags::bitflags! {
+    #[derive(
+        Default,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        PartialOrd,
+        Ord,
+        Hash,
+        Debug,
+        derive_more::Display,
+        serde::Serialize,
+        serde::Deserialize
+    )]
+    #[display(fmt = "{:b}", "self.bits()")]
+    pub struct Flags: u8 {
+        const DYNAMIC_PAYLOAD = 0b00000001;
+        const RETURN_TYPE = 0b00000010;
     }
 }
 
@@ -134,134 +127,104 @@ impl Version {
     Hash,
     Debug,
     derive_more::Display,
+    serde::Serialize,
+    serde::Deserialize,
 )]
 #[display(fmt = "({service}, {object}, {action})")]
-pub(crate) struct Subject {
-    service: ServiceId,
-    object: ObjectId,
-    action: ActionId,
+pub struct Address {
+    pub(crate) service: Service,
+    pub(crate) object: Object,
+    pub(crate) action: Action,
 }
 
-impl Subject {
-    const SIZE: usize = std::mem::size_of::<u32>() * 3;
-
-    pub(crate) const fn service(&self) -> ServiceId {
+impl Address {
+    pub const fn service(&self) -> Service {
         self.service
     }
 
-    pub(crate) const fn object(&self) -> ObjectId {
+    pub const fn object(&self) -> Object {
         self.object
     }
 
-    pub(crate) const fn action(&self) -> ActionId {
+    pub const fn action(&self) -> Action {
         self.action
     }
+}
 
-    fn read<B>(buf: &mut B) -> Self
-    where
-        B: Buf,
-    {
-        let service = ServiceId::new(buf.get_u32_le());
-        let object = ObjectId::new(buf.get_u32_le());
-        let action = ActionId::new(buf.get_u32_le());
-        Self {
-            service,
-            object,
-            action,
-        }
-    }
+#[derive(
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub struct Service(pub(crate) u32);
 
-    fn write<B>(self, buf: &mut B)
-    where
-        B: BufMut,
-    {
-        buf.put_u32_le(self.service.into());
-        buf.put_u32_le(self.object.into());
-        buf.put_u32_le(self.action.into());
+impl Service {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
     }
 }
 
 #[derive(
-    Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, derive_more::UpperHex,
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+    serde::Serialize,
+    serde::Deserialize,
 )]
-#[upper_hex(fmt = "{:#X}", "Self::VALUE")]
-struct MagicCookie;
+pub struct Object(pub(crate) u32);
 
-impl MagicCookie {
-    const SIZE: usize = std::mem::size_of::<u32>();
-    const VALUE: u32 = 0x42dead42;
-
-    fn read<B>(buf: &mut B) -> Result<Self, InvalidMagicCookieValueError>
-    where
-        B: Buf,
-    {
-        let value = buf.get_u32();
-        if value == Self::VALUE {
-            Ok(MagicCookie)
-        } else {
-            Err(InvalidMagicCookieValueError(value))
-        }
-    }
-
-    fn write<B>(self, buf: &mut B)
-    where
-        B: BufMut,
-    {
-        buf.put_u32(Self::VALUE)
+impl Object {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
     }
 }
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-#[error("invalid message magic cookie value {0:x}")]
-pub(crate) struct InvalidMagicCookieValueError(u32);
-
-#[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-struct BodySize(usize);
-
-impl BodySize {
-    const SIZE: usize = std::mem::size_of::<u32>();
-
-    fn read<B>(buf: &mut B) -> Result<Self, BodyCannotBeRepresentedAsUSizeError>
-    where
-        B: Buf,
-    {
-        let size = buf.get_u32_le();
-        if size > (usize::MAX as u32) {
-            return Err(BodyCannotBeRepresentedAsUSizeError(size));
-        }
-        let size = size as usize;
-        Ok(Self(size))
-    }
-
-    fn write<B>(self, buf: &mut B) -> Result<(), BodyCannotBeRepresentedAsU32Error>
-    where
-        B: BufMut,
-    {
-        let size = self.0;
-        if size > (u32::MAX as usize) {
-            return Err(BodyCannotBeRepresentedAsU32Error(size));
-        }
-        let size = size as u32;
-        buf.put_u32_le(size);
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-#[error(
-    "message body size {0} cannot be represented as an usize (the maximum for this system is {})",
-    usize::MAX
-)]
-pub(crate) struct BodyCannotBeRepresentedAsUSizeError(u32);
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-#[error(
-    "message body size {0} cannot be represented as an u32 (the maximum for this system is {})",
-    u32::MAX
-)]
-pub(crate) struct BodyCannotBeRepresentedAsU32Error(usize);
 
 #[derive(
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub struct Action(pub(crate) u32);
+
+impl Action {
+    pub const fn new(id: u32) -> Self {
+        Self(id)
+    }
+}
+
+#[derive(
+    Default,
     Clone,
     Copy,
     PartialEq,
@@ -271,366 +234,202 @@ pub(crate) struct BodyCannotBeRepresentedAsU32Error(usize);
     Debug,
     Hash,
     derive_more::Display,
-    num_derive::FromPrimitive,
-    num_derive::ToPrimitive,
+    serde::Serialize,
+    serde::Deserialize,
 )]
-#[repr(u8)]
-pub(crate) enum Kind {
-    #[display(fmt = "call")]
-    Call = 1,
-    #[display(fmt = "reply")]
-    Reply = 2,
-    #[display(fmt = "error")]
-    Error = 3,
-    #[display(fmt = "post")]
-    Post = 4,
-    #[display(fmt = "event")]
-    Event = 5,
-    #[display(fmt = "capabilities")]
-    Capabilities = 6,
-    #[display(fmt = "cancel")]
-    Cancel = 7,
-    #[display(fmt = "canceled")]
-    Canceled = 8,
+#[display(fmt = "header(id={id}, {ty}, version={version}, flags={flags}, address={address})")]
+pub struct Header {
+    pub(crate) id: Id,
+    pub(crate) ty: Type,
+    pub(crate) body_size: usize,
+    pub(crate) version: Version,
+    pub(crate) flags: Flags,
+    pub(crate) address: Address,
 }
 
-impl Kind {
-    const SIZE: usize = std::mem::size_of::<u8>();
-
-    fn read<B>(buf: &mut B) -> Result<Self, InvalidKindValueError>
-    where
-        B: Buf,
-    {
-        buf.get_u8().try_into()
-    }
-
-    fn write<B>(self, buf: &mut B)
-    where
-        B: BufMut,
-    {
-        buf.put_u8(self.into())
-    }
-}
-
-impl Default for Kind {
-    fn default() -> Self {
-        Self::Call
-    }
-}
-
-impl From<Kind> for u8 {
-    fn from(kind: Kind) -> u8 {
-        use num_traits::ToPrimitive;
-        kind.to_u8().unwrap()
-    }
-}
-
-impl std::convert::TryFrom<u8> for Kind {
-    type Error = InvalidKindValueError;
-
-    fn try_from(value: u8) -> Result<Self, InvalidKindValueError> {
-        use num_traits::FromPrimitive;
-        Self::from_u8(value).ok_or(InvalidKindValueError(value))
-    }
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, thiserror::Error)]
-#[error("invalid message kind value {0}")]
-pub(crate) struct InvalidKindValueError(u8);
-
-bitflags::bitflags! {
-    #[derive(Default, derive_more::Display)]
-    #[display(fmt = "{:b}", "self.bits()")]
-    pub(crate) struct Flags: u8 {
-        const DYNAMIC_PAYLOAD = 0b00000001;
-        const RETURN_TYPE = 0b00000010;
-    }
-}
-
-impl Flags {
-    const SIZE: usize = std::mem::size_of::<u8>();
-
-    fn read<B>(buf: &mut B) -> Result<Self, InvalidFlagsValueError>
-    where
-        B: Buf,
-    {
-        let byte = buf.get_u8();
-        let flags = Self::try_from(byte)?;
-        Ok(flags)
-    }
-
-    fn write<B>(self, buf: &mut B)
-    where
-        B: BufMut,
-    {
-        buf.put_u8(self.bits())
-    }
-}
-
-impl std::convert::TryFrom<u8> for Flags {
-    type Error = InvalidFlagsValueError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        Self::from_bits(value).ok_or(InvalidFlagsValueError(value))
-    }
-}
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-#[error("invalid message flags value {0}")]
-pub(crate) struct InvalidFlagsValueError(u8);
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-struct Header {
-    id: Id,
-    kind: Kind,
-    body_size: usize,
-    flags: Flags,
-    subject: Subject,
-}
-
-impl Header {
-    const MAGIC_COOKIE_OFFSET: usize = 0;
-    const ID_OFFSET: usize = Self::MAGIC_COOKIE_OFFSET + MagicCookie::SIZE;
-    const BODY_SIZE_OFFSET: usize = Self::ID_OFFSET + Id::SIZE;
-    const VERSION_OFFSET: usize = Self::BODY_SIZE_OFFSET + BodySize::SIZE;
-    const TYPE_OFFSET: usize = Self::VERSION_OFFSET + Version::SIZE;
-    const FLAGS_OFFSET: usize = Self::TYPE_OFFSET + Kind::SIZE;
-    const SUBJECT_OFFSET: usize = Self::FLAGS_OFFSET + Flags::SIZE;
-    const SIZE: usize = Self::SUBJECT_OFFSET + Subject::SIZE;
-
-    fn read<B>(buf: &mut B) -> Result<Self, ReadHeaderError>
-    where
-        B: Buf,
-    {
-        MagicCookie::read(buf)?;
-        let id = Id::read(buf);
-        let body_size = BodySize::read(buf)?.0;
-        let version = Version::read(buf);
-        if version != Version::CURRENT {
-            return Err(ReadHeaderError::UnsupportedVersion(version.0));
-        }
-        let ty = Kind::read(buf)?;
-        let flags = Flags::read(buf)?;
-        let subject = Subject::read(buf);
-        Ok(Self {
-            id,
-            kind: ty,
-            body_size,
-            flags,
-            subject,
-        })
-    }
-
-    fn write<B>(self, buf: &mut B) -> Result<(), WriteHeaderError>
-    where
-        B: BufMut,
-    {
-        let mut hbuf = [0u8; Header::SIZE];
-        let mut hbuf_ref = hbuf.as_mut();
-        MagicCookie.write(&mut hbuf_ref);
-        self.id.write(&mut hbuf_ref);
-        BodySize(self.body_size).write(&mut hbuf_ref)?;
-        Version::CURRENT.write(&mut hbuf_ref);
-        self.kind.write(&mut hbuf_ref);
-        self.flags.write(&mut hbuf_ref);
-        self.subject.write(&mut hbuf_ref);
-        buf.put(hbuf.as_ref());
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub(crate) enum ReadHeaderError {
-    #[error(transparent)]
-    MagicCookie(#[from] InvalidMagicCookieValueError),
-
-    #[error(transparent)]
-    BodySize(#[from] BodyCannotBeRepresentedAsUSizeError),
-
-    #[error("unsupported message version {0}")]
-    UnsupportedVersion(u16),
-
-    #[error(transparent)]
-    Kind(#[from] InvalidKindValueError),
-
-    #[error(transparent)]
-    Flags(#[from] InvalidFlagsValueError),
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, thiserror::Error)]
-pub(crate) enum WriteHeaderError {
-    #[error(transparent)]
-    BodySize(#[from] BodyCannotBeRepresentedAsU32Error),
-}
-
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, derive_more::Display)]
-#[display(fmt = "message(id={id}, {kind}, subject={subject}, flags={flags})")]
-pub(crate) struct Message {
-    id: Id,
-    kind: Kind,
-    subject: Subject,
-    flags: Flags,
-    content: format::Value,
+#[derive(
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Hash,
+    derive_more::Display,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[display(
+    fmt = "message({ty}, id={id}, version={version}, flags={flags}, address={address}, body={body})"
+)]
+pub struct Message {
+    pub(crate) id: Id,
+    pub(crate) ty: Type,
+    pub(crate) version: Version,
+    pub(crate) flags: Flags,
+    pub(crate) address: Address,
+    pub(crate) body: format::Value,
 }
 
 impl Message {
-    fn new(header: Header, body: format::Value) -> Self {
+    pub fn new(header: Header, body: format::Value) -> Self {
         Self {
             id: header.id,
-            kind: header.kind,
-            subject: header.subject,
+            ty: header.ty,
+            version: header.version,
+            address: header.address,
             flags: header.flags,
-            content: body,
+            body,
         }
     }
 
     /// Builds a "call" message.
     ///
-    /// This sets the kind, the id and the subject of the message.
-    pub(crate) fn call(id: Id, subject: Subject) -> Builder {
+    /// This sets the ty, the id and the address of the message.
+    pub fn call(id: Id, address: Address) -> Builder {
         Builder::new()
             .set_id(id)
-            .set_kind(Kind::Call)
-            .set_subject(subject)
+            .set_ty(Type::Call)
+            .set_address(address)
     }
 
     /// Builds a "reply" message.
     ///
-    /// This sets the kind, the id and the subject of the message.
-    pub(crate) fn reply(id: Id, subject: Subject) -> Builder {
+    /// This sets the ty, the id and the address of the message.
+    pub fn reply(id: Id, address: Address) -> Builder {
         Builder::new()
             .set_id(id)
-            .set_kind(Kind::Reply)
-            .set_subject(subject)
+            .set_ty(Type::Reply)
+            .set_address(address)
     }
 
     /// Builds a "error" message.
     ///
-    /// This sets the kind, the id, the subject and the content of the message.
-    pub(crate) fn error(
-        id: Id,
-        subject: Subject,
-        description: &str,
-    ) -> Result<Builder, format::Error> {
+    /// This sets the ty, the id, the address and the body of the message.
+    pub fn error(id: Id, address: Address, description: &str) -> Result<Builder, format::Error> {
         Builder::new()
             .set_id(id)
-            .set_kind(Kind::Error)
-            .set_subject(subject)
+            .set_ty(Type::Error)
+            .set_address(address)
             .set_error_description(description)
     }
 
     /// Builds a "post" message.
     ///
-    /// This sets the kind, the id and the subject of the message.
-    pub(crate) fn post(id: Id, subject: Subject) -> Builder {
+    /// This sets the ty, the id and the address of the message.
+    pub fn post(id: Id, address: Address) -> Builder {
         Builder::new()
             .set_id(id)
-            .set_kind(Kind::Post)
-            .set_subject(subject)
+            .set_ty(Type::Post)
+            .set_address(address)
     }
 
     /// Builds a "event" message.
     ///
-    /// This sets the kind, the id and the subject of the message.
-    pub(crate) fn event(id: Id, subject: Subject) -> Builder {
+    /// This sets the ty, the id and the address of the message.
+    pub fn event(id: Id, address: Address) -> Builder {
         Builder::new()
             .set_id(id)
-            .set_kind(Kind::Event)
-            .set_subject(subject)
+            .set_ty(Type::Event)
+            .set_address(address)
     }
 
     /// Builds a "capabilities" message.
     ///
-    /// This sets the kind, the id, the subject and the content of the message.
-    pub(crate) fn capabilities(
+    /// This sets the ty, the id, the address and the body of the message.
+    pub fn capabilities(
         id: Id,
-        subject: Subject,
-        map: &capabilities::CapabilitiesMap,
+        address: Address,
+        map: &CapabilitiesMap,
     ) -> Result<Builder, format::Error> {
         Builder::new()
             .set_id(id)
-            .set_kind(Kind::Capabilities)
-            .set_subject(subject)
+            .set_ty(Type::Capabilities)
+            .set_address(address)
             .set_value(&map)
     }
 
     /// Builds a "cancel" message.
     ///
-    /// This sets the kind, the id, the subject and the content of the message.
-    pub(crate) fn cancel(id: Id, subject: Subject, call_id: Id) -> Builder {
+    /// This sets the ty, the id, the address and the body of the message.
+    pub fn cancel(id: Id, address: Address, call_id: Id) -> Builder {
         Builder::new()
             .set_id(id)
-            .set_kind(Kind::Cancel)
-            .set_subject(subject)
+            .set_ty(Type::Cancel)
+            .set_address(address)
             .set_value(&call_id)
             .expect("failed to serialize a message ID in the format")
     }
 
     /// Builds a "canceled" message.
     ///
-    /// This sets the kind, the id and the subject of the message.
-    pub(crate) fn canceled(id: Id, subject: Subject) -> Builder {
+    /// This sets the ty, the id and the address of the message.
+    pub fn canceled(id: Id, address: Address) -> Builder {
         Builder::new()
             .set_id(id)
-            .set_subject(subject)
-            .set_kind(Kind::Canceled)
+            .set_address(address)
+            .set_ty(Type::Canceled)
     }
 
-    fn write<B>(self, buf: &mut B) -> Result<(), WriteHeaderError>
-    where
-        B: BufMut,
-    {
-        Header {
-            id: self.id,
-            kind: self.kind,
-            body_size: self.content.to_bytes().len(),
-            flags: self.flags,
-            subject: self.subject,
-        }
-        .write(buf)?;
-        buf.put(self.content.to_bytes());
-        Ok(())
-    }
-
-    pub(crate) fn id(&self) -> Id {
+    pub fn id(&self) -> Id {
         self.id
     }
 
-    pub(crate) fn kind(&self) -> Kind {
-        self.kind
+    pub fn ty(&self) -> Type {
+        self.ty
     }
 
-    pub(crate) fn subject(&self) -> Subject {
-        self.subject
+    pub fn flags(&self) -> Flags {
+        self.flags
     }
 
-    pub(crate) fn into_content(self) -> format::Value {
-        self.content
+    pub fn body_size(&self) -> usize {
+        self.body.bytes_len()
     }
 
-    pub(crate) fn size(&self) -> usize {
-        Header::SIZE + self.content.as_bytes().len()
+    pub fn address(&self) -> Address {
+        self.address
     }
 
-    pub(crate) fn deserialize_content<T>(&self) -> Result<T, format::Error>
+    pub fn header(&self) -> Header {
+        Header {
+            id: self.id,
+            ty: self.ty,
+            version: self.version,
+            body_size: self.body_size(),
+            flags: self.flags,
+            address: self.address,
+        }
+    }
+
+    pub fn body(&self) -> format::Value {
+        self.body.clone()
+    }
+
+    pub fn deserialize_body<T>(&self) -> Result<T, format::Error>
     where
         T: serde::de::DeserializeOwned,
     {
         // TODO: Check DYNAMIC_PAYLOAD flag
-        self.content.to_deserializable()
+        self.body.to_deserializable()
     }
 
-    pub(crate) fn deserialize_error_description(&self) -> Result<String, GetErrorDescriptionError> {
-        let dynamic: Dynamic = self.deserialize_content()?;
+    pub fn deserialize_error_description(
+        &self,
+    ) -> Result<String, DeserializeErrorDescriptionError> {
+        let dynamic: Dynamic = self.deserialize_body()?;
         match dynamic {
             Dynamic::String(s) => Ok(s),
-            d => Err(GetErrorDescriptionError::DynamicValueIsNotAString(d)),
+            d => Err(DeserializeErrorDescriptionError::DynamicValueIsNotAString(
+                d,
+            )),
         }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum GetErrorDescriptionError {
+pub enum DeserializeErrorDescriptionError {
     #[error("dynamic value {0} of error description is not a string")]
     DynamicValueIsNotAString(Dynamic),
 
@@ -639,7 +438,7 @@ pub(crate) enum GetErrorDescriptionError {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub(crate) struct Builder(Message);
+pub struct Builder(Message);
 
 impl Default for Builder {
     fn default() -> Self {
@@ -657,164 +456,235 @@ impl Builder {
         self
     }
 
-    fn set_kind(mut self, value: Kind) -> Self {
-        self.0.kind = value;
+    fn set_ty(mut self, value: Type) -> Self {
+        self.0.ty = value;
         self
     }
 
-    fn set_subject(mut self, value: Subject) -> Self {
-        self.0.subject = value;
+    fn set_address(mut self, value: Address) -> Self {
+        self.0.address = value;
         self
     }
 
-    pub(crate) fn set_content(mut self, content: format::Value) -> Self {
-        self.0.content = content;
+    pub fn set_body(mut self, body: format::Value) -> Self {
+        self.0.body = body;
         self
     }
 
-    /// Sets the serialized representation of the value in the format as the content of the message.
+    /// Sets the serialized representation of the value in the format as the body of the message.
     /// It checks if the "dynamic payload" flag is set on the message to know how to serialize the value.
     /// If the flag is set after calling this value, the value will not be serialized coherently with the flag.
-    pub(crate) fn set_value<T>(mut self, value: &T) -> Result<Self, format::Error>
+    pub fn set_value<T>(mut self, value: &T) -> Result<Self, format::Error>
     where
         T: serde::Serialize,
     {
         // TODO: if flags has dynamic_payload bit, serialize the value as a dynamic.
-        self.0.content = format::Value::from_serializable(value)?;
+        self.0.body = format::Value::from_serializable(value)?;
         Ok(self)
     }
 
-    pub(crate) fn set_error_description(self, description: &str) -> Result<Self, format::Error> {
+    pub fn set_error_description(self, description: &str) -> Result<Self, format::Error> {
         self.set_value(&Dynamic::from(description))
     }
 
-    pub(crate) fn build(self) -> Message {
+    pub fn build(self) -> Message {
         self.0
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
+// #[derive(
+//     Default,
+//     Clone,
+//     PartialEq,
+//     Eq,
+//     PartialOrd,
+//     Ord,
+//     Hash,
+//     Debug,
+//     serde::Serialize,
+//     serde::Deserialize,
+// )]
+// pub struct Call {
+//     pub(crate) id: Id,
+//     pub(crate) address: Address,
+//     pub(crate) value: format::Value,
+// }
 
-    #[test]
-    fn test_header_size() {
-        assert_eq!(Header::SIZE, 28);
-    }
+// impl From<Call> for Message {
+//     fn from(call: Call) -> Self {
+//         Message::call(call.id, call.address)
+//             .set_body(call.value)
+//             .build()
+//     }
+// }
 
-    #[test]
-    fn test_header_read() {
-        let mut input: &[u8] = &[
-            0x42, 0xde, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
-        ];
-        assert_eq!(
-            Header::read(&mut input),
-            Ok(Header {
-                id: Id(990340),
-                kind: Kind::Error,
-                body_size: 35,
-                subject: Subject {
-                    service: ServiceId::new(47),
-                    object: ObjectId::new(1),
-                    action: ActionId::new(178)
-                },
-                flags: Flags::empty(),
-            })
-        );
-    }
+// #[derive(
+//     Default,
+//     Clone,
+//     PartialEq,
+//     Eq,
+//     PartialOrd,
+//     Ord,
+//     Hash,
+//     Debug,
+//     serde::Serialize,
+//     serde::Deserialize,
+// )]
+// pub struct Post {
+//     pub(crate) id: Id,
+//     pub(crate) address: Address,
+//     pub(crate) value: format::Value,
+// }
 
-    #[test]
-    fn test_message_write() {
-        let msg = Message {
-            id: Id(329),
-            kind: Kind::Capabilities,
-            subject: Subject {
-                service: ServiceId::new(1),
-                object: ObjectId::new(1),
-                action: ActionId::new(104),
-            },
-            flags: Flags::RETURN_TYPE,
-            content: [0x17, 0x2b, 0xe6, 0x01, 0x5f].into(),
-        };
-        let mut buf = Vec::new();
-        msg.write(&mut buf).unwrap();
+// impl From<Post> for Message {
+//     fn from(post: Post) -> Self {
+//         Message::post(post.id, post.address)
+//             .set_body(post.value)
+//             .build()
+//     }
+// }
 
-        assert_eq!(
-            buf,
-            [
-                0x42, 0xde, 0xad, 0x42, // cookie
-                0x49, 0x01, 0x00, 0x00, // id
-                0x05, 0x00, 0x00, 0x00, // size
-                0x00, 0x00, 0x06, 0x02, // version, type, flags
-                0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00,
-                0x00, // subject,
-                0x17, 0x2b, 0xe6, 0x01, 0x5f, // body
-            ]
-        );
-    }
+// #[derive(
+//     Default,
+//     Clone,
+//     PartialEq,
+//     Eq,
+//     PartialOrd,
+//     Ord,
+//     Hash,
+//     Debug,
+//     serde::Serialize,
+//     serde::Deserialize,
+// )]
+// pub struct Event {
+//     pub(crate) id: Id,
+//     pub(crate) address: Address,
+//     pub(crate) value: format::Value,
+// }
 
-    #[test]
-    fn test_header_read_invalid_magic_cookie_value() {
-        let mut input: &[u8] = &[
-            0x42, 0xdf, 0xad, 0x42, 0x84, 0x1c, 0x0f, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x00,
-            0x03, 0x00, 0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00,
-            0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72,
-            0x6f, 0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f,
-            0x63, 0x61, 0x6c, 0x69, 0x7a, 0x65, 0x64,
-        ];
-        let header = Header::read(&mut input);
-        assert_eq!(
-            header,
-            Err(ReadHeaderError::MagicCookie(InvalidMagicCookieValueError(
-                0x42dfad42
-            )))
-        );
-    }
+// impl From<Event> for Message {
+//     fn from(event: Event) -> Self {
+//         Message::event(event.id, event.address)
+//             .set_body(event.value)
+//             .build()
+//     }
+// }
 
-    #[test]
-    fn test_header_read_invalid_type_value() {
-        let mut input: &[u8] = &[
-            0x42, 0xde, 0xad, 0x42, // cookie,
-            0x84, 0x1c, 0x0f, 0x00, // id
-            0x23, 0x00, 0x00, 0x00, // size
-            0x00, 0x00, 0xaa, 0x00, // version, type, flags
-            0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00, // subject
-        ];
-        let header = Header::read(&mut input);
-        assert_eq!(
-            header,
-            Err(ReadHeaderError::Kind(InvalidKindValueError(0xaa)))
-        );
-    }
+// #[derive(
+//     Default,
+//     Clone,
+//     PartialEq,
+//     Eq,
+//     PartialOrd,
+//     Ord,
+//     Hash,
+//     Debug,
+//     serde::Serialize,
+//     serde::Deserialize,
+// )]
+// pub struct Cancel {
+//     pub(crate) id: Id,
+//     pub(crate) address: Address,
+//     pub(crate) call_id: Id,
+// }
 
-    #[test]
-    fn test_header_read_invalid_flags_value() {
-        let mut input: &[u8] = &[
-            0x42, 0xde, 0xad, 0x42, // cookie,
-            0x84, 0x1c, 0x0f, 0x00, // id
-            0x23, 0x00, 0x00, 0x00, // size
-            0x00, 0x00, 0x03, 0x13, // version, type, flags
-            0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00, // subject
-        ];
-        let header = Header::read(&mut input);
-        assert_eq!(
-            header,
-            Err(ReadHeaderError::Flags(InvalidFlagsValueError(0x13)))
-        );
-    }
+// impl From<Cancel> for Message {
+//     fn from(cancel: Cancel) -> Self {
+//         Message::cancel(cancel.id, cancel.address, cancel.call_id).build()
+//     }
+// }
 
-    #[test]
-    fn test_header_read_unsupported_version() {
-        let mut input: &[u8] = &[
-            0x42, 0xde, 0xad, 0x42, // cookie,
-            0x84, 0x1c, 0x0f, 0x00, // id
-            0x23, 0x00, 0x00, 0x00, // size
-            0x12, 0x34, 0x03, 0x00, // version, type, flags
-            0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00, // subject
-        ];
-        let header = Header::read(&mut input);
-        assert_eq!(header, Err(ReadHeaderError::UnsupportedVersion(0x3412)));
-    }
-}
+// #[derive(
+//     Default, Clone, PartialEq, Eq, PartialOrd, Debug, serde::Serialize, serde::Deserialize,
+// )]
+// pub struct Capabilities {
+//     pub(crate) id: Id,
+//     pub(crate) address: Address,
+//     pub(crate) capabilities: CapabilitiesMap,
+// }
+
+// impl TryFrom<Capabilities> for Message {
+//     type Error = format::Error;
+//     fn try_from(capabilities: Capabilities) -> Result<Self, Self::Error> {
+//         Ok(Message::capabilities(
+//             capabilities.id,
+//             capabilities.address,
+//             &capabilities.capabilities,
+//         )?
+//         .build())
+//     }
+// }
+
+// #[derive(
+//     Default,
+//     Clone,
+//     PartialEq,
+//     Eq,
+//     PartialOrd,
+//     Ord,
+//     Hash,
+//     Debug,
+//     serde::Serialize,
+//     serde::Deserialize,
+// )]
+// pub struct Reply {
+//     pub(crate) id: Id,
+//     pub(crate) address: Address,
+//     pub(crate) value: format::Value,
+// }
+
+// impl From<Reply> for Message {
+//     fn from(reply: Reply) -> Self {
+//         Message::reply(reply.id, reply.address)
+//             .set_body(reply.value)
+//             .build()
+//     }
+// }
+
+// #[derive(
+//     Default,
+//     Clone,
+//     PartialEq,
+//     Eq,
+//     PartialOrd,
+//     Ord,
+//     Hash,
+//     Debug,
+//     serde::Serialize,
+//     serde::Deserialize,
+// )]
+// pub struct Error {
+//     pub(crate) id: Id,
+//     pub(crate) address: Address,
+//     pub(crate) description: String,
+// }
+
+// impl TryFrom<Error> for Message {
+//     type Error = format::Error;
+//     fn try_from(error: Error) -> Result<Self, Self::Error> {
+//         Ok(Message::error(error.id, error.address, &error.description)?.build())
+//     }
+// }
+
+// #[derive(
+//     Default,
+//     Clone,
+//     PartialEq,
+//     Eq,
+//     PartialOrd,
+//     Ord,
+//     Hash,
+//     Debug,
+//     serde::Serialize,
+//     serde::Deserialize,
+// )]
+// pub struct Canceled {
+//     pub(crate) id: Id,
+//     pub(crate) address: Address,
+// }
+
+// impl From<Canceled> for Message {
+//     fn from(canceled: Canceled) -> Self {
+//         Message::canceled(canceled.id, canceled.address).build()
+//     }
+// }

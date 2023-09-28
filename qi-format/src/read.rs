@@ -1,5 +1,5 @@
 use crate::{Error, Result};
-use qi_types::{DisplayBytes, Raw};
+use qi_value::{DisplayBytes, Raw};
 use std::string::ToString;
 
 mod private {

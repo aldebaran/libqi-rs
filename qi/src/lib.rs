@@ -47,4 +47,4 @@
 pub use qi_format as format;
 pub use qi_messaging::{self as messaging, session};
 pub use qi_object::{self as object, Node, ServiceDirectory, ServiceInfo, Uri};
-pub use qi_types as types;
+pub use qi_value as value;

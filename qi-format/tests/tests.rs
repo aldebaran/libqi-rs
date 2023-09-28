@@ -1,6 +1,6 @@
 use pretty_assertions::assert_eq;
 use qi_format::{from_value, to_value};
-use qi_types::{
+use qi_value::{
     list, list_ty, map_ty,
     object::{
         ActionId, MetaMethod, MetaObject, MetaProperty, MetaSignal, Object, ObjectId, ObjectUid,
@@ -197,7 +197,7 @@ fn test_object_to_from_value() {
 
     let object: Object = from_value(&value_in).unwrap();
 
-    use qi_types::ty::StaticGetType;
+    use qi_value::ty::StaticGetType;
 
     assert_eq!(
         object,

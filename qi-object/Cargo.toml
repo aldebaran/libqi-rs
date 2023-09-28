@@ -17,7 +17,7 @@ futures = "0.3.27"
 iri-string = { version = "0.5.6", features = ["serde-std"] }
 pin-project-lite = "0.2.9"
 qi-messaging = { path = "../qi-messaging" }
-qi-types = { path = "../qi-types" }
+qi-value = { path = "../qi-value" }
 qi-format = { path = "../qi-format" }
 sealed = "0.5.0"
 serde = { version = "1.0.152", features = ["derive"] }
