@@ -1,0 +1,5 @@
+error: typed(transparent) requires struct to have at most one field
+ --> tests/typed/fail_struct_transparent_more_than_one_field.rs:3:8
+  |
+3 | struct S {
+  |        ^

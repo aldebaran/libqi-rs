@@ -22,6 +22,9 @@ pub mod de;
 #[doc(inline)]
 pub use de::{from_value, Deserializer};
 
+#[cfg(test)]
+mod tests;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("input/output error")]
@@ -42,8 +45,8 @@ pub enum Error {
     #[error("expected {0} elements, got one more")]
     UnexpectedElement(usize),
 
-    #[error("string data \"{0}\" is not valid UTF-8")]
-    InvalidStringUtf8(String, #[source] std::str::Utf8Error),
+    #[error("string data is not valid UTF-8")]
+    InvalidStringUtf8(#[from] std::str::Utf8Error),
 
     #[error("{0}")]
     Custom(std::string::String),

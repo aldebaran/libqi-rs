@@ -39,15 +39,14 @@
     clippy::unneeded_field_pattern,
     clippy::use_debug
 )]
-#![doc(test(attr(deny(warnings))))]
-#![doc = include_str!("../README.md")]
 
-mod anyvalue;
-pub mod dynamic;
-pub mod map;
-mod number;
-pub mod object;
+mod signature;
+pub mod ty;
+mod typed;
 
-#[doc(inline)]
-pub use crate::{anyvalue::AnyValue, dynamic::Dynamic, map::Map, number::Number, object::Object};
-pub use bytes::Bytes;
+pub use signature::Signature;
+pub use ty::{
+    list, map, option, struct_ty, tuple, tuple_struct, unit_tuple, varargs, StructAnnotations,
+    StructField, Tuple, Type,
+};
+pub use typed::Typed;

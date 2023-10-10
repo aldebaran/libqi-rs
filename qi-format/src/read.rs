@@ -1,6 +1,6 @@
+use bytes::Bytes;
+
 use crate::{Error, Result};
-use qi_value::{DisplayBytes, Raw};
-use std::string::ToString;
 
 mod private {
     pub trait Sealed {}
@@ -143,7 +143,7 @@ impl<R> Read for IoRead<R>
 where
     R: std::io::Read,
 {
-    type Raw = Raw;
+    type Raw = Bytes;
     type Str = String;
 
     fn read_byte(&mut self) -> Result<u8> {
@@ -162,15 +162,13 @@ where
         let size = self.read_size()?;
         let mut buf = vec![0; size];
         self.reader.read_exact(&mut buf)?;
-        Ok(Raw::from(buf))
+        Ok(Bytes::from(buf))
     }
 
     // equivalence: string -> raw
     fn read_str(&mut self) -> Result<Self::Str> {
         let raw = self.read_raw()?;
-        let str = String::from_utf8(raw.into()).map_err(|err| {
-            Error::InvalidStringUtf8(DisplayBytes(err.as_bytes()).to_string(), err.utf8_error())
-        })?;
+        let str = String::from_utf8(raw.into()).map_err(|err| err.utf8_error())?;
         Ok(str)
     }
 }
@@ -226,8 +224,7 @@ impl<'b> Read for SliceRead<'b> {
     // equivalence: string -> raw
     fn read_str(&mut self) -> Result<Self::Str> {
         let raw = self.read_raw()?;
-        let str = std::str::from_utf8(raw)
-            .map_err(|err| Error::InvalidStringUtf8(DisplayBytes(raw).to_string(), err))?;
+        let str = std::str::from_utf8(raw)?;
         Ok(str)
     }
 }
@@ -262,7 +259,7 @@ mod tests {
             ][..],
         );
         assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, "abc"));
-        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_, _)));
+        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_)));
         assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, String::new()));
         assert_matches!(read.read_str(), Err(Error::Io(_)));
     }
@@ -270,8 +267,8 @@ mod tests {
     #[test]
     fn test_io_read_raw() {
         let mut read = IoRead::new(&[3, 0, 0, 0, 97, 98, 99, 2, 0, 0, 0, 1, 2][..]);
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[97, 98, 99])));
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[1, 2])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Bytes::from_static(&[97, 98, 99])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Bytes::from_static(&[1, 2])));
         assert_matches!(read.read_raw(), Err(Error::Io(_)));
     }
 
@@ -296,7 +293,7 @@ mod tests {
     fn test_slice_read_string() {
         let mut read = SliceRead::new(&[1, 0, 0, 0, 100, 4, 0, 0, 0, 0, 159, 146, 150, 0, 0, 0, 0]);
         assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, "d"));
-        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_, _)));
+        assert_matches!(read.read_str(), Err(Error::InvalidStringUtf8(_)));
         assert_matches!(read.read_str(), Ok(s) => assert_eq!(s, String::new()));
         assert_matches!(read.read_str(), Err(Error::Io(_)));
     }
@@ -304,9 +301,9 @@ mod tests {
     #[test]
     fn test_slice_read_raw() {
         let mut read = SliceRead::new(&[1, 0, 0, 0, 100, 1, 0, 0, 0, 1, 0, 0, 0, 0]);
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[100])));
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[1])));
-        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Raw::from_static(&[])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Bytes::from_static(&[100])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Bytes::from_static(&[1])));
+        assert_matches!(read.read_raw(), Ok(s) => assert_eq!(s, Bytes::from_static(&[])));
         assert_matches!(read.read_raw(), Err(Error::Io(_)));
     }
 

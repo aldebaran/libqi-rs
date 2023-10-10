@@ -1,5 +1,5 @@
-use crate::{ty, Type};
 use derive_more::{From, Index, Into, IntoIterator};
+use qi_type::{self as ty, Type, Typed};
 
 /// The [`Map`] value represents an association of keys to values in the `qi` type system.
 ///
@@ -44,18 +44,14 @@ impl<K, V> Map<K, V> {
     where
         Q: PartialEq<K> + ?Sized,
     {
-        self.0
-            .iter()
-            .find_map(|(k, v)| if key == k { Some(v) } else { None })
+        self.0.iter().find_map(|(k, v)| (key == k).then_some(v))
     }
 
     pub fn get_mut<'s, Q>(&'s mut self, key: &Q) -> Option<&'s mut V>
     where
         Q: PartialEq<K> + ?Sized,
     {
-        self.0
-            .iter_mut()
-            .find_map(|(k, v)| if key == k { Some(v) } else { None })
+        self.0.iter_mut().find_map(|(k, v)| (key == k).then_some(v))
     }
 
     pub fn entry(&mut self, key: K) -> Entry<'_, K, V>
@@ -109,39 +105,21 @@ impl<K, V> Map<K, V> {
         self.0.retain_mut(|(key, value)| f(key, value))
     }
 
-    fn type_reduce<F>(&self, f: F) -> Type
-    where
-        F: FnMut((&K, &V)) -> (Option<Type>, Option<Type>),
-    {
-        let common_types = self
-            .iter()
-            .map(f)
-            .reduce(|(common_key, common_value), (key, value)| {
-                (
-                    ty::common_type(common_key, key),
-                    ty::common_type(common_value, value),
-                )
-            });
-        let (key, value) = match common_types {
-            Some((key, value)) => (key, value),
-            None => (None, None),
-        };
-        ty::map_of(key, value)
-    }
-
-    pub(crate) fn get_dynamic_type(&self) -> Option<Type>
-    where
-        K: ty::DynamicGetType,
-        V: ty::DynamicGetType,
-    {
-        Some(self.type_reduce(|(key, value)| (key.dynamic_type(), value.dynamic_type())))
-    }
-
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         Q: PartialEq<K> + ?Sized,
     {
         self.0.iter().any(|(key_in, _)| key == key_in)
+    }
+}
+
+impl<K, V> Typed for Map<K, V>
+where
+    K: Typed,
+    V: Typed,
+{
+    fn ty() -> Option<Type> {
+        Some(ty::map(K::ty(), V::ty()))
     }
 }
 
@@ -201,25 +179,6 @@ impl<'a, K, V> VacantEntry<'a, K, V> {
     pub fn insert(self, value: V) -> &'a mut V {
         self.vec.push((self.key, value));
         &mut self.vec.last_mut().unwrap().1
-    }
-}
-
-impl<K, V> std::fmt::Display for Map<K, V>
-where
-    K: std::fmt::Display,
-    V: std::fmt::Display,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("{")?;
-        let mut add_sep = false;
-        for (key, value) in &self.0 {
-            if add_sep {
-                f.write_str(", ")?;
-            }
-            write!(f, "{key}: {value}")?;
-            add_sep = true;
-        }
-        f.write_str("}")
     }
 }
 
@@ -332,7 +291,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Value;
     use serde_test::{assert_tokens, Token};
 
     #[test]
@@ -346,10 +304,7 @@ mod tests {
     #[test]
     fn test_map_ser_de() {
         assert_tokens(
-            &Map(vec![
-                (Value::from(32i16), Value::from("trente deux")),
-                (Value::from(34i16), Value::from("trente quatre")),
-            ]),
+            &Map(vec![(32i16, "trente deux"), (34i16, "trente quatre")]),
             &[
                 Token::Map { len: Some(2) },
                 Token::I16(32),

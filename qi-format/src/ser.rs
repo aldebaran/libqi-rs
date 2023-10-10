@@ -1,3 +1,9 @@
+/// Serialization of `serde` values in the `qi` format.
+///
+/// The following `serde` types are not handled:
+///
+/// - `i128`
+/// - `u128`
 use crate::{write::*, Error, Result, Value};
 use bytes::{BufMut, BytesMut};
 

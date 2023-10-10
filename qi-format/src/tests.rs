@@ -1,14 +1,14 @@
+use super::*;
 use pretty_assertions::assert_eq;
-use qi_format::{from_value, to_value};
+use qi_type::{list, map, struct_ty, tuple, unit_tuple, Signature, Type, Typed};
 use qi_value::{
-    list, list_ty, map_ty,
     object::{
         ActionId, MetaMethod, MetaObject, MetaProperty, MetaSignal, Object, ObjectId, ObjectUid,
         ServiceId,
     },
-    struct_ty, tuple_ty, Dynamic, Signature, Type, Value,
+    Dynamic,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
 struct S0 {
@@ -72,15 +72,8 @@ fn test_dynamic_to_from_value() {
         0x6c, 0x69, 0x7a, 0x65, 0x64,
     ]
     .into();
-    let dynamic: Dynamic = from_value(&value_in).unwrap();
-    assert_eq!(
-        dynamic,
-        Dynamic::new(
-            Value::from("The robot is not localized"),
-            Some(Type::String)
-        )
-        .unwrap()
-    );
+    let dynamic: Dynamic<&str> = from_value(&value_in).unwrap();
+    assert_eq!(dynamic, Dynamic("The robot is not localized"));
     let value_out = to_value(&dynamic).unwrap();
     assert_eq!(value_in, value_out);
 }
@@ -195,30 +188,28 @@ fn test_object_to_from_value() {
     ]
     .into();
 
-    let object: Object = from_value(&value_in).unwrap();
-
-    use qi_value::ty::StaticGetType;
+    let object_in: Object = from_value(&value_in).unwrap();
 
     assert_eq!(
-        object,
+        object_in,
         Object {
             meta_object: MetaObject {
-                methods: [
+                methods: HashMap::from_iter([
                     (
                         ActionId::new(0),
                         MetaMethod {
                             uid: ActionId::new(0),
                             return_signature: Signature::new(Some(Type::UInt64)),
                             name: String::from("registerEvent"),
-                            parameters_signature: Signature::new(Some(tuple_ty![
+                            parameters_signature: Signature::new(Some(tuple([
                                 Type::UInt32,
                                 Type::UInt32,
                                 Type::UInt64,
-                            ])),
+                            ]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(1),
@@ -226,27 +217,27 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(1),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("unregisterEvent"),
-                            parameters_signature: Signature::new(Some(tuple_ty![
+                            parameters_signature: Signature::new(Some(tuple([
                                 Type::UInt32,
                                 Type::UInt32,
                                 Type::UInt64,
-                            ])),
+                            ]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(2),
                         MetaMethod {
                             uid: ActionId::new(2),
-                            return_signature: Signature::new(Some(MetaObject::static_type())),
+                            return_signature: Signature::new(MetaObject::ty()),
                             name: String::from("metaObject"),
-                            parameters_signature: Signature::new(Some(tuple_ty![Type::UInt32])),
+                            parameters_signature: Signature::new(Some(tuple([Type::UInt32]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(3),
@@ -254,11 +245,11 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(3),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("terminate"),
-                            parameters_signature: Signature::new(Some(tuple_ty![Type::UInt32])),
+                            parameters_signature: Signature::new(Some(tuple([Type::UInt32]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(5),
@@ -266,11 +257,11 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(5),
                             return_signature: Signature::dynamic(),
                             name: String::from("property"),
-                            parameters_signature: Signature::new(Some(tuple_ty![None])),
+                            parameters_signature: Signature::new(Some(tuple([None]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(6),
@@ -278,23 +269,23 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(6),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("setProperty"),
-                            parameters_signature: Signature::new(Some(tuple_ty![None, None])),
+                            parameters_signature: Signature::new(Some(tuple([None, None]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(7),
                         MetaMethod {
                             uid: ActionId::new(7),
-                            return_signature: Signature::new(Some(list_ty!(Type::String))),
+                            return_signature: Signature::new(Some(list(Type::String))),
                             name: String::from("properties"),
-                            parameters_signature: Signature::new(Some(tuple_ty![])),
+                            parameters_signature: Signature::new(Some(unit_tuple())),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(8),
@@ -302,16 +293,16 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(8),
                             return_signature: Signature::new(Some(Type::UInt64)),
                             name: String::from("registerEventWithSignature"),
-                            parameters_signature: Signature::new(Some(tuple_ty![
+                            parameters_signature: Signature::new(Some(tuple([
                                 Type::UInt32,
                                 Type::UInt32,
                                 Type::UInt64,
-                                Type::String
-                            ])),
+                                Type::String,
+                            ]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(80),
@@ -319,11 +310,11 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(80),
                             return_signature: Signature::new(Some(Type::Bool)),
                             name: String::from("isStatsEnabled"),
-                            parameters_signature: Signature::new(Some(tuple_ty![])),
+                            parameters_signature: Signature::new(Some(unit_tuple())),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(81),
@@ -331,42 +322,44 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(81),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("enableStats"),
-                            parameters_signature: Signature::new(Some(tuple_ty![Type::Bool])),
+                            parameters_signature: Signature::new(Some(tuple([Type::Bool]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(82),
                         MetaMethod {
                             uid: ActionId::new(82),
                             return_signature: Signature::new(Some({
-                                let minmaxsum = struct_ty! {
-                                    MinMaxSum {
-                                        minValue: Type::Float32,
-                                        maxValue: Type::Float32,
-                                        cumulatedValue: Type::Float32,
-                                    }
-                                };
-                                map_ty!(
+                                let minmaxsum = struct_ty(
+                                    "MinMaxSum",
+                                    [
+                                        ("minValue", Type::Float32),
+                                        ("maxValue", Type::Float32),
+                                        ("cumulatedValue", Type::Float32),
+                                    ],
+                                );
+                                map(
                                     Type::UInt32,
-                                    struct_ty! {
-                                        MethodStatistics {
-                                            count: Type::UInt32,
-                                            wall: minmaxsum.clone(),
-                                            user: minmaxsum.clone(),
-                                            system: minmaxsum,
-                                        }
-                                    }
+                                    struct_ty(
+                                        "MethodStatistics",
+                                        [
+                                            ("count", Type::UInt32),
+                                            ("wall", minmaxsum.clone()),
+                                            ("user", minmaxsum.clone()),
+                                            ("system", minmaxsum),
+                                        ],
+                                    ),
                                 )
                             })),
                             name: String::from("stats"),
-                            parameters_signature: Signature::new(Some(tuple_ty![])),
+                            parameters_signature: Signature::new(Some(unit_tuple())),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(83),
@@ -374,11 +367,11 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(83),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("clearStats"),
-                            parameters_signature: Signature::new(Some(tuple_ty![])),
+                            parameters_signature: Signature::new(Some(unit_tuple())),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(84),
@@ -386,11 +379,11 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(84),
                             return_signature: Signature::new(Some(Type::Bool)),
                             name: String::from("isTraceEnabled"),
-                            parameters_signature: Signature::new(Some(tuple_ty![])),
+                            parameters_signature: Signature::new(Some(unit_tuple())),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(85),
@@ -398,11 +391,11 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(85),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("enableTrace"),
-                            parameters_signature: Signature::new(Some(tuple_ty![Type::Bool])),
+                            parameters_signature: Signature::new(Some(tuple([Type::Bool]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(100),
@@ -410,11 +403,11 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(100),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("pingMe"),
-                            parameters_signature: Signature::new(Some(tuple_ty![Type::Object])),
+                            parameters_signature: Signature::new(Some(tuple([Type::Object]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(101),
@@ -422,11 +415,11 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(101),
                             return_signature: Signature::new(Some(Type::String)),
                             name: String::from("ping"),
-                            parameters_signature: Signature::new(Some(tuple_ty![])),
+                            parameters_signature: Signature::new(Some(unit_tuple())),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
                     (
                         ActionId::new(102),
@@ -434,71 +427,67 @@ fn test_object_to_from_value() {
                             uid: ActionId::new(102),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("nameMe"),
-                            parameters_signature: Signature::new(Some(tuple_ty![Type::String])),
+                            parameters_signature: Signature::new(Some(tuple([Type::String]))),
                             description: String::new(),
-                            parameters: list![],
+                            parameters: vec![],
                             return_description: String::new(),
-                        }
+                        },
                     ),
-                ]
-                .into_iter()
-                .collect(),
-                signals: [
+                ]),
+                signals: HashMap::from_iter([
                     (
                         ActionId::new(86),
                         MetaSignal {
                             uid: ActionId::new(86),
                             name: String::from("traceObject"),
-                            signature: Signature::new(Some(tuple_ty![struct_ty! {
-                                EventTrace {
-                                    id: Type::UInt32,
-                                    kind: Type::Int32,
-                                    slotId: Type::UInt32,
-                                    arguments: None,
-                                    timestamp: struct_ty! {
-                                        timeval {
-                                            tv_sec: Type::Int64,
-                                            tv_usec: Type::Int64,
-                                        }
-                                    },
-                                    userUsTime: Type::Int64,
-                                    systemUsTime: Type::Int64,
-                                    callerContext: Type::UInt32,
-                                    calleeContext: Type::UInt32,
-                                }
-                            }])),
-                        }
+                            signature: Signature::new(Some(tuple([struct_ty(
+                                "EventTrace",
+                                [
+                                    ("id", Some(Type::UInt32)),
+                                    ("kind", Some(Type::Int32)),
+                                    ("slotId", Some(Type::UInt32)),
+                                    ("arguments", None),
+                                    (
+                                        "timestamp",
+                                        Some(struct_ty(
+                                            "timeval",
+                                            [("tv_sec", Type::Int64), ("tv_usec", Type::Int64)],
+                                        )),
+                                    ),
+                                    ("userUsTime", Some(Type::Int64)),
+                                    ("systemUsTime", Some(Type::Int64)),
+                                    ("callerContext", Some(Type::UInt32)),
+                                    ("calleeContext", Some(Type::UInt32)),
+                                ],
+                            )]))),
+                        },
                     ),
                     (
                         ActionId::new(103),
                         MetaSignal {
                             uid: ActionId::new(103),
                             name: String::from("name"),
-                            signature: Signature::new(Some(tuple_ty![Type::String])),
-                        }
+                            signature: Signature::new(Some(tuple([Type::String]))),
+                        },
                     ),
-                ]
-                .into_iter()
-                .collect(),
-                properties: [(
+                ]),
+                properties: HashMap::from_iter([(
                     ActionId::new(103),
                     MetaProperty {
                         uid: ActionId::new(103),
                         name: String::from("name"),
                         signature: Signature::new(Some(Type::String)),
-                    }
-                )]
-                .into_iter()
-                .collect(),
+                    },
+                )]),
                 description: String::new(),
             },
             service_id: ServiceId::new(2),
             object_id: ObjectId::new(4),
-            object_uid: ObjectUid::new([
-                0x0bf8f786, 0x6b070405, 0xd63fe439, 0xf9477e96, 0xfc2f2c3d
+            object_uid: ObjectUid::from_digest([
+                0x0bf8f786, 0x6b070405, 0xd63fe439, 0xf9477e96, 0xfc2f2c3d,
             ]),
         }
     );
-    let value_out = to_value(&object).unwrap();
-    assert_eq!(value_in, value_out);
+    let object_out = from_value(&to_value(&object_in).unwrap()).unwrap();
+    assert_eq!(object_in, object_out);
 }

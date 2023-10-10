@@ -1,5 +1,15 @@
+/// Deserialization of `serde` values from the `qi` format.
+///
+/// The following `serde` types are not handled:
+///
+/// - `i128`
+/// - `u128`
+/// - `any`
+/// - `ignored any`
+///
+/// Identifiers are deserialized as unit values.
 use crate::{read, Error, Result, Value};
-use qi_value::Raw;
+use bytes::Bytes;
 use serde::de::IntoDeserializer;
 
 pub fn from_value<'v, T>(value: &'v Value) -> Result<T>
@@ -111,7 +121,7 @@ impl<'de> BytesDeserializer<'de> for &'de [u8] {
     }
 }
 
-impl<'de> BytesDeserializer<'de> for Raw {
+impl<'de> BytesDeserializer<'de> for Bytes {
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,

@@ -1,9 +1,11 @@
 [workspace]
 members = [
+    "qi-type",
     "qi-value",
+    "qi-derive",
     "qi-format",
     "qi-messaging",
-    "qi-object",
-    "qi-tools",
-    "qi",
+    # "qi-object",
+    # "qi-tools",
+    # "qi",
 ]

@@ -193,17 +193,13 @@ pub struct Event {
     pub(crate) value: format::Value,
 }
 
-#[derive(
-    Default, Clone, PartialEq, Eq, PartialOrd, Debug, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Default, Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Capabilities {
     pub(crate) address: message::Address,
     pub(crate) capabilities: capabilities::CapabilitiesMap,
 }
 
-#[derive(
-    Clone, PartialEq, Eq, PartialOrd, Debug, derive_more::From, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, PartialEq, Eq, Debug, derive_more::From, serde::Serialize, serde::Deserialize)]
 pub enum Notification {
     Event(Event),
     Capabilities(Capabilities),

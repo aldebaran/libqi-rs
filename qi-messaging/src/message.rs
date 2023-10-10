@@ -415,26 +415,10 @@ impl Message {
         self.body.to_deserializable()
     }
 
-    pub fn deserialize_error_description(
-        &self,
-    ) -> Result<String, DeserializeErrorDescriptionError> {
-        let dynamic: Dynamic = self.deserialize_body()?;
-        match dynamic {
-            Dynamic::String(s) => Ok(s),
-            d => Err(DeserializeErrorDescriptionError::DynamicValueIsNotAString(
-                d,
-            )),
-        }
+    pub fn deserialize_error_description(&self) -> Result<String, format::Error> {
+        let Dynamic(description) = self.deserialize_body()?;
+        Ok(description)
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DeserializeErrorDescriptionError {
-    #[error("dynamic value {0} of error description is not a string")]
-    DynamicValueIsNotAString(Dynamic),
-
-    #[error(transparent)]
-    Format(#[from] format::Error),
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

@@ -1,11 +1,9 @@
-use crate::value::{Dynamic, Map};
-use std::cmp::Ordering;
+use crate::value::Dynamic;
+use std::{borrow::Borrow, cmp::Ordering, collections::HashMap, hash::Hash};
 
-type MapImpl = Map<String, Dynamic>;
+type MapImpl = HashMap<String, Dynamic<bool>>;
 
-#[derive(
-    Default, Clone, PartialEq, Eq, PartialOrd, Debug, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Default, Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CapabilitiesMap(MapImpl);
 
 impl CapabilitiesMap {
@@ -16,7 +14,7 @@ impl CapabilitiesMap {
     pub fn set_capability<K, V>(&mut self, name: K, value: V)
     where
         K: Into<String>,
-        V: Into<Dynamic>,
+        V: Into<Dynamic<bool>>,
     {
         self.0.insert(name.into(), value.into());
     }
@@ -25,18 +23,12 @@ impl CapabilitiesMap {
         self.into_iter()
     }
 
-    pub fn get<K>(&self, key: &K) -> Option<&Dynamic>
+    pub fn get<K>(&self, key: &K) -> Option<&bool>
     where
-        K: PartialEq<String> + ?Sized,
+        String: Borrow<K>,
+        K: Hash + Eq + ?Sized,
     {
-        self.0.get(key)
-    }
-
-    pub fn has_flag_capability<K>(&self, key: &K) -> bool
-    where
-        K: PartialEq<String> + ?Sized,
-    {
-        matches!(self.get(key), Some(Dynamic::Bool(true)))
+        self.0.get(key).map(|Dynamic(b)| b)
     }
 
     pub fn intersect(&mut self, other: &Self) -> &mut Self {
@@ -45,7 +37,7 @@ impl CapabilitiesMap {
                 // Prefer values from this map when no ordering can be made. Only use the other map
                 // values if they are strictly inferior.
                 if let Some(Ordering::Less) = other_value.partial_cmp(value) {
-                    *value = other_value.clone();
+                    *value = *other_value;
                 }
             }
         }
@@ -62,14 +54,14 @@ impl<'map> std::iter::IntoIterator for &'map CapabilitiesMap {
     type IntoIter = <&'map MapImpl as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        (&self.0).into_iter()
+        self.0.iter()
     }
 }
 
 impl<K, V> std::iter::FromIterator<(K, V)> for CapabilitiesMap
 where
     K: Into<String>,
-    V: Into<Dynamic>,
+    V: Into<Dynamic<bool>>,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         Self(MapImpl::from_iter(
@@ -81,7 +73,7 @@ where
 impl<K, V> std::iter::Extend<(K, V)> for CapabilitiesMap
 where
     K: Into<String>,
-    V: Into<Dynamic>,
+    V: Into<Dynamic<bool>>,
 {
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         self.0
@@ -113,10 +105,10 @@ mod tests {
             ("H", false),
         ]);
         m.intersect(&m2);
-        assert_matches!(m.get("A"), Some(Dynamic::Bool(true)));
-        assert_matches!(m.get("B"), Some(Dynamic::Bool(false)));
-        assert_matches!(m.get("C"), Some(Dynamic::Bool(false)));
-        assert_matches!(m.get("D"), Some(Dynamic::Bool(false)));
+        assert_matches!(m.get("A"), Some(true));
+        assert_matches!(m.get("B"), Some(false));
+        assert_matches!(m.get("C"), Some(false));
+        assert_matches!(m.get("D"), Some(false));
         assert_matches!(m.get("E"), None);
         assert_matches!(m.get("F"), None);
         assert_matches!(m.get("G"), None);

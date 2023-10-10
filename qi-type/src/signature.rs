@@ -1,9 +1,12 @@
-use crate::ty::{self, StructAnnotations, TupleType, Type};
+use crate::{
+    ty::{self, StructAnnotations, Tuple, Type},
+    Typed,
+};
 use derive_more::{From, Into};
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, From, Into)]
 #[into(owned, ref, ref_mut)]
-pub struct Signature(Option<Type>);
+pub struct Signature(pub(crate) Option<Type>);
 
 impl Signature {
     pub fn new(t: Option<Type>) -> Self {
@@ -16,6 +19,12 @@ impl Signature {
 
     pub fn into_type(self) -> Option<Type> {
         self.0
+    }
+}
+
+impl Typed for Signature {
+    fn ty() -> Option<Type> {
+        Some(Type::String)
     }
 }
 
@@ -306,7 +315,7 @@ fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> 
                 };
                 let tuple = match annotations {
                     Some(annotations) => {
-                        TupleType::from_annotations_of_elements(annotations, elements).map_err(
+                        Tuple::struct_from_annotations_of_elements(annotations, elements).map_err(
                             |err| SignatureParseError::Annotations {
                                 annotations: annotations_str.to_owned(),
                                 tuple: tuple_str.to_owned(),
@@ -314,11 +323,11 @@ fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> 
                             },
                         )?
                     }
-                    None => TupleType::Tuple(elements),
+                    None => Tuple::Tuple(elements),
                 };
                 Type::Tuple(tuple)
             }
-            _ => Type::Tuple(TupleType::Tuple(elements)),
+            _ => Type::Tuple(Tuple::Tuple(elements)),
         }
     };
 
@@ -403,7 +412,7 @@ fn parse_tuple_annotations(
                 Some(CHAR_ANNOTATIONS_SEP) => accu = accu.next(),
                 Some(CHAR_ANNOTATIONS_END) => break accu.end(),
                 Some(c) if c.is_ascii() && (c.is_alphanumeric() || c == '_') => accu.push_char(c),
-                Some(c) if c == ' ' => { /* spaces are ignored */ }
+                Some(' ') => { /* spaces are ignored */ }
                 Some(c) => return Err(AnnotationsError::UnexpectedChar(c)),
                 None => return Err(AnnotationsError::MissingTupleAnnotationEnd),
             }
@@ -522,7 +531,7 @@ impl<'de> serde::Deserialize<'de> for Signature {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{list_ty, map_ty, object, option_ty, struct_ty, tuple_ty, varargs_ty};
+    use crate::ty::{self, list, map, option, struct_ty, tuple, tuple_struct, unit_tuple, varargs};
 
     #[test]
     fn test_signature_to_from_string() {
@@ -574,60 +583,53 @@ mod tests {
         assert_sig_from_to_str!(Type::Raw, "r");
         assert_sig_from_to_str!(Type::Object, "o");
         assert_sig_from_to_str!(None::<Type>, "m");
-        assert_sig_from_to_str!(ty::option_of(Type::Unit), "+v");
-        assert_sig_from_to_str!(ty::varargs_of(None), "#m");
-        assert_sig_from_to_str!(ty::list_of(Type::Int32), "[i]");
-        assert_sig_from_to_str!(ty::list_of(tuple_ty![]), "[()]");
-        assert_sig_from_to_str!(ty::map_of(Type::Float32, Type::String), "{fs}");
+        assert_sig_from_to_str!(option(Type::Unit), "+v");
+        assert_sig_from_to_str!(varargs(None), "#m");
+        assert_sig_from_to_str!(list(Type::Int32), "[i]");
+        assert_sig_from_to_str!(list(unit_tuple()), "[()]");
+        assert_sig_from_to_str!(map(Type::Float32, Type::String), "{fs}");
+        assert_sig_from_to_str!(tuple([Type::Float32, Type::String, Type::UInt32]), "(fsI)");
         assert_sig_from_to_str!(
-            tuple_ty![Type::Float32, Type::String, Type::UInt32],
-            "(fsI)"
-        );
-        assert_sig_from_to_str!(
-            struct_ty! {
-                ExplorationMap(
-                    list_ty!(tuple_ty!(Type::Float64, Type::Float64)),
-                    Type::UInt64
-                )
-            },
+            tuple_struct(
+                "ExplorationMap",
+                [list(tuple([Type::Float64, Type::Float64])), Type::UInt64]
+            ),
             "([(dd)]L)<ExplorationMap>"
         );
         assert_sig_from_to_str!(
-            struct_ty! {
-                ExplorationMap {
-                    points: list_ty!(struct_ty! {
-                        Point {
-                            x: Type::Float64,
-                            y: Type::Float64,
-                        }
-                    }),
-                    timestamp: Type::UInt64,
-                }
-            },
+            struct_ty(
+                "ExplorationMap",
+                [
+                    (
+                        "points",
+                        list(struct_ty(
+                            "Point",
+                            [("x", Type::Float64), ("y", Type::Float64),]
+                        ))
+                    ),
+                    ("timestamp", Type::UInt64)
+                ]
+            ),
             "([(dd)<Point,x,y>]L)<ExplorationMap,points,timestamp>"
         );
         // Underscores in structure and field names are allowed.
         // Spaces between structure or field names are trimmed.
         assert_sig_from_to_str!(
             "(i)<   A_B ,  c_d   >" =>
-            struct_ty!{
-                A_B {
-                    c_d: Type::Int32
-                }
-            } =>
+            struct_ty("A_B", [("c_d", Type::Int32)]) =>
             "(i)<A_B,c_d>"
         );
         // Annotations can be ignored if the struct name is missing.
-        assert_sig_from_to_str!("()<>" => tuple_ty!() => "()");
-        assert_sig_from_to_str!("(i)<>" => tuple_ty!(Type::Int32) => "(i)");
-        assert_sig_from_to_str!("(i)<,,,,,,,>" => tuple_ty!(Type::Int32) => "(i)");
-        assert_sig_from_to_str!("(ff)<,x,y>" => tuple_ty!(Type::Float32, Type::Float32) => "(ff)");
+        assert_sig_from_to_str!("()<>" => unit_tuple() => "()");
+        assert_sig_from_to_str!("(i)<>" => tuple([Type::Int32]) => "(i)");
+        assert_sig_from_to_str!("(i)<,,,,,,,>" => tuple([Type::Int32]) => "(i)");
+        assert_sig_from_to_str!("(ff)<,x,y>" => tuple([Type::Float32, Type::Float32]) => "(ff)");
         // Some complex type for fun.
         assert_sig_from_to_str!(
-            tuple_ty!(
-                list_ty!(map_ty!(option_ty!(Type::Object), Type::Raw)),
-                varargs_ty!(option_ty!(None))
-            ),
+            tuple([
+                list(map(option(Type::Object), Type::Raw)),
+                varargs(option(None))
+            ]),
             "([{+or}]#+m)"
         );
     }
@@ -815,28 +817,13 @@ mod tests {
     }
 
     #[test]
-    fn test_signature_from_str_meta_object() {
-        use pretty_assertions::assert_eq;
-        let input = "({I(Issss[(ss)<MetaMethodParameter,name,description>]s)\
-                     <MetaMethod,uid,returnSignature,name,parametersSignature,\
-                     description,parameters,returnDescription>}{I(Iss)<MetaSignal,\
-                     uid,name,signature>}{I(Iss)<MetaProperty,uid,name,signature>}s)\
-                     <MetaObject,methods,signals,properties,description>";
-        let sig: Signature = input.parse().unwrap();
-        use ty::StaticGetType;
-        assert_eq!(sig, Signature(Some(object::MetaObject::static_type())));
-    }
-
-    #[test]
     fn test_signature_ser_de() {
         use serde_test::{assert_tokens, Token};
         assert_tokens(
-            &Signature(Some(struct_ty! {
-                Point {
-                    x: Type::Float64,
-                    y: Type::Float64,
-                }
-            })),
+            &Signature(Some(struct_ty(
+                "Point",
+                [("x", Type::Float64), ("y", Type::Float64)],
+            ))),
             &[Token::Str("(dd)<Point,x,y>")],
         )
     }

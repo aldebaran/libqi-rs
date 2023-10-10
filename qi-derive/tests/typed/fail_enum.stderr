@@ -1,0 +1,5 @@
+error: `Typed` cannot be derived on enums and unions
+ --> tests/typed/fail_enum.rs:2:6
+  |
+2 | enum E {
+  |      ^
