@@ -11,7 +11,6 @@ rust-version = "1.63"
 [dependencies]
 bytes = { version = "1.4.0", features = ["serde"] }
 derive_more = "0.99.17"
-derive-new = "0.5.9"
 futures = "0.3.27"
 serde = { version = "1.0.152", features = ["derive"] }
 thiserror = "1.0.39"
@@ -20,7 +19,6 @@ tracing = "0.1.37"
 tokio-util = { version = "0.7.7", features = ["codec"] }
 qi-value = { path = "../qi-value" }
 qi-format = { path = "../qi-format" }
-bitflags = { version = "2.4.0", features = ["serde"] }
 tower = { version = "0.4.13", features = ["util"] }
 pin-project-lite = "0.2.13"
 

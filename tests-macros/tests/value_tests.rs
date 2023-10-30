@@ -1,20 +1,27 @@
 use assert_matches::assert_matches;
-use qi_type::{
+use qi_value::{
     ty::{StructField, Tuple},
-    Type, Typed,
+    Type,
 };
 
-#[test]
-fn test_derive_typed_basic() {
-    #[derive(qi_derive::Typed)]
-    #[allow(dead_code)]
-    struct Basic {
-        s: String,
-        b: bool,
-        u: (),
-        li: Vec<i32>,
-    }
+#[derive(
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::IntoValue,
+    qi_macros::Reflect,
+    qi_macros::StdTryFromValue,
+)]
+#[allow(dead_code)]
+struct Basic {
+    s: String,
+    b: bool,
+    u: (),
+    li: Vec<i32>,
+}
 
+#[test]
+fn test_derive_reflect_basic() {
+    use qi_value::Reflect;
     assert_matches!(
         Basic::ty(),
         Some(Type::Tuple(Tuple::Struct { name, fields })) => {
@@ -56,26 +63,35 @@ fn test_derive_typed_basic() {
     );
 }
 
-#[test]
-fn test_derive_typed_transparent() {
-    #[derive(qi_derive::Typed)]
-    #[qi(typed(transparent))]
-    #[allow(dead_code)]
-    struct Transparent {
-        s: String,
-    }
-    assert_eq!(Transparent::ty(), Some(Type::String));
+#[derive(
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::IntoValue,
+    qi_macros::Reflect,
+    qi_macros::StdTryFromValue,
+)]
+#[qi(transparent)]
+#[allow(dead_code)]
+struct Transparent {
+    s: String,
 }
 
 #[test]
-fn test_derive_typed_rename_all() {
-    #[derive(qi_derive::Typed)]
-    #[qi(typed(rename_all = "camelCase"))]
-    struct RenameAll {
-        #[allow(dead_code)]
-        my_field_has_a_name_with_underscores: i32,
-    }
+fn test_derive_reflect_transparent() {
+    use qi_value::Reflect;
+    assert_eq!(Transparent::ty(), Some(Type::String));
+}
 
+#[derive(qi_macros::Reflect)]
+#[qi(rename_all = "camelCase")]
+struct RenameAll {
+    #[allow(dead_code)]
+    my_field_has_a_name_with_underscores: i32,
+}
+
+#[test]
+fn test_derive_reflect_rename_all() {
+    use qi_value::Reflect;
     assert_matches!(
         RenameAll::ty(),
         Some(Type::Tuple(Tuple::Struct { name, fields })) => {
@@ -96,7 +112,7 @@ fn test_derive_typed_rename_all() {
 #[test]
 fn test_derive_typed_build() {
     let t = trybuild::TestCases::new();
-    t.compile_fail("tests/typed/fail_struct_field_not_typed.rs");
-    t.compile_fail("tests/typed/fail_enum.rs");
-    t.compile_fail("tests/typed/fail_struct_transparent_more_than_one_field.rs");
+    t.compile_fail("tests/value/fail_struct_field_not_typed.rs");
+    t.compile_fail("tests/value/fail_enum.rs");
+    t.compile_fail("tests/value/fail_struct_transparent_more_than_one_field.rs");
 }

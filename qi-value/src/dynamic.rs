@@ -1,39 +1,13 @@
 mod de;
 
-pub use de::deserialize;
-use qi_type::Typed;
+use crate::{AsValue, FromValue};
 
-pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
-where
-    T: Typed + serde::Serialize,
-    S: serde::Serializer,
-{
-    use serde::ser::SerializeStruct;
-    let sig = T::signature();
-    let mut struct_serializer = serializer.serialize_struct("Dynamic", 2)?;
-    struct_serializer.serialize_field("signature", &sig)?;
-    struct_serializer.serialize_field("value", &value)?;
-    struct_serializer.end()
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    derive_new::new,
-    derive_more::From,
-)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::From)]
 pub struct Dynamic<T>(pub T);
 
 impl<T> serde::Serialize for Dynamic<T>
 where
-    T: Typed + serde::Serialize,
+    T: AsValue,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -43,17 +17,61 @@ where
     }
 }
 
-impl<'de, T> serde::Deserialize<'de> for Dynamic<T>
+impl<'de: 'a, 'a, T> serde::Deserialize<'de> for Dynamic<T>
 where
-    T: serde::Deserialize<'de>,
+    T: FromValue<'a>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = de::deserialize(deserializer)?;
-        Ok(Self(value))
+        self::deserialize(deserializer).map(Self)
     }
+}
+
+const SERDE_STRUCT_NAME: &str = "Dynamic";
+
+enum Fields {
+    Signature,
+    Value,
+}
+
+impl Fields {
+    const KEYS: [&'static str; 2] = ["signature", "value"];
+    const fn key(&self) -> &'static str {
+        match self {
+            Fields::Signature => Self::KEYS[0],
+            Fields::Value => Self::KEYS[1],
+        }
+    }
+}
+
+pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+where
+    T: AsValue,
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeStruct;
+    let mut serializer = serializer.serialize_struct(SERDE_STRUCT_NAME, Fields::KEYS.len())?;
+    serializer.serialize_field(Fields::Signature.key(), &value.value_signature())?;
+    serializer.serialize_field(Fields::Value.key(), &value.as_value())?;
+    serializer.end()
+}
+
+pub fn deserialize<'de: 'a, 'a, T, D>(deserializer: D) -> Result<T, D::Error>
+where
+    T: FromValue<'a>,
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value = deserializer.deserialize_struct(
+        SERDE_STRUCT_NAME,
+        &Fields::KEYS,
+        de::DynamicVisitor::new(),
+    )?;
+    value
+        .cast()
+        .map_err(|err| D::Error::custom(err.to_string()))
 }
 
 #[cfg(test)]
@@ -65,7 +83,8 @@ mod tests {
 
     #[test]
     fn test_dynamic_serde_struct() {
-        #[derive(PartialEq, Debug, qi_derive::Typed, serde::Serialize, serde::Deserialize)]
+        #[derive(PartialEq, Debug, qi_macros::AsValue, qi_macros::FromValue)]
+        #[qi(value = "crate")]
         struct MyStruct {
             an_int: i32,
             a_raw: Bytes,
@@ -90,15 +109,9 @@ mod tests {
                 Token::Str("signature"),
                 Token::Str("(ir+{s[b]})<MyStruct,an_int,a_raw,an_option>"),
                 Token::Str("value"),
-                Token::Struct {
-                    name: "MyStruct",
-                    len: 3,
-                },
-                Token::Str("an_int"),
+                Token::Tuple { len: 3 },
                 Token::I32(42),
-                Token::Str("a_raw"),
                 Token::Bytes(&[1, 2, 3]),
-                Token::Str("an_option"),
                 Token::Some,
                 Token::Map { len: Some(4) },
                 Token::Str("false_false"),
@@ -122,7 +135,7 @@ mod tests {
                 Token::Bool(true),
                 Token::SeqEnd,
                 Token::MapEnd,
-                Token::StructEnd,
+                Token::TupleEnd,
                 Token::StructEnd,
             ],
         );

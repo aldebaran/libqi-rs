@@ -43,17 +43,10 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-pub mod node;
+// pub mod control;
 pub mod object;
-pub mod service_directory;
+pub mod service;
 pub mod signal;
-pub mod transport;
 
-pub use iri_string::types::UriString as Uri;
-pub use messaging::CallResult;
-pub use node::Node;
-pub use object::Object;
-use qi_format as format;
-use qi_messaging as messaging;
-use qi_value as value;
-pub use service_directory::{ServiceDirectory, ServiceInfo};
+#[cfg(test)]
+mod tests;

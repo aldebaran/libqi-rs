@@ -126,7 +126,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct IoRead<R> {
     reader: R,
 }
@@ -173,7 +173,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct SliceRead<'b> {
     data: &'b [u8],
 }

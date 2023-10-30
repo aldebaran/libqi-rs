@@ -1,0 +1,29 @@
+error: AsValue cannot be derived on enums and unions
+ --> tests/value/fail_enum.rs:8:6
+  |
+8 | enum E {
+  |      ^
+
+error: FromValue cannot be derived on enums and unions
+ --> tests/value/fail_enum.rs:8:6
+  |
+8 | enum E {
+  |      ^
+
+error: IntoValue cannot be derived on enums and unions
+ --> tests/value/fail_enum.rs:8:6
+  |
+8 | enum E {
+  |      ^
+
+error: Reflect cannot be derived on enums and unions
+ --> tests/value/fail_enum.rs:8:6
+  |
+8 | enum E {
+  |      ^
+
+error: StdTryFromValue cannot be derived on enums and unions
+ --> tests/value/fail_enum.rs:8:6
+  |
+8 | enum E {
+  |      ^

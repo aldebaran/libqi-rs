@@ -8,19 +8,19 @@
 /// - `ignored any`
 ///
 /// Identifiers are deserialized as unit values.
-use crate::{read, Error, Result, Value};
+use crate::{read, Error, Result};
 use bytes::Bytes;
 use serde::de::IntoDeserializer;
 
-pub fn from_value<'v, T>(value: &'v Value) -> Result<T>
+pub fn from_bytes<'v, T>(bytes: &'v Bytes) -> Result<T>
 where
     T: serde::de::Deserialize<'v>,
 {
-    let mut de = Deserializer::from_slice(value.as_bytes());
+    let mut de = Deserializer::from_slice(bytes);
     T::deserialize(&mut de)
 }
 
-#[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Deserializer<R> {
     reader: R,
 }
@@ -33,7 +33,7 @@ where
         Self { reader }
     }
 
-    fn as_ref(&mut self) -> &mut Self {
+    fn by_ref(&mut self) -> &mut Self {
         self
     }
 }
@@ -386,6 +386,248 @@ where
     }
 }
 
+impl<'de, R> serde::Deserializer<'de> for Deserializer<R>
+where
+    R: read::Read,
+    R::Raw: BytesDeserializer<'de>,
+    R::Str: StrDeserializer<'de>,
+{
+    type Error = Error;
+
+    fn deserialize_any<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_any(visitor)
+    }
+
+    fn deserialize_bool<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_bool(visitor)
+    }
+
+    fn deserialize_i8<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_i8(visitor)
+    }
+
+    fn deserialize_i16<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_i16(visitor)
+    }
+
+    fn deserialize_i32<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_i32(visitor)
+    }
+
+    fn deserialize_i64<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_i64(visitor)
+    }
+
+    fn deserialize_u8<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_u8(visitor)
+    }
+
+    fn deserialize_u16<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_u16(visitor)
+    }
+
+    fn deserialize_u32<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_u32(visitor)
+    }
+
+    fn deserialize_u64<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_u64(visitor)
+    }
+
+    fn deserialize_f32<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_f32(visitor)
+    }
+
+    fn deserialize_f64<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_f64(visitor)
+    }
+
+    fn deserialize_char<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_char(visitor)
+    }
+
+    fn deserialize_str<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_str(visitor)
+    }
+
+    fn deserialize_string<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_string(visitor)
+    }
+
+    fn deserialize_bytes<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_bytes(visitor)
+    }
+
+    fn deserialize_byte_buf<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_byte_buf(visitor)
+    }
+
+    fn deserialize_option<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_option(visitor)
+    }
+
+    fn deserialize_unit<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_unit(visitor)
+    }
+
+    fn deserialize_unit_struct<V>(
+        mut self,
+        name: &'static str,
+        visitor: V,
+    ) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_unit_struct(name, visitor)
+    }
+
+    fn deserialize_newtype_struct<V>(
+        mut self,
+        name: &'static str,
+        visitor: V,
+    ) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_newtype_struct(name, visitor)
+    }
+
+    fn deserialize_seq<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_seq(visitor)
+    }
+
+    fn deserialize_tuple<V>(
+        mut self,
+        len: usize,
+        visitor: V,
+    ) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_tuple(len, visitor)
+    }
+
+    fn deserialize_tuple_struct<V>(
+        mut self,
+        name: &'static str,
+        len: usize,
+        visitor: V,
+    ) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_tuple_struct(name, len, visitor)
+    }
+
+    fn deserialize_map<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_map(visitor)
+    }
+
+    fn deserialize_struct<V>(
+        mut self,
+        name: &'static str,
+        fields: &'static [&'static str],
+        visitor: V,
+    ) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_struct(name, fields, visitor)
+    }
+
+    fn deserialize_enum<V>(
+        mut self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        visitor: V,
+    ) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_enum(name, variants, visitor)
+    }
+
+    fn deserialize_identifier<V>(mut self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_identifier(visitor)
+    }
+
+    fn deserialize_ignored_any<V>(
+        mut self,
+        visitor: V,
+    ) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'de>,
+    {
+        (&mut self).deserialize_ignored_any(visitor)
+    }
+}
+
 impl<'de, R> serde::de::EnumAccess<'de> for &mut Deserializer<R>
 where
     R: read::Read,
@@ -468,7 +710,7 @@ where
     {
         let item = match self.iter.next() {
             Some(_idx) => {
-                let item = seed.deserialize(self.deserializer.as_ref())?;
+                let item = seed.deserialize(self.deserializer.by_ref())?;
                 Some(item)
             }
             None => None,
@@ -514,7 +756,7 @@ where
     where
         V: serde::de::DeserializeSeed<'de>,
     {
-        seed.deserialize(self.deserializer.as_ref())
+        seed.deserialize(self.deserializer.by_ref())
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -556,19 +798,19 @@ mod tests {
         let data = [0, 1, 2];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_bool(ValueVisitor),
+            deserializer.by_ref().deserialize_bool(ValueVisitor),
             Ok(Value::Bool(false))
         );
         assert_matches!(
-            deserializer.deserialize_bool(ValueVisitor),
+            deserializer.by_ref().deserialize_bool(ValueVisitor),
             Ok(Value::Bool(true))
         );
         assert_matches!(
-            deserializer.deserialize_bool(ValueVisitor),
+            deserializer.by_ref().deserialize_bool(ValueVisitor),
             Err(Error::NotABoolValue(2))
         );
         assert_matches!(
-            deserializer.deserialize_bool(ValueVisitor),
+            deserializer.by_ref().deserialize_bool(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -577,18 +819,36 @@ mod tests {
     fn test_deserializer_deserialize_i8() {
         let data = [1, 2];
         let mut deserializer = super::Deserializer::from_slice(&data);
-        assert_matches!(deserializer.deserialize_i8(ValueVisitor), Ok(Value::I8(1)));
-        assert_matches!(deserializer.deserialize_i8(ValueVisitor), Ok(Value::I8(2)));
-        assert_matches!(deserializer.deserialize_i8(ValueVisitor), Err(Error::Io(_)));
+        assert_matches!(
+            deserializer.by_ref().deserialize_i8(ValueVisitor),
+            Ok(Value::I8(1))
+        );
+        assert_matches!(
+            deserializer.by_ref().deserialize_i8(ValueVisitor),
+            Ok(Value::I8(2))
+        );
+        assert_matches!(
+            deserializer.by_ref().deserialize_i8(ValueVisitor),
+            Err(Error::Io(_))
+        );
     }
 
     #[test]
     fn test_deserializer_deserialize_u8() {
         let data = [1, 2];
         let mut deserializer = super::Deserializer::from_slice(&data);
-        assert_matches!(deserializer.deserialize_u8(ValueVisitor), Ok(Value::U8(1)));
-        assert_matches!(deserializer.deserialize_u8(ValueVisitor), Ok(Value::U8(2)));
-        assert_matches!(deserializer.deserialize_u8(ValueVisitor), Err(Error::Io(_)));
+        assert_matches!(
+            deserializer.by_ref().deserialize_u8(ValueVisitor),
+            Ok(Value::U8(1))
+        );
+        assert_matches!(
+            deserializer.by_ref().deserialize_u8(ValueVisitor),
+            Ok(Value::U8(2))
+        );
+        assert_matches!(
+            deserializer.by_ref().deserialize_u8(ValueVisitor),
+            Err(Error::Io(_))
+        );
     }
 
     #[test]
@@ -596,15 +856,15 @@ mod tests {
         let data = [1, 0, 2, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_i16(ValueVisitor),
+            deserializer.by_ref().deserialize_i16(ValueVisitor),
             Ok(Value::I16(1))
         );
         assert_matches!(
-            deserializer.deserialize_i16(ValueVisitor),
+            deserializer.by_ref().deserialize_i16(ValueVisitor),
             Ok(Value::I16(2))
         );
         assert_matches!(
-            deserializer.deserialize_i16(ValueVisitor),
+            deserializer.by_ref().deserialize_i16(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -614,15 +874,15 @@ mod tests {
         let data = [1, 0, 2, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_u16(ValueVisitor),
+            deserializer.by_ref().deserialize_u16(ValueVisitor),
             Ok(Value::U16(1))
         );
         assert_matches!(
-            deserializer.deserialize_u16(ValueVisitor),
+            deserializer.by_ref().deserialize_u16(ValueVisitor),
             Ok(Value::U16(2))
         );
         assert_matches!(
-            deserializer.deserialize_u16(ValueVisitor),
+            deserializer.by_ref().deserialize_u16(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -632,15 +892,15 @@ mod tests {
         let data = [1, 0, 0, 0, 2, 0, 0, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_i32(ValueVisitor),
+            deserializer.by_ref().deserialize_i32(ValueVisitor),
             Ok(Value::I32(1))
         );
         assert_matches!(
-            deserializer.deserialize_i32(ValueVisitor),
+            deserializer.by_ref().deserialize_i32(ValueVisitor),
             Ok(Value::I32(2))
         );
         assert_matches!(
-            deserializer.deserialize_i32(ValueVisitor),
+            deserializer.by_ref().deserialize_i32(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -650,15 +910,15 @@ mod tests {
         let data = [1, 0, 0, 0, 2, 0, 0, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_u32(ValueVisitor),
+            deserializer.by_ref().deserialize_u32(ValueVisitor),
             Ok(Value::U32(1))
         );
         assert_matches!(
-            deserializer.deserialize_u32(ValueVisitor),
+            deserializer.by_ref().deserialize_u32(ValueVisitor),
             Ok(Value::U32(2))
         );
         assert_matches!(
-            deserializer.deserialize_u32(ValueVisitor),
+            deserializer.by_ref().deserialize_u32(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -668,15 +928,15 @@ mod tests {
         let data = [1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_i64(ValueVisitor),
+            deserializer.by_ref().deserialize_i64(ValueVisitor),
             Ok(Value::I64(1))
         );
         assert_matches!(
-            deserializer.deserialize_i64(ValueVisitor),
+            deserializer.by_ref().deserialize_i64(ValueVisitor),
             Ok(Value::I64(2))
         );
         assert_matches!(
-            deserializer.deserialize_i64(ValueVisitor),
+            deserializer.by_ref().deserialize_i64(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -686,15 +946,15 @@ mod tests {
         let data = [1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_u64(ValueVisitor),
+            deserializer.by_ref().deserialize_u64(ValueVisitor),
             Ok(Value::U64(1))
         );
         assert_matches!(
-            deserializer.deserialize_u64(ValueVisitor),
+            deserializer.by_ref().deserialize_u64(ValueVisitor),
             Ok(Value::U64(2))
         );
         assert_matches!(
-            deserializer.deserialize_u64(ValueVisitor),
+            deserializer.by_ref().deserialize_u64(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -705,15 +965,15 @@ mod tests {
         let data = [0x14, 0xae, 0x29, 0x42, 0xff, 0xff, 0xff, 0x7f];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_f32(ValueVisitor),
+            deserializer.by_ref().deserialize_f32(ValueVisitor),
             Ok(Value::F32(f)) => assert_eq!(f, 42.42)
         );
         assert_matches!(
-            deserializer.deserialize_f32(ValueVisitor),
+            deserializer.by_ref().deserialize_f32(ValueVisitor),
             Ok(Value::F32(f)) => assert!(f.is_nan())
         );
         assert_matches!(
-            deserializer.deserialize_f32(ValueVisitor),
+            deserializer.by_ref().deserialize_f32(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -726,15 +986,15 @@ mod tests {
         ];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_f64(ValueVisitor),
+            deserializer.by_ref().deserialize_f64(ValueVisitor),
             Ok(Value::F64(f)) => assert_eq!(f, 42.42)
         );
         assert_matches!(
-            deserializer.deserialize_f64(ValueVisitor),
+            deserializer.by_ref().deserialize_f64(ValueVisitor),
             Ok(Value::F64(f)) => assert!(f.is_nan())
         );
         assert_matches!(
-            deserializer.deserialize_f64(ValueVisitor),
+            deserializer.by_ref().deserialize_f64(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -744,15 +1004,15 @@ mod tests {
         let data = [4, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_bytes(ValueVisitor),
+            deserializer.by_ref().deserialize_bytes(ValueVisitor),
             Ok(Value::Bytes(v)) => assert_eq!(v, [1, 2, 3, 4])
         );
         assert_matches!(
-            deserializer.deserialize_bytes(ValueVisitor),
+            deserializer.by_ref().deserialize_bytes(ValueVisitor),
             Ok(Value::Bytes(v)) => assert!(v.is_empty())
         );
         assert_matches!(
-            deserializer.deserialize_bytes(ValueVisitor),
+            deserializer.by_ref().deserialize_bytes(ValueVisitor),
             Err(Error::Io(_))
         );
 
@@ -767,7 +1027,7 @@ mod tests {
         let data = [4, 0, 0, 0, 1, 2, 3];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_bytes(ValueVisitor),
+            deserializer.by_ref().deserialize_bytes(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -794,7 +1054,10 @@ mod tests {
     fn test_deserializer_deserialize_unit() {
         let data = [];
         let mut deserializer = super::Deserializer::from_slice(&data);
-        assert_matches!(deserializer.deserialize_unit(ValueVisitor), Ok(Value::Unit));
+        assert_matches!(
+            deserializer.by_ref().deserialize_unit(ValueVisitor),
+            Ok(Value::Unit)
+        );
     }
 
     #[test]
@@ -875,15 +1138,15 @@ mod tests {
         let mut deserializer = super::Deserializer::from_slice(&data);
         // `deserialize_char` yields strings, the visitor decides if it handles them or not.
         assert_matches!(
-            deserializer.deserialize_char(ValueVisitor),
+            deserializer.by_ref().deserialize_char(ValueVisitor),
             Ok(Value::String(s)) => assert_eq!(s, "a")
         );
         assert_matches!(
-            deserializer.deserialize_char(ValueVisitor),
+            deserializer.by_ref().deserialize_char(ValueVisitor),
             Ok(Value::String(s)) => assert_eq!(s, "bc")
         );
         assert_matches!(
-            deserializer.deserialize_char(ValueVisitor),
+            deserializer.by_ref().deserialize_char(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -894,15 +1157,15 @@ mod tests {
         let data = [1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99, 3, 0, 0, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_str(ValueVisitor),
+            deserializer.by_ref().deserialize_str(ValueVisitor),
             Ok(Value::String(s)) => assert_eq!(s, "a")
         );
         assert_matches!(
-            deserializer.deserialize_str(ValueVisitor),
+            deserializer.by_ref().deserialize_str(ValueVisitor),
             Ok(Value::String(s)) => assert_eq!(s, "bc")
         );
         assert_matches!(
-            deserializer.deserialize_str(ValueVisitor),
+            deserializer.by_ref().deserialize_str(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -913,19 +1176,19 @@ mod tests {
         let data = [1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99, 0, 0, 0, 0, 3, 0, 0, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_string(ValueVisitor),
+            deserializer.by_ref().deserialize_string(ValueVisitor),
             Ok(Value::String(s)) => assert_eq!(s, "a")
         );
         assert_matches!(
-            deserializer.deserialize_string(ValueVisitor),
+            deserializer.by_ref().deserialize_string(ValueVisitor),
             Ok(Value::String(s)) => assert_eq!(s, "bc")
         );
         assert_matches!(
-            deserializer.deserialize_string(ValueVisitor),
+            deserializer.by_ref().deserialize_string(ValueVisitor),
             Ok(Value::String(s)) => assert!(s.is_empty())
         );
         assert_matches!(
-            deserializer.deserialize_string(ValueVisitor),
+            deserializer.by_ref().deserialize_string(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -935,19 +1198,19 @@ mod tests {
         let data = [1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99, 0, 0, 0, 0, 3, 0, 0, 0];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_byte_buf(ValueVisitor),
+            deserializer.by_ref().deserialize_byte_buf(ValueVisitor),
             Ok(Value::Bytes(b)) => assert_eq!(b, [97])
         );
         assert_matches!(
-            deserializer.deserialize_byte_buf(ValueVisitor),
+            deserializer.by_ref().deserialize_byte_buf(ValueVisitor),
             Ok(Value::Bytes(b)) => assert_eq!(b, [98, 99])
         );
         assert_matches!(
-            deserializer.deserialize_byte_buf(ValueVisitor),
+            deserializer.by_ref().deserialize_byte_buf(ValueVisitor),
             Ok(Value::Bytes(b)) => assert!(b.is_empty())
         );
         assert_matches!(
-            deserializer.deserialize_byte_buf(ValueVisitor),
+            deserializer.by_ref().deserialize_byte_buf(ValueVisitor),
             Err(Error::Io(_))
         );
     }
@@ -994,7 +1257,9 @@ mod tests {
         let data = [];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_unit_struct("MyStruct", ValueVisitor),
+            deserializer
+                .by_ref()
+                .deserialize_unit_struct("MyStruct", ValueVisitor),
             Ok(Value::Unit)
         );
     }
@@ -1035,7 +1300,7 @@ mod tests {
         let data = [];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_identifier(ValueVisitor),
+            deserializer.by_ref().deserialize_identifier(ValueVisitor),
             Ok(Value::Unit)
         );
     }
@@ -1048,7 +1313,7 @@ mod tests {
         let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_i128(ValueVisitor),
+            deserializer.by_ref().deserialize_i128(ValueVisitor),
             Err(Error::Custom(_))
         );
     }
@@ -1058,7 +1323,7 @@ mod tests {
         let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_u128(ValueVisitor),
+            deserializer.by_ref().deserialize_u128(ValueVisitor),
             Err(Error::Custom(_))
         );
     }
@@ -1068,7 +1333,7 @@ mod tests {
         let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_any(ValueVisitor),
+            deserializer.by_ref().deserialize_any(ValueVisitor),
             Err(Error::CannotDeserializeAny)
         );
     }
@@ -1078,7 +1343,7 @@ mod tests {
         let data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let mut deserializer = super::Deserializer::from_slice(&data);
         assert_matches!(
-            deserializer.deserialize_any(ValueVisitor),
+            deserializer.by_ref().deserialize_any(ValueVisitor),
             Err(Error::CannotDeserializeAny)
         );
     }

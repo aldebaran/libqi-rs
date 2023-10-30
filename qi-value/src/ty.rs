@@ -63,28 +63,59 @@ impl std::fmt::Display for Type {
             Type::Object => f.write_str("object"),
             Type::Option(t) => {
                 f.write_str("option(")?;
-                write_option_type(f, t.as_deref())?;
+                DisplayTypeOption(t).fmt(f)?;
                 f.write_str(")")
             }
             Type::List(t) => {
                 f.write_str("list(")?;
-                write_option_type(f, t.as_deref())?;
+                DisplayTypeOption(t).fmt(f)?;
                 f.write_str(")")
             }
             Type::VarArgs(t) => {
                 f.write_str("varargs(")?;
-                write_option_type(f, t.as_deref())?;
+                DisplayTypeOption(t).fmt(f)?;
                 f.write_str(")")
             }
             Type::Map { key, value } => {
                 f.write_str("map(")?;
-                write_option_type(f, key.as_deref())?;
+                DisplayTypeOption(key).fmt(f)?;
                 f.write_str(",")?;
-                write_option_type(f, value.as_deref())?;
+                DisplayTypeOption(value).fmt(f)?;
                 f.write_str(")")
             }
             Type::Tuple(t) => t.fmt(f),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct DisplayTypeOption<'a, T>(pub &'a Option<T>);
+
+impl<T> std::fmt::Display for DisplayTypeOption<'_, T>
+where
+    T: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            Some(ty) => ty.fmt(f),
+            None => f.write_str("dynamic"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct DisplayTypeTuple<'a, T>(pub &'a Vec<Option<T>>);
+
+impl<T> std::fmt::Display for DisplayTypeTuple<'_, T>
+where
+    T: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("(")?;
+        for t in self.0 {
+            DisplayTypeOption(t).fmt(f)?;
+        }
+        f.write_str(")")
     }
 }
 
@@ -192,7 +223,7 @@ impl std::fmt::Display for Tuple {
             if idx > 0 {
                 f.write_str(",")?;
             }
-            write_option_type(f, element.as_ref())?;
+            DisplayTypeOption(&element).fmt(f)?;
         }
         f.write_str(")")?;
         if let Some(annotations) = self.annotations() {
@@ -360,10 +391,23 @@ pub struct ZipStructFieldsSizeError {
     pub element_count: usize,
 }
 
-fn write_option_type(f: &mut std::fmt::Formatter<'_>, t: Option<&Type>) -> std::fmt::Result {
-    use std::fmt::Display;
-    match t {
-        Some(t) => t.fmt(f),
-        None => f.write_str("dynamic"),
-    }
+pub fn common_type(t1: Option<Type>, t2: Option<Type>) -> Option<Type> {
+    t1.zip(t2).filter(|(t1, t2)| t1 == t2).map(|(t1, _)| t1)
+}
+
+pub fn reduce_type<C>(c: C) -> Option<Type>
+where
+    C: IntoIterator<Item = Type>,
+{
+    c.into_iter().map(Some).reduce(common_type).flatten()
+}
+
+pub fn reduce_map_types<C>(c: C) -> (Option<Type>, Option<Type>)
+where
+    C: IntoIterator<Item = (Type, Type)>,
+{
+    c.into_iter()
+        .map(|(k, v)| (Some(k), Some(v)))
+        .reduce(|(ck, cv), (k, v)| (common_type(ck, k), common_type(cv, v)))
+        .unwrap_or((None, None))
 }

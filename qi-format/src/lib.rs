@@ -6,21 +6,17 @@
 const FALSE_BOOL: u8 = 0;
 const TRUE_BOOL: u8 = 1;
 
-mod value;
-#[doc(inline)]
-pub use value::Value;
-
 mod read;
 
 mod write;
 
 pub mod ser;
 #[doc(inline)]
-pub use ser::{to_value, Serializer};
+pub use ser::{to_bytes, Serializer};
 
 pub mod de;
 #[doc(inline)]
-pub use de::{from_value, Deserializer};
+pub use de::{from_bytes, Deserializer};
 
 #[cfg(test)]
 mod tests;

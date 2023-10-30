@@ -1,8 +1,9 @@
 use crate::{
     ty::{self, StructAnnotations, Tuple, Type},
-    Typed,
+    AsValue, FromValue, FromValueError, Reflect, Value,
 };
 use derive_more::{From, Into};
+use std::borrow::Cow;
 
 #[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, From, Into)]
 #[into(owned, ref, ref_mut)]
@@ -22,9 +23,44 @@ impl Signature {
     }
 }
 
-impl Typed for Signature {
+impl Reflect for Signature {
     fn ty() -> Option<Type> {
         Some(Type::String)
+    }
+}
+
+impl AsValue for Signature {
+    fn value_type(&self) -> Type {
+        <Self as Reflect>::ty().unwrap()
+    }
+
+    fn as_value(&self) -> Value<'_> {
+        Value::String(Cow::Owned(self.to_string()))
+    }
+}
+
+impl FromValue<'_> for Signature {
+    fn from_value(value: Value<'_>) -> Result<Self, FromValueError> {
+        match value {
+            Value::String(s) => s
+                .parse()
+                .map_err(|err: FromStrError| FromValueError::Custom(err.to_string())),
+            _ => Err(FromValueError::value_type_mismatch::<Self>(&value)),
+        }
+    }
+}
+
+impl From<Signature> for Value<'_> {
+    fn from(sig: Signature) -> Self {
+        Value::String(sig.to_string().into())
+    }
+}
+
+impl TryFrom<Value<'_>> for Signature {
+    type Error = FromValueError;
+
+    fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
+        value.cast()
     }
 }
 
@@ -535,7 +571,6 @@ mod tests {
 
     #[test]
     fn test_signature_to_from_string() {
-        use pretty_assertions::assert_eq;
         macro_rules! assert_sig_to_str {
             ($t:expr, $s:expr) => {{
                 assert_eq!(

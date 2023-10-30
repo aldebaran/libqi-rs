@@ -1,0 +1,5 @@
+error: `qi(transparent)` requires struct to have at most one field
+ --> tests/value/fail_struct_transparent_more_than_one_field.rs:9:8
+  |
+9 | struct S {
+  |        ^

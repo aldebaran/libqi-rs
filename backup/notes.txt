@@ -1,0 +1,306 @@
+Protocol:
+╔═══════════════════════╤═══════════════════════╤═══════════════════════╤═══════════════════════╗
+║           1           │           2           │           3           │           4           ║
+╟──┬──┬──┬──┬──┬──┬──┬──┼──┬──┬──┬──┬──┬──┬──┬──┼──┬──┬──┬──┬──┬──┬──┬──┼──┬──┬──┬──┬──┬──┬──┬──╢
+║ 0│ 1│ 2│ 3│ 4│ 5│ 6│ 7│ 8│ 9│10│11│12│13│14│15│16│17│18│19│20│21│22│23│24│25│26│27│28│29│30│31║
+╠══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╧══╣
+║                                                                                               ║
+║                                         magic cookie                                          ║
+║                                                                                               ║
+╟───────────────────────────────────────────────────────────────────────────────────────────────╢
+║                                                                                               ║
+║                                          identifier                                           ║
+║                                                                                               ║
+╟───────────────────────────────────────────────────────────────────────────────────────────────╢
+║                                                                                               ║
+║                                         payload size                                          ║
+║                                                                                               ║
+╟───────────────────────────────────────────────┬───────────────────────┬─────────────────┬──┬──╢
+║                                               │                       │                 │Re│Dy║
+║                    version                    │         type          │ flags(reserved) │tT│nP║
+║                                               │                       │                 │yp│ay║
+╟───────────────────────────────────────────────┴───────────────────────┴─────────────────┴──┴──╢
+║                                                                                               ║
+║                                            service                                            ║
+║                                                                                               ║
+╟───────────────────────────────────────────────────────────────────────────────────────────────╢
+║                                                                                               ║
+║                                            object                                             ║
+║                                                                                               ║
+╟───────────────────────────────────────────────────────────────────────────────────────────────╢
+║                                                                                               ║
+║                                            action                                             ║
+║                                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+ -- magiccookie uin32, big endian
+ value = 0x42dead42, -- encoded as big endian in the message.
+
+ -- id, uint32, little endian
+ some unique id for messages, usually a counter incremented everytime a request is made
+
+ -- size/len, uint32, little endian
+ size of the payload. may be 0
+
+ -- version, uint16, little endian
+ always 0
+
+ -- type, uint8, little endian
+ see below
+
+ -- flags, uint8, little endian
+ may have 2 bits set, never really used
+
+ -- service, uint32, little endian
+ see below
+
+ -- object, uint32, little endian
+ see below
+
+ -- action, uint32, little endian
+ see below
+
+ type = {
+     enum = {
+         none       = {id = 0, text = "none"},
+         call       = {id = 1, text = "call"},
+         reply      = {id = 2, text = "reply"},
+         error      = {id = 3, text = "error"},
+         post       = {id = 4, text = "post"},
+         event      = {id = 5, text = "event"},
+         capability = {id = 6, text = "capability"},
+         cancel     = {id = 7, text = "cancel"},
+         canceled   = {id = 8, text = "canceled"},
+     },
+ },
+
+ service = {
+     enum = {
+         server = {id = 0, text = "Server"},
+         sd     = {id = 1, text = "ServiceDirectory"},
+     },
+ },
+ object = {
+     boundobject_host_ids = {
+         min =  0x00000002, -- luacheck: ignore
+         max =  0x7fffffff, -- luacheck: ignore
+     },
+     remoteobject_host_ids = {
+         min = 0x80000000, -- luacheck: ignore
+         max = 0xffffffff, -- luacheck: ignore
+     },
+     -- special objects
+     enum = {
+         null                = {id = 0, text = "null"},
+         service_main_object = {id = 1, text = "service main object"},
+     },
+ },
+ action = {
+     -- The meaning of an action id depends on the service and its object. If the service is
+     -- 'Server', then actions must be some special values. The 'ServiceDirectory' service
+     -- main object also as some special actions.
+     boundobject = {
+         enum = {
+             register_event = { id = 0, text = "connect to signal (method: registerEvent)" },
+             unregister_event = { id = 1, text = "disconnect from signal (method: unregisterEvent)" },
+             metaobject = { id = 2, text = "get the metaobject (method: metaObject)" },
+             terminate = { id = 3, text = "release object (method: terminate)" },
+             property = { id = 5, -- no action with id 4 surprisingly text = "get a property (method: property)" },
+             set_property = { id = 6, text = "set a property (method: setProperty)" },
+             properties = { id = 7, text = "get property list (method: properties)" },
+             register_event_with_signature = { id = 8, text = "connect to signal with signature (method: registerEventWithSignature)" },
+
+    /// Starting id of features handled by Manageable
+    static const uint32_t startId = 80;
+    /// Stop id of features handled by Manageable
+    static const uint32_t endId = 99;
+
+    // Manageable
+    unsigned int id = startId;
+    builder.advertiseMethod("isStatsEnabled", &Manageable::isStatsEnabled, MetaCallType_Auto, id++); => 80
+    builder.advertiseMethod("enableStats", &Manageable::enableStats,       MetaCallType_Auto, id++); => 81
+    builder.advertiseMethod("stats", &Manageable::stats,                   MetaCallType_Auto, id++); => 82
+    builder.advertiseMethod("clearStats", &Manageable::clearStats,         MetaCallType_Auto, id++); => 83
+    builder.advertiseMethod("isTraceEnabled", &Manageable::isTraceEnabled, MetaCallType_Auto, id++); => 84
+    builder.advertiseMethod("enableTrace", &Manageable::enableTrace,       MetaCallType_Auto, id++); => 85
+    builder.advertiseSignal("traceObject", &Manageable::traceObject, id++);                          => 86
+    QI_ASSERT(id <= endId);
+
+    static const unsigned int qiObjectSpecialMemberMaxUid = 100;
+
+         },
+     },
+     server = {
+         enum = {
+             connect      = {id = 4, text = "connect"},
+             authenticate = {id = 8, text = "authenticate"},
+         }
+     },
+     sd = {
+         enum = {
+             service = { id = 100, text = "get a service (method: service)" },
+             services = { id = 101, text = "get all services (method: services)" },
+             register_service = { id = 102, text = "register a service (method: registerService)" },
+             unregister_service = { id = 103, text = "unregister a service (method: unregisterService)" },
+             service_ready = { id = 104, text = "a service is ready (method: serviceReady)" },
+             update_service_info = { id = 105, text = "update information of a service (method: updateServiceInfo)"},
+             service_added = { id = 106, text = "a service has been added (signal: serviceAdded)" },
+             service_removed = { id = 107, text = "a service has been removed (signal: serviceRemoved)" },
+             machine_id = { id = 108, text = "get the machine id (method: machineId)" },
+         },
+     },
+ },
+
+ header size: 28 bytes
+
+ =============================================================================================================
+ Capabilities
+ =============================================================================================================
+
+namespace capabilityname
+{
+  char const * const clientServerSocket    = "ClientServerSocket";
+  char const * const metaObjectCache       = "MetaObjectCache";
+  char const * const messageFlags          = "MessageFlags";
+  char const * const remoteCancelableCalls = "RemoteCancelableCalls";
+  char const * const objectPtrUid          = "ObjectPtrUID";
+  char const * const relativeEndpointUri   = "RelativeEndpointURI";
+}
+
+{ { capabilityname::clientServerSocket   , AnyValue::from(true)  }
+, { capabilityname::messageFlags         , AnyValue::from(true)  }
+, { capabilityname::metaObjectCache      , AnyValue::from(false) }
+, { capabilityname::remoteCancelableCalls, AnyValue::from(true)  }
+, { capabilityname::objectPtrUid         , AnyValue::from(true)  }
+, { capabilityname::relativeEndpointUri  , AnyValue::from(true)  }
+
+ =============================================================================================================
+ Server connection procedure
+ =============================================================================================================
+
+ Server POV
+ ==========
+
+ Note: messages must have service == 0, object == 0
+
+ - authentication
+
+   authentication is enforced:
+   ---------------------------
+   - if not auth request msg(service:server, type:call, function:authenticate)
+     - send auth error msg(type:error, value:error message as dynamic value)
+     - reject connection
+   - get message value into authentication data (map<String, Value>)
+   - send reply with value auth result as capability map
+   - mark client as authenticated
+
+   authentication is not enforced:
+   -------------------------------
+   - if is auth request
+     - send successful auth reply (AuthProvider::State_Key: unsigned int(AuthProvider::State_Done))
+
+ - send capabilities
+   type: capability, service: server, value: capabilities(map<String, Value>)
+   msg.setValue(socketInfo.extractCapabilities(), typeOf<CapabilityMap>()->signature());
+
+ - ignore message after that, unless it's an auth request, in which case, respond auth ok
+
+ Client POV
+ ==========
+
+ - send auth request msg(service:server, type:call, function:authenticate)
+ - handle auth reply msg(service:server, type:reply, function:authenticate, value:auth result),
+ or error msg(service:server, type:error, function:authenticate, value:error msg as dynamic value)
+ - send capabilities
+
+ =============================================================================================================
+
+  enum TypeKind
+  {
+    TypeKind_Unknown  = 0,
+    TypeKind_Void     = 1,
+    TypeKind_Int      = 2,
+    TypeKind_Float    = 3,
+    TypeKind_String   = 4,
+    TypeKind_List     = 5,
+    TypeKind_Map      = 6,
+    TypeKind_Object   = 7,
+    TypeKind_Pointer  = 8,
+    TypeKind_Tuple    = 9,
+    TypeKind_Dynamic  = 10,
+    TypeKind_Raw      = 11,
+    TypeKind_Iterator = 13,
+    TypeKind_Function = 14,
+    TypeKind_Signal   = 15,
+    TypeKind_Property = 16,
+    TypeKind_VarArgs  = 17,
+    TypeKind_Optional = 18,
+  };
+
+ enum Signature::Type {
+   // Used only for empty containers when Dynamic resolution is used.
+   Type_None     = '_',
+   Type_Bool     = 'b',
+
+   Type_Int8     = 'c',
+   Type_UInt8    = 'C',
+
+   Type_Void     = 'v',
+
+   Type_Int16    = 'w',
+   Type_UInt16   = 'W',
+
+   Type_Int32    = 'i',
+   Type_UInt32   = 'I',
+
+   Type_Int64    = 'l',
+   Type_UInt64   = 'L',
+
+   Type_Float    = 'f',
+   Type_Double   = 'd',
+
+   Type_String   = 's',
+   Type_List     = '[',
+   Type_List_End = ']',
+
+   Type_Map      = '{',
+   Type_Map_End  = '}',
+
+   Type_Tuple    = '(',
+   Type_Tuple_End= ')',
+
+   Type_Dynamic  = 'm',
+
+   Type_Raw      = 'r',
+
+   //This type should not be used, it's will be removed when we get ride of legacy void *.
+   Type_Pointer  = '*',
+
+   Type_Object   = 'o',
+   Type_VarArgs  = '#',
+   Type_KwArgs   = '~',
+
+   Type_Optional = '+',
+
+   Type_Unknown  = 'X',
+ };
+
+enum ServiceDirectory {
+  Local(Local)
+  Remote(Remote)
+}
+Session == ServiceDirectory
+
+Backlog:
+
+- Connect to SD
+- List services
+- Connect to client from SD
+- Call client method
+- Connect to client signal
+- Set client property
+- Expose service
+- authentification, TLS + mTLS
+
+Bonus:
+Tools -> qicli

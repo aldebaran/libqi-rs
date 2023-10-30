@@ -1,5 +1,4 @@
-use derive_more::{From, Index, Into, IntoIterator};
-use qi_type::{self as ty, Type, Typed};
+use derive_more::{From, Index, Into};
 
 /// The [`Map`] value represents an association of keys to values in the `qi` type system.
 ///
@@ -14,14 +13,24 @@ use qi_type::{self as ty, Type, Typed};
 ///
 /// This type guarantees the unicity of keys. When an insertion is done, if the key already exists
 /// in the map, its value is overwritten with the inserted one.
-#[derive(
-    Default, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Index, IntoIterator, Debug, Hash,
-)]
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, From, Into, Index, Debug, Hash)]
 pub struct Map<K, V>(Vec<(K, V)>);
 
 impl<K, V> Map<K, V> {
     pub fn new() -> Self {
         Self(Vec::new())
+    }
+
+    pub fn with_capacity(size: usize) -> Self {
+        Self(Vec::with_capacity(size))
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &K> {
@@ -113,16 +122,6 @@ impl<K, V> Map<K, V> {
     }
 }
 
-impl<K, V> Typed for Map<K, V>
-where
-    K: Typed,
-    V: Typed,
-{
-    fn ty() -> Option<Type> {
-        Some(ty::map(K::ty(), V::ty()))
-    }
-}
-
 #[derive(Debug)]
 pub enum Entry<'a, K, V> {
     Occupied(OccupiedEntry<'a, K, V>),
@@ -179,6 +178,15 @@ impl<'a, K, V> VacantEntry<'a, K, V> {
     pub fn insert(self, value: V) -> &'a mut V {
         self.vec.push((self.key, value));
         &mut self.vec.last_mut().unwrap().1
+    }
+}
+
+impl<K, V> std::iter::IntoIterator for Map<K, V> {
+    type Item = (K, V);
+    type IntoIter = std::vec::IntoIter<(K, V)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 

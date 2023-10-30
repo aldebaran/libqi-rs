@@ -1,5 +1,5 @@
 [package]
-name = "qi-derive"
+name = "qi-macros"
 
 license-file = "../LICENSE.txt"
 repository = "https://github.com/nyibbang/libqi-rs"
@@ -17,13 +17,7 @@ proc-macro2 = "1.0.67"
 convert_case = "0.6.0"
 thiserror = "1.0.49"
 
-[[test]]
-name = "typed_tests"
-path = "tests/typed_tests.rs"
-
 [dev-dependencies]
-qi-type = { path = "../qi-type" }
-trybuild = "1.0.85"
 assert_matches = "1.5.0"
-syn = { version = "2.0.37", features = ["extra-traits"] }
+syn = { version = "2.0.37", features = ["full", "extra-traits"] }
 pretty_assertions = "1.4.0"

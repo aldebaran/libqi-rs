@@ -14,9 +14,9 @@ impl CapabilitiesMap {
     pub fn set_capability<K, V>(&mut self, name: K, value: V)
     where
         K: Into<String>,
-        V: Into<Dynamic<bool>>,
+        V: Into<bool>,
     {
-        self.0.insert(name.into(), value.into());
+        self.0.insert(name.into(), Dynamic(value.into()));
     }
 
     pub fn iter(&self) -> <&Self as IntoIterator>::IntoIter {
@@ -61,11 +61,11 @@ impl<'map> std::iter::IntoIterator for &'map CapabilitiesMap {
 impl<K, V> std::iter::FromIterator<(K, V)> for CapabilitiesMap
 where
     K: Into<String>,
-    V: Into<Dynamic<bool>>,
+    V: Into<bool>,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         Self(MapImpl::from_iter(
-            iter.into_iter().map(|(k, v)| (k.into(), v.into())),
+            iter.into_iter().map(|(k, v)| (k.into(), Dynamic(v.into()))),
         ))
     }
 }
@@ -73,11 +73,11 @@ where
 impl<K, V> std::iter::Extend<(K, V)> for CapabilitiesMap
 where
     K: Into<String>,
-    V: Into<Dynamic<bool>>,
+    V: Into<bool>,
 {
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         self.0
-            .extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
+            .extend(iter.into_iter().map(|(k, v)| (k.into(), Dynamic(v.into()))))
     }
 }
 

@@ -9,14 +9,13 @@ edition = "2021"
 rust-version = "1.63"
 
 [dependencies]
-qi-derive = { path = "../qi-derive" }
-qi-type = { path = "../qi-type" }
-bytes = { version = "1.4.0", features = ["serde"] }
+qi-macros = { path = "../qi-macros" }
 derive_more = "0.99.17"
 serde = { version = "1.0.152", features = ["derive"] }
-derive-new = "0.5.9"
+thiserror = "1.0.39"
+seq-macro = "0.3.5"
+ordered-float = { version = "4.1.1", features = ["serde"] }
+bytes = { version = "1.5.0", features = ["serde"] }
 
 [dev-dependencies]
-assert_matches = "1.5.0"
 serde_test = "1.0.152"
-serde-value = "0.7.0"

@@ -1,5 +1,5 @@
-use crate::{capabilities::CapabilitiesMap, format, value};
-use value::Dynamic;
+use crate::{capabilities::CapabilitiesMap, format, value::Dynamic};
+use bytes::Bytes;
 
 #[derive(
     Default,
@@ -93,30 +93,7 @@ impl Default for Type {
     }
 }
 
-bitflags::bitflags! {
-    #[derive(
-        Default,
-        Clone,
-        Copy,
-        PartialEq,
-        Eq,
-        PartialOrd,
-        Ord,
-        Hash,
-        Debug,
-        derive_more::Display,
-        serde::Serialize,
-        serde::Deserialize
-    )]
-    #[display(fmt = "{:b}", "self.bits()")]
-    pub struct Flags: u8 {
-        const DYNAMIC_PAYLOAD = 0b00000001;
-        const RETURN_TYPE = 0b00000010;
-    }
-}
-
 #[derive(
-    derive_new::new,
     Default,
     Clone,
     Copy,
@@ -237,13 +214,12 @@ impl Action {
     serde::Serialize,
     serde::Deserialize,
 )]
-#[display(fmt = "header(id={id}, {ty}, version={version}, flags={flags}, address={address})")]
+#[display(fmt = "header(id={id}, {ty}, version={version}, address={address})")]
 pub struct Header {
     pub(crate) id: Id,
     pub(crate) ty: Type,
     pub(crate) body_size: usize,
     pub(crate) version: Version,
-    pub(crate) flags: Flags,
     pub(crate) address: Address,
 }
 
@@ -261,25 +237,24 @@ pub struct Header {
     serde::Deserialize,
 )]
 #[display(
-    fmt = "message({ty}, id={id}, version={version}, flags={flags}, address={address}, body={body})"
+    fmt = "message({ty}, id={id}, address={address}, body=[len={}])",
+    "body.len()"
 )]
 pub struct Message {
     pub(crate) id: Id,
     pub(crate) ty: Type,
     pub(crate) version: Version,
-    pub(crate) flags: Flags,
     pub(crate) address: Address,
-    pub(crate) body: format::Value,
+    pub(crate) body: Bytes,
 }
 
 impl Message {
-    pub fn new(header: Header, body: format::Value) -> Self {
+    pub fn new(header: Header, body: Bytes) -> Self {
         Self {
             id: header.id,
             ty: header.ty,
             version: header.version,
             address: header.address,
-            flags: header.flags,
             body,
         }
     }
@@ -380,12 +355,8 @@ impl Message {
         self.ty
     }
 
-    pub fn flags(&self) -> Flags {
-        self.flags
-    }
-
     pub fn body_size(&self) -> usize {
-        self.body.bytes_len()
+        self.body.len()
     }
 
     pub fn address(&self) -> Address {
@@ -398,21 +369,19 @@ impl Message {
             ty: self.ty,
             version: self.version,
             body_size: self.body_size(),
-            flags: self.flags,
             address: self.address,
         }
     }
 
-    pub fn body(&self) -> format::Value {
-        self.body.clone()
+    pub fn body(&self) -> &Bytes {
+        &self.body
     }
 
     pub fn deserialize_body<T>(&self) -> Result<T, format::Error>
     where
         T: serde::de::DeserializeOwned,
     {
-        // TODO: Check DYNAMIC_PAYLOAD flag
-        self.body.to_deserializable()
+        format::from_bytes(&self.body)
     }
 
     pub fn deserialize_error_description(&self) -> Result<String, format::Error> {
@@ -450,7 +419,7 @@ impl Builder {
         self
     }
 
-    pub fn set_body(mut self, body: format::Value) -> Self {
+    pub fn set_body(mut self, body: Bytes) -> Self {
         self.0.body = body;
         self
     }
@@ -462,213 +431,15 @@ impl Builder {
     where
         T: serde::Serialize,
     {
-        // TODO: if flags has dynamic_payload bit, serialize the value as a dynamic.
-        self.0.body = format::Value::from_serializable(value)?;
+        self.0.body = format::to_bytes(value)?;
         Ok(self)
     }
 
     pub fn set_error_description(self, description: &str) -> Result<Self, format::Error> {
-        self.set_value(&Dynamic::from(description))
+        self.set_value(&Dynamic(description))
     }
 
     pub fn build(self) -> Message {
         self.0
     }
 }
-
-// #[derive(
-//     Default,
-//     Clone,
-//     PartialEq,
-//     Eq,
-//     PartialOrd,
-//     Ord,
-//     Hash,
-//     Debug,
-//     serde::Serialize,
-//     serde::Deserialize,
-// )]
-// pub struct Call {
-//     pub(crate) id: Id,
-//     pub(crate) address: Address,
-//     pub(crate) value: format::Value,
-// }
-
-// impl From<Call> for Message {
-//     fn from(call: Call) -> Self {
-//         Message::call(call.id, call.address)
-//             .set_body(call.value)
-//             .build()
-//     }
-// }
-
-// #[derive(
-//     Default,
-//     Clone,
-//     PartialEq,
-//     Eq,
-//     PartialOrd,
-//     Ord,
-//     Hash,
-//     Debug,
-//     serde::Serialize,
-//     serde::Deserialize,
-// )]
-// pub struct Post {
-//     pub(crate) id: Id,
-//     pub(crate) address: Address,
-//     pub(crate) value: format::Value,
-// }
-
-// impl From<Post> for Message {
-//     fn from(post: Post) -> Self {
-//         Message::post(post.id, post.address)
-//             .set_body(post.value)
-//             .build()
-//     }
-// }
-
-// #[derive(
-//     Default,
-//     Clone,
-//     PartialEq,
-//     Eq,
-//     PartialOrd,
-//     Ord,
-//     Hash,
-//     Debug,
-//     serde::Serialize,
-//     serde::Deserialize,
-// )]
-// pub struct Event {
-//     pub(crate) id: Id,
-//     pub(crate) address: Address,
-//     pub(crate) value: format::Value,
-// }
-
-// impl From<Event> for Message {
-//     fn from(event: Event) -> Self {
-//         Message::event(event.id, event.address)
-//             .set_body(event.value)
-//             .build()
-//     }
-// }
-
-// #[derive(
-//     Default,
-//     Clone,
-//     PartialEq,
-//     Eq,
-//     PartialOrd,
-//     Ord,
-//     Hash,
-//     Debug,
-//     serde::Serialize,
-//     serde::Deserialize,
-// )]
-// pub struct Cancel {
-//     pub(crate) id: Id,
-//     pub(crate) address: Address,
-//     pub(crate) call_id: Id,
-// }
-
-// impl From<Cancel> for Message {
-//     fn from(cancel: Cancel) -> Self {
-//         Message::cancel(cancel.id, cancel.address, cancel.call_id).build()
-//     }
-// }
-
-// #[derive(
-//     Default, Clone, PartialEq, Eq, PartialOrd, Debug, serde::Serialize, serde::Deserialize,
-// )]
-// pub struct Capabilities {
-//     pub(crate) id: Id,
-//     pub(crate) address: Address,
-//     pub(crate) capabilities: CapabilitiesMap,
-// }
-
-// impl TryFrom<Capabilities> for Message {
-//     type Error = format::Error;
-//     fn try_from(capabilities: Capabilities) -> Result<Self, Self::Error> {
-//         Ok(Message::capabilities(
-//             capabilities.id,
-//             capabilities.address,
-//             &capabilities.capabilities,
-//         )?
-//         .build())
-//     }
-// }
-
-// #[derive(
-//     Default,
-//     Clone,
-//     PartialEq,
-//     Eq,
-//     PartialOrd,
-//     Ord,
-//     Hash,
-//     Debug,
-//     serde::Serialize,
-//     serde::Deserialize,
-// )]
-// pub struct Reply {
-//     pub(crate) id: Id,
-//     pub(crate) address: Address,
-//     pub(crate) value: format::Value,
-// }
-
-// impl From<Reply> for Message {
-//     fn from(reply: Reply) -> Self {
-//         Message::reply(reply.id, reply.address)
-//             .set_body(reply.value)
-//             .build()
-//     }
-// }
-
-// #[derive(
-//     Default,
-//     Clone,
-//     PartialEq,
-//     Eq,
-//     PartialOrd,
-//     Ord,
-//     Hash,
-//     Debug,
-//     serde::Serialize,
-//     serde::Deserialize,
-// )]
-// pub struct Error {
-//     pub(crate) id: Id,
-//     pub(crate) address: Address,
-//     pub(crate) description: String,
-// }
-
-// impl TryFrom<Error> for Message {
-//     type Error = format::Error;
-//     fn try_from(error: Error) -> Result<Self, Self::Error> {
-//         Ok(Message::error(error.id, error.address, &error.description)?.build())
-//     }
-// }
-
-// #[derive(
-//     Default,
-//     Clone,
-//     PartialEq,
-//     Eq,
-//     PartialOrd,
-//     Ord,
-//     Hash,
-//     Debug,
-//     serde::Serialize,
-//     serde::Deserialize,
-// )]
-// pub struct Canceled {
-//     pub(crate) id: Id,
-//     pub(crate) address: Address,
-// }
-
-// impl From<Canceled> for Message {
-//     fn from(canceled: Canceled) -> Self {
-//         Message::canceled(canceled.id, canceled.address).build()
-//     }
-// }

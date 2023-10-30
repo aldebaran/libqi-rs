@@ -1,8 +1,6 @@
-mod impls;
-
 use crate::{Signature, Type};
 
-pub trait Typed {
+pub trait Reflect {
     fn ty() -> Option<Type>;
 
     fn signature() -> Signature {

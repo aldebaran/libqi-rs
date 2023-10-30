@@ -1,7 +1,8 @@
 use crate::{
-    capabilities, format,
+    capabilities,
     message::{self, Address, Id, Message},
 };
+use bytes::Bytes;
 use futures::{
     future::{abortable, AbortHandle, Abortable, Aborted},
     ready,
@@ -140,7 +141,7 @@ impl Sink<Post> for Client {
 )]
 pub struct Call {
     pub(crate) address: message::Address,
-    pub(crate) value: format::Value,
+    pub(crate) body: Bytes,
 }
 
 #[derive(
@@ -156,7 +157,7 @@ pub struct Call {
     serde::Deserialize,
 )]
 pub struct Reply {
-    pub(crate) value: format::Value,
+    pub(crate) body: Bytes,
 }
 
 #[derive(
@@ -173,7 +174,7 @@ pub struct Reply {
 )]
 pub struct Post {
     pub(crate) address: message::Address,
-    pub(crate) value: format::Value,
+    pub(crate) body: Bytes,
 }
 
 #[derive(
@@ -190,7 +191,7 @@ pub struct Post {
 )]
 pub struct Event {
     pub(crate) address: message::Address,
-    pub(crate) value: format::Value,
+    pub(crate) body: Bytes,
 }
 
 #[derive(Default, Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
@@ -339,7 +340,7 @@ where
                 Some((id, address, result)) = self.service_call_futures.next(),
                     if !self.service_call_futures.is_terminated() => {
                     let message = match result {
-                        Ok(reply) => Message::reply(id, address).set_body(reply.value).build(),
+                        Ok(reply) => Message::reply(id, address).set_body(reply.body).build(),
                         Err(Abandon::Error(err)) => match Message::error(id, address, &err) {
                             Ok(builder) => builder.build(),
                             Err(err) => Message::error(id, address,
@@ -381,7 +382,7 @@ where
         let address = message.address;
         let call = Call {
             address,
-            value: message.body,
+            body: message.body,
         };
         let ready = self.service.ready().await;
         let service_call_future = match ready {
@@ -405,9 +406,7 @@ where
 
     fn handle_reply(&mut self, message: Message) {
         if let Some(client_call) = self.find_client_call_mut(message.id) {
-            client_call.handle_response(Ok(Reply {
-                value: message.body,
-            }));
+            client_call.handle_response(Ok(Reply { body: message.body }));
         }
     }
 
@@ -427,7 +426,7 @@ where
     async fn handle_post(&mut self, message: Message) {
         let post = Post {
             address: message.address,
-            value: message.body,
+            body: message.body,
         };
         let _res = self.posts.send(post).await;
     }
@@ -435,7 +434,7 @@ where
     fn handle_event(&self, message: Message) {
         let event = Event {
             address: message.address,
-            value: message.body,
+            body: message.body,
         };
         let notification = Notification::Event(event);
         let _res = self.notifications.send(notification);
@@ -493,11 +492,11 @@ where
                     response_sender: Some(response_sender),
                 };
                 self.client_calls.push(client_call);
-                let message = Message::call(id, call.address).set_body(call.value).build();
+                let message = Message::call(id, call.address).set_body(call.body).build();
                 Some(message)
             }
             Request::Post(post) => {
-                let message = Message::post(id, post.address).set_body(post.value).build();
+                let message = Message::post(id, post.address).set_body(post.body).build();
                 Some(message)
             }
         }

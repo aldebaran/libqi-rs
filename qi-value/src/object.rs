@@ -1,7 +1,19 @@
-use qi_type::{Signature, Type, Typed};
-use std::collections::HashMap;
+use crate::{AsValue, FromValue, FromValueError, Map, Reflect, Signature, Type, Value};
 
-#[derive(Clone, Default, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    qi_macros::IntoValue,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[qi(value = "crate")]
 pub struct Object {
     pub meta_object: MetaObject,
     pub service_id: ServiceId,
@@ -9,9 +21,31 @@ pub struct Object {
     pub object_uid: ObjectUid,
 }
 
-impl Typed for Object {
+impl Reflect for Object {
     fn ty() -> Option<Type> {
         Some(Type::Object)
+    }
+}
+
+impl AsValue for Object {
+    fn value_type(&self) -> Type {
+        Type::Object
+    }
+
+    fn as_value(&self) -> Value<'_> {
+        Value::Object(Box::new(self.clone()))
+    }
+}
+
+impl FromValue<'_> for Object {
+    fn from_value(value: Value<'_>) -> Result<Self, FromValueError> {
+        match value {
+            Value::Object(object) => Ok(*object),
+            _ => Err(FromValueError::TypeMismatch {
+                expected: "an Object".to_owned(),
+                actual: value.value_type().to_string(),
+            }),
+        }
     }
 }
 
@@ -21,20 +55,30 @@ impl std::fmt::Display for Object {
     }
 }
 
-pub(crate) fn deserialize_object<'de, D, V>(
-    deserializer: D,
-    visitor: V,
-) -> Result<V::Value, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    V: serde::de::Visitor<'de>,
-{
-    deserializer.deserialize_struct(
-        "Object",
-        &["meta_object", "service_id", "object_id", "object_uid"],
-        visitor,
-    )
-}
+#[derive(
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    qi_macros::Reflect,
+    qi_macros::FromValue,
+    qi_macros::StdTryFromValue,
+    qi_macros::AsValue,
+    qi_macros::IntoValue,
+    serde::Serialize,
+    serde::Deserialize,
+    derive_more::Display,
+    derive_more::From,
+    derive_more::Into,
+)]
+#[serde(transparent)]
+#[qi(value = "crate", transparent)]
+pub struct ServiceId(pub u32);
 
 #[derive(
     Default,
@@ -46,7 +90,11 @@ where
     Ord,
     Hash,
     Debug,
-    qi_derive::Typed,
+    qi_macros::Reflect,
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::StdTryFromValue,
+    qi_macros::IntoValue,
     serde::Serialize,
     serde::Deserialize,
     derive_more::Display,
@@ -54,14 +102,8 @@ where
     derive_more::Into,
 )]
 #[serde(transparent)]
-#[qi(typed(transparent))]
-pub struct ServiceId(u32);
-
-impl ServiceId {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-}
+#[qi(value = "crate", transparent)]
+pub struct ObjectId(pub u32);
 
 #[derive(
     Default,
@@ -73,7 +115,11 @@ impl ServiceId {
     Ord,
     Hash,
     Debug,
-    qi_derive::Typed,
+    qi_macros::Reflect,
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::StdTryFromValue,
+    qi_macros::IntoValue,
     serde::Serialize,
     serde::Deserialize,
     derive_more::Display,
@@ -81,41 +127,10 @@ impl ServiceId {
     derive_more::Into,
 )]
 #[serde(transparent)]
-#[qi(typed(transparent))]
-pub struct ObjectId(u32);
-
-impl ObjectId {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-}
-
-#[derive(
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    qi_derive::Typed,
-    serde::Serialize,
-    serde::Deserialize,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
-#[serde(transparent)]
-#[qi(typed(transparent))]
-pub struct ActionId(u32);
+#[qi(value = "crate", transparent)]
+pub struct ActionId(pub u32);
 
 impl ActionId {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-
     pub fn incr(&mut self) -> Self {
         let old_id = self.0;
         self.0 = self.0.wrapping_add(1);
@@ -133,14 +148,18 @@ impl ActionId {
     Ord,
     Hash,
     Debug,
-    qi_derive::Typed,
+    qi_macros::Reflect,
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::StdTryFromValue,
+    qi_macros::IntoValue,
     serde::Serialize,
     serde::Deserialize,
     derive_more::From,
     derive_more::Into,
     derive_more::IntoIterator,
 )]
-#[qi(typed(transparent))]
+#[qi(value = "crate", transparent)]
 pub struct ObjectUid(
     // SHA-1 digest as bytes of Big Endian encoded sequence of 5 DWORD.
     [u8; 20],
@@ -174,18 +193,41 @@ impl std::fmt::Display for ObjectUid {
 }
 
 #[derive(
-    Clone, Default, PartialEq, Eq, Debug, qi_derive::Typed, serde::Serialize, serde::Deserialize,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    qi_macros::Reflect,
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::StdTryFromValue,
+    qi_macros::IntoValue,
+    serde::Serialize,
+    serde::Deserialize,
 )]
+#[qi(value = "crate")]
 pub struct MetaObject {
-    pub methods: HashMap<ActionId, MetaMethod>,
-    pub signals: HashMap<ActionId, MetaSignal>,
-    pub properties: HashMap<ActionId, MetaProperty>,
+    pub methods: Map<ActionId, MetaMethod>,
+    pub signals: Map<ActionId, MetaSignal>,
+    pub properties: Map<ActionId, MetaProperty>,
     pub description: String,
 }
 
 impl MetaObject {
     pub fn builder() -> MetaObjectBuilder {
         MetaObjectBuilder::new()
+    }
+
+    pub fn signal(&self, name: &str) -> Option<(&ActionId, &MetaSignal)> {
+        self.signals.iter().find(|(_, sig)| sig.name == name)
+    }
+
+    pub fn method(&self, name: &str) -> Option<(&ActionId, &MetaMethod)> {
+        self.methods.iter().find(|(_, method)| method.name == name)
     }
 }
 
@@ -204,17 +246,17 @@ impl MetaObjectBuilder {
     pub fn add_method(
         mut self,
         uid: ActionId,
-        name: impl Into<String>,
-        parameters_signature: impl Into<Signature>,
-        return_signature: impl Into<Signature>,
+        name: String,
+        parameters_signature: Signature,
+        return_signature: Signature,
     ) -> Self {
         self.meta_object.methods.insert(
             uid,
             MetaMethod {
                 uid,
-                return_signature: return_signature.into(),
-                name: name.into(),
-                parameters_signature: parameters_signature.into(),
+                return_signature,
+                name,
+                parameters_signature,
                 description: String::new(),
                 parameters: Vec::new(),
                 return_description: String::new(),
@@ -223,18 +265,13 @@ impl MetaObjectBuilder {
         self
     }
 
-    pub fn add_signal(
-        mut self,
-        uid: ActionId,
-        name: impl Into<String>,
-        signature: impl Into<Signature>,
-    ) -> Self {
+    pub fn add_signal(mut self, uid: ActionId, name: String, signature: Signature) -> Self {
         self.meta_object.signals.insert(
             uid,
             MetaSignal {
                 uid,
-                name: name.into(),
-                signature: signature.into(),
+                name,
+                signature,
             },
         );
         self
@@ -282,12 +319,15 @@ impl MetaObjectBuilder {
     Ord,
     Hash,
     Debug,
-    qi_derive::Typed,
+    qi_macros::Reflect,
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::StdTryFromValue,
+    qi_macros::IntoValue,
     serde::Serialize,
     serde::Deserialize,
 )]
-#[serde(rename_all = "camelCase")]
-#[qi(typed(rename_all = "camelCase"))]
+#[qi(value = "crate", rename_all = "camelCase")]
 pub struct MetaMethod {
     pub uid: ActionId,
     pub return_signature: Signature,
@@ -307,10 +347,15 @@ pub struct MetaMethod {
     Ord,
     Hash,
     Debug,
-    qi_derive::Typed,
+    qi_macros::Reflect,
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::StdTryFromValue,
+    qi_macros::IntoValue,
     serde::Serialize,
     serde::Deserialize,
 )]
+#[qi(value = "crate")]
 pub struct MetaMethodParameter {
     pub name: String,
     pub description: String,
@@ -325,10 +370,15 @@ pub struct MetaMethodParameter {
     Ord,
     Hash,
     Debug,
-    qi_derive::Typed,
+    qi_macros::Reflect,
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::StdTryFromValue,
+    qi_macros::IntoValue,
     serde::Serialize,
     serde::Deserialize,
 )]
+#[qi(value = "crate")]
 pub struct MetaSignal {
     pub uid: ActionId,
     pub name: String,
@@ -344,10 +394,15 @@ pub struct MetaSignal {
     Ord,
     Hash,
     Debug,
-    qi_derive::Typed,
+    qi_macros::Reflect,
+    qi_macros::AsValue,
+    qi_macros::FromValue,
+    qi_macros::StdTryFromValue,
+    qi_macros::IntoValue,
     serde::Serialize,
     serde::Deserialize,
 )]
+#[qi(value = "crate")]
 pub struct MetaProperty {
     pub uid: ActionId,
     pub name: String,

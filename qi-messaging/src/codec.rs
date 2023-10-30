@@ -42,11 +42,8 @@
 //!
 //!  The total header size is therefore 28 bytes.
 
-use crate::{
-    format,
-    message::{Action, Address, Flags, Header, Id, Message, Object, Service, Type, Version},
-};
-use bytes::{Buf, BufMut, BytesMut};
+use crate::message::{Action, Address, Header, Id, Message, Object, Service, Type, Version};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tracing::instrument;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
@@ -149,7 +146,7 @@ fn put_message(msg: Message, dst: &mut BytesMut) -> Result<(), EncodeError> {
     let msg_size = HEADER_SIZE + msg.body_size();
     dst.reserve(msg_size);
     put_header(msg.header(), dst)?;
-    put_body(msg.body(), dst);
+    dst.put(msg.body);
     Ok(())
 }
 
@@ -170,14 +167,13 @@ fn decode_header(src: &mut BytesMut) -> Result<Option<Header>, DecodeError> {
     }
 
     let ty = get_type(src)?;
-    let flags = get_flags(src)?;
+    src.advance(1); // Flags
     let address = get_address(src);
     let header = Header {
         id,
         ty,
         body_size,
         version,
-        flags,
         address,
     };
     Ok(Some(header))
@@ -189,7 +185,7 @@ fn put_header(header: Header, dst: &mut BytesMut) -> Result<(), EncodeError> {
     put_body_size(header.body_size, dst)?;
     put_version(Version::current(), dst);
     put_type(header.ty, dst);
-    put_flags(header.flags, dst);
+    dst.put_u8(0); // Flags
     put_address(header.address, dst);
     Ok(())
 }
@@ -301,16 +297,6 @@ fn put_type(ty: Type, dst: &mut BytesMut) {
     dst.put_u8(ty_u8)
 }
 
-fn get_flags(src: &mut BytesMut) -> Result<Flags, DecodeError> {
-    let byte = src.get_u8();
-    let flags = Flags::from_bits(byte).ok_or(DecodeError::InvalidFlagsValue(byte))?;
-    Ok(flags)
-}
-
-fn put_flags(flags: Flags, dst: &mut BytesMut) {
-    dst.put_u8(flags.bits())
-}
-
 fn get_address(src: &mut BytesMut) -> Address {
     let service = Service::from(src.get_u32_le());
     let object = Object::from(src.get_u32_le());
@@ -328,18 +314,13 @@ fn put_address(address: Address, dst: &mut BytesMut) {
     dst.put_u32_le(address.action.into());
 }
 
-fn decode_body(size: usize, src: &mut BytesMut) -> Option<format::Value> {
+fn decode_body(size: usize, src: &mut BytesMut) -> Option<Bytes> {
     if src.len() < size {
         src.reserve(size - src.len());
         return None;
     }
     let bytes = src.copy_to_bytes(size);
-    let value = format::Value::from_bytes(bytes);
-    Some(value)
-}
-
-fn put_body(body: format::Value, dst: &mut BytesMut) {
-    dst.put_slice(body.as_bytes())
+    Some(bytes)
 }
 
 #[cfg(test)]
@@ -355,8 +336,7 @@ mod tests {
             ty: message::Type::Call,
             version: Version::current(),
             address: message::Address::default(),
-            flags: message::Flags::all(),
-            body: [1, 2, 3].into(),
+            body: Bytes::from_static(&[1, 2, 3]),
         };
         let mut encoder_buf = BytesMut::new();
         let mut encoder = Codec::new();
@@ -441,7 +421,6 @@ mod tests {
                     object: Object(1),
                     action: Action(178)
                 },
-                flags: Flags::empty(),
             }
         );
     }
@@ -457,8 +436,7 @@ mod tests {
                 object: Object(1),
                 action: Action(104),
             },
-            flags: Flags::RETURN_TYPE,
-            body: [0x17, 0x2b, 0xe6, 0x01, 0x5f].into(),
+            body: Bytes::from_static(&[0x17, 0x2b, 0xe6, 0x01, 0x5f]),
         };
         let mut buf = BytesMut::new();
         put_message(msg, &mut buf).unwrap();
@@ -469,7 +447,7 @@ mod tests {
                 0x42, 0xde, 0xad, 0x42, // cookie
                 0x49, 0x01, 0x00, 0x00, // id
                 0x05, 0x00, 0x00, 0x00, // size
-                0x00, 0x00, 0x06, 0x02, // version, type, flags
+                0x00, 0x00, 0x06, 0x00, // version, type, flags
                 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00,
                 0x00, // address,
                 0x17, 0x2b, 0xe6, 0x01, 0x5f, // body
@@ -506,21 +484,6 @@ mod tests {
         .into();
         let err = decode_header(&mut input).unwrap_err();
         assert_matches!(err, DecodeError::InvalidTypeValue(12));
-    }
-
-    #[test]
-    fn test_header_decode_invalid_flags_value() {
-        let mut input = [
-            0x42, 0xde, 0xad, 0x42, // cookie,
-            0x84, 0x1c, 0x0f, 0x00, // id
-            0x23, 0x00, 0x00, 0x00, // size
-            0x00, 0x00, 0x03, 13, // version, type, flags
-            0x2f, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xb2, 0x00, 0x00, 0x00, // address
-        ]
-        .as_slice()
-        .into();
-        let err = decode_header(&mut input).unwrap_err();
-        assert_matches!(err, DecodeError::InvalidFlagsValue(13));
     }
 
     #[test]

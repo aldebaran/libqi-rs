@@ -42,12 +42,21 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-mod anyvalue;
 pub mod dynamic;
 pub mod map;
-mod number;
 pub mod object;
+mod reflect;
+mod signature;
+pub mod ty;
+pub mod value;
 
 #[doc(inline)]
-pub use crate::{anyvalue::AnyValue, dynamic::Dynamic, map::Map, number::Number, object::Object};
-pub use bytes::Bytes;
+pub use crate::{
+    dynamic::Dynamic,
+    map::Map,
+    object::Object,
+    reflect::Reflect,
+    signature::Signature,
+    ty::Type,
+    value::{AsValue, FromValue, FromValueError, Value},
+};

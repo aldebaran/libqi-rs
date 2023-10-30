@@ -1,86 +1,142 @@
-pub mod client;
+pub mod error;
 
-use crate::{
-    signal,
-    value::{
-        self,
-        object::{ActionId, MetaObject, ObjectId, ServiceId},
-        Signature,
-    },
-    CallResult,
+use crate::signal::SignalLink;
+use async_trait::async_trait;
+use error::{AnyCallError, CallError};
+use futures::{Sink, SinkExt};
+use qi_type::Signature;
+use qi_value::{
+    object::{ActionId, MetaObject, ObjectId},
+    Dynamic, Value,
 };
-pub use client::Client;
-use futures::future::BoxFuture;
-use value::Value;
+use sealed::sealed;
+use tower::{Service, ServiceExt};
 
+use self::error::NoSuchMethodError;
+
+#[async_trait]
 pub trait Object {
+    async fn register_event(
+        &mut self,
+        event: ActionId,
+        link: SignalLink,
+    ) -> Result<SignalLink, CallError>;
+
+    async fn register_event_with_signature(
+        &mut self,
+        event: ActionId,
+        link: SignalLink,
+        signature: Signature,
+    ) -> Result<SignalLink, CallError>;
+
+    async fn unregister_event(
+        &mut self,
+        object: ObjectId,
+        event: ActionId,
+        link: SignalLink,
+    ) -> Result<(), CallError>;
+
+    async fn meta_object(&mut self) -> Result<MetaObject, CallError>;
+
+    async fn property<T>(&mut self, name: Dynamic<&str>) -> Result<Dynamic<T>, CallError>;
+
+    async fn set_property<T>(
+        &mut self,
+        name: Dynamic<&str>,
+        value: Dynamic<T>,
+    ) -> Result<(), CallError>
+    where
+        T: Send;
+
+    async fn properties(&self) -> Result<Vec<String>, CallError>;
+}
+
+#[sealed]
+#[async_trait]
+pub trait MetaCall {
+    type Output;
     type Error;
 
-    fn register_event(
-        &mut self,
-        service: ServiceId,
-        event: ActionId,
-        link: signal::Link,
-    ) -> BoxFuture<CallResult<signal::Link, Self::Error>>;
-
-    fn register_event_with_signature(
-        &mut self,
-        service: ServiceId,
-        event: ActionId,
-        link: signal::Link,
-        signature: Signature,
-    ) -> BoxFuture<CallResult<signal::Link, Self::Error>>;
-
-    fn unregister_event(
-        &mut self,
-        service: ServiceId,
-        event: ActionId,
-        link: signal::Link,
-    ) -> BoxFuture<CallResult<(), Self::Error>>;
-
-    fn meta_object(&self, id: ObjectId) -> BoxFuture<CallResult<MetaObject, Self::Error>>;
-
-    fn property(&self, name: value::Dynamic) -> BoxFuture<CallResult<value::Dynamic, Self::Error>>;
-
-    fn set_property(
-        &mut self,
-        name: value::Dynamic,
-        value: value::Dynamic,
-    ) -> BoxFuture<CallResult<(), Self::Error>>;
-
-    fn properties(&self) -> BoxFuture<CallResult<Vec<String>, Self::Error>>;
-
-    fn call<T>(
-        &mut self,
-        action: BoundAction,
-        value: T,
-    ) -> BoxFuture<CallResult<Value, Self::Error>>
+    async fn call<T>(&mut self, name: &str, arg: T) -> Result<Self::Output, Self::Error>
     where
-        T: serde::Serialize; // TODO: T: Value
+        T: 'async_trait + serde::Serialize;
+}
 
-    fn post<T>(&mut self, action: BoundAction, value: T) -> BoxFuture<Result<(), Self::Error>>
-    where
-        T: serde::Serialize; // TODO: T: Value
+#[sealed]
+#[async_trait]
+impl<O> MetaCall for O
+where
+    O: Object + tower::Service<Call> + Send,
+    O::Future: Send,
+    O::Error: Send,
+{
+    type Output = O::Response;
+    type Error = AnyCallError<O::Error>;
 
-    fn event<T>(&mut self, action: BoundAction, value: T) -> BoxFuture<Result<(), Self::Error>>
+    async fn call<T>(&mut self, name: &str, arg: T) -> Result<Self::Output, Self::Error>
     where
-        T: serde::Serialize; // TODO: T: Value
+        T: 'async_trait + AsValue,
+    {
+        let meta = self.meta_object().await.map_err(AnyCallError::MetaObject)?;
+        let (&action, _) = meta
+            .method(name)
+            .ok_or_else(|| NoSuchMethodError::Name(name.to_owned()))?;
+        self.map_err(AnyCallError::Service)
+            .ready()
+            .await?
+            .call(Call {
+                action,
+                arg: arg.into(),
+            })
+            .await
+    }
 }
 
 #[derive(Debug)]
-pub struct BoundAction(ActionId);
+pub struct Call {
+    action: ActionId,
+    arg: Value,
+}
 
-// static OBJECT_META_OBJECT: OnceCell<MetaObject> = OnceCell::new();
-//
-// fn bound_object_meta_object() -> &'static MetaObject {
-//     OBJECT_META_OBJECT.get_or_init(|| {
-//         let mut builder = MetaObject::builder();
-//         builder.add_method(
-//             ACTION_ID_REGISTER_EVENT,
-//             "registerEvent",
-//             ???,
-//             ???,
-//         );
-//         builder.build()
-//     })
-// }
+#[sealed]
+#[async_trait]
+pub trait MetaPost {
+    async fn post<T>(&mut self, name: &str, arg: T)
+    where
+        T: 'async_trait + serde::Serialize;
+}
+
+#[sealed]
+#[async_trait]
+impl<O> MetaPost for O
+where
+    O: Object + Sink<Post> + Send + Unpin,
+{
+    async fn post<T>(&mut self, name: &str, arg: T)
+    where
+        T: 'async_trait + serde::Serialize,
+    {
+        let arg = Value::serialize(&arg);
+        if let Ok(meta) = self.meta_object().await {
+            if let Some(&action) = meta
+                .signal(name)
+                .map(|(id, _)| id)
+                .or_else(|| meta.method(name).map(|(id, _)| id))
+            {
+                let _res = self.send(Post { action, arg }).await;
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Post {
+    action: ActionId,
+    arg: Value,
+}
+
+pub(crate) trait IntoObject {
+    type Object: Object;
+
+    fn into_object(self) -> Self::Object;
+}

@@ -4,8 +4,8 @@
 ///
 /// - `i128`
 /// - `u128`
-use crate::{write::*, Error, Result, Value};
-use bytes::{BufMut, BytesMut};
+use crate::{write::*, Error, Result};
+use bytes::{BufMut, Bytes, BytesMut};
 
 fn to_writer<W, T>(writer: W, value: &T) -> Result<()>
 where
@@ -17,13 +17,13 @@ where
     Ok(())
 }
 
-pub fn to_value<T>(serializable: &T) -> Result<Value>
+pub fn to_bytes<T>(serializable: &T) -> Result<Bytes>
 where
     T: serde::Serialize,
 {
     let mut writer = BytesMut::new().writer();
     to_writer(&mut writer, serializable)?;
-    Ok(Value::from_bytes(writer.into_inner().freeze()))
+    Ok(writer.into_inner().freeze())
 }
 
 #[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
