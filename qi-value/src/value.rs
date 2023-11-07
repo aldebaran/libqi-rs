@@ -2,9 +2,9 @@ pub mod de;
 mod impls;
 mod ser;
 
-use crate::{map::Map, ty::DisplayTypeOption, Object, Reflect, Signature, Type};
+use crate::{map::Map, reflect::RuntimeReflect, ty, Object, Type};
 use ordered_float::OrderedFloat;
-use std::borrow::Cow;
+use std::{borrow::Cow, str::Utf8Error, string::FromUtf8Error};
 
 /// The [`Value`] structure represents any value of the `qi` type system.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -21,7 +21,7 @@ pub enum Value<'a> {
     UInt64(u64),
     Float32(OrderedFloat<f32>),
     Float64(OrderedFloat<f64>),
-    String(Cow<'a, str>),
+    String(Cow<'a, [u8]>),
     Raw(Cow<'a, [u8]>),
     Option(Option<Box<Value<'a>>>),
     List(Vec<Value<'a>>),
@@ -38,6 +38,35 @@ impl<'a> Value<'a> {
     {
         T::from_value(self)
     }
+
+    pub fn into_owned<'b>(self) -> Value<'b> {
+        match self {
+            Self::Unit => Value::Unit,
+            Self::Bool(v) => Value::Bool(v),
+            Self::Int8(v) => Value::Int8(v),
+            Self::UInt8(v) => Value::UInt8(v),
+            Self::Int16(v) => Value::Int16(v),
+            Self::UInt16(v) => Value::UInt16(v),
+            Self::Int32(v) => Value::Int32(v),
+            Self::UInt32(v) => Value::UInt32(v),
+            Self::Int64(v) => Value::Int64(v),
+            Self::UInt64(v) => Value::UInt64(v),
+            Self::Float32(v) => Value::Float32(v),
+            Self::Float64(v) => Value::Float64(v),
+            Self::String(v) => Value::String(v.into_owned().into()),
+            Self::Raw(v) => Value::Raw(v.into_owned().into()),
+            Self::Option(v) => Value::Option(v.map(|v| Box::new(v.into_owned()))),
+            Self::List(v) => Value::List(v.into_iter().map(Value::into_owned).collect()),
+            Self::Map(v) => Value::Map(
+                v.into_iter()
+                    .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                    .collect(),
+            ),
+            Self::Tuple(v) => Value::Tuple(v.into_iter().map(Value::into_owned).collect()),
+            Self::Object(v) => Value::Object(v),
+            Self::Dynamic(v) => Value::Dynamic(Box::new(v.into_owned())),
+        }
+    }
 }
 
 impl Default for Value<'_> {
@@ -49,30 +78,39 @@ impl Default for Value<'_> {
 impl std::fmt::Display for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Unit => f.write_str("unit"),
-            Value::Bool(v) => write!(f, "bool({})", v),
-            Value::Int8(v) => write!(f, "i8({})", v),
-            Value::UInt8(v) => write!(f, "u8({})", v),
-            Value::Int16(v) => write!(f, "i16({})", v),
-            Value::UInt16(v) => write!(f, "u16({})", v),
-            Value::Int32(v) => write!(f, "i32({})", v),
-            Value::UInt32(v) => write!(f, "u32({})", v),
-            Value::Int64(v) => write!(f, "i64({})", v),
-            Value::UInt64(v) => write!(f, "u64({})", v),
-            Value::Float32(v) => write!(f, "f32({})", v),
-            Value::Float64(v) => write!(f, "f64({})", v),
-            Value::String(v) => write!(f, "str({})", v),
-            Value::Raw(v) => write!(f, "raw(len={})", v.len()),
+            Value::Unit => f.write_str("()"),
+            Value::Bool(v) => write!(f, "{}", v),
+            Value::Int8(v) => write!(f, "{}", v),
+            Value::UInt8(v) => write!(f, "{}", v),
+            Value::Int16(v) => write!(f, "{}", v),
+            Value::UInt16(v) => write!(f, "{}", v),
+            Value::Int32(v) => write!(f, "{}", v),
+            Value::UInt32(v) => write!(f, "{}", v),
+            Value::Int64(v) => write!(f, "{}", v),
+            Value::UInt64(v) => write!(f, "{}", v),
+            Value::Float32(v) => write!(f, "{}", v),
+            Value::Float64(v) => write!(f, "{}", v),
+            Value::String(v) => {
+                if matches!(v, Cow::Borrowed(_)) {
+                    f.write_str("&")?;
+                }
+                write!(f, "{}", String::from_utf8_lossy(v))
+            }
+            Value::Raw(v) => {
+                if matches!(v, Cow::Borrowed(_)) {
+                    f.write_str("&")?;
+                }
+                write!(f, "raw[len={}]", v.len())
+            }
             Value::Option(v) => {
-                f.write_str("opt(")?;
                 match v {
-                    Some(v) => v.fmt(f)?,
+                    Some(v) => write!(f, "some({v})")?,
                     None => f.write_str("none")?,
                 };
                 f.write_str(")")
             }
             Value::List(l) => {
-                write!(f, "list[{}](", l.len())?;
+                write!(f, "[len={}/", l.len())?;
                 let mut add_sep = false;
                 for v in l {
                     if add_sep {
@@ -81,10 +119,10 @@ impl std::fmt::Display for Value<'_> {
                     v.fmt(f)?;
                     add_sep = true;
                 }
-                f.write_str(")")
+                f.write_str("]")
             }
             Value::Map(m) => {
-                write!(f, "map[{}](", m.len())?;
+                write!(f, "{{len={}/", m.len())?;
                 let mut add_sep = false;
                 for (k, v) in m {
                     if add_sep {
@@ -93,10 +131,10 @@ impl std::fmt::Display for Value<'_> {
                     write!(f, "{k}:{v}")?;
                     add_sep = true;
                 }
-                f.write_str(")")
+                f.write_str("}}")
             }
             Value::Tuple(elems) => {
-                write!(f, "tuple(")?;
+                write!(f, "(")?;
                 let mut add_sep = false;
                 for v in elems {
                     if add_sep {
@@ -113,14 +151,63 @@ impl std::fmt::Display for Value<'_> {
     }
 }
 
-pub trait AsValue {
-    fn value_type(&self) -> Type;
-
-    fn value_signature(&self) -> Signature {
-        Signature(Some(self.value_type()))
+impl ToValue for Value<'_> {
+    fn to_value(&self) -> Value<'_> {
+        self.clone()
     }
+}
 
-    fn as_value(&self) -> Value<'_>;
+impl<'long: 'short, 'short> IntoValue<'short> for Value<'long> {
+    fn into_value(self) -> Value<'short> {
+        self
+    }
+}
+
+impl<'long: 'short, 'short> FromValue<'long> for Value<'short> {
+    fn from_value(value: Value<'long>) -> Result<Self, FromValueError> {
+        Ok(value)
+    }
+}
+
+impl RuntimeReflect for Value<'_> {
+    fn ty(&self) -> Type {
+        match self {
+            Self::Unit => Type::Unit,
+            Self::Bool(_) => Type::Bool,
+            Self::Int8(_) => Type::Int8,
+            Self::UInt8(_) => Type::UInt8,
+            Self::Int16(_) => Type::Int16,
+            Self::UInt16(_) => Type::UInt16,
+            Self::Int32(_) => Type::Int32,
+            Self::UInt32(_) => Type::UInt32,
+            Self::Int64(_) => Type::Int64,
+            Self::UInt64(_) => Type::UInt64,
+            Self::Float32(_) => Type::Float32,
+            Self::Float64(_) => Type::Float64,
+            Self::String(_) => Type::String,
+            Self::Raw(_) => Type::Raw,
+            Self::Option(v) => Type::Option(v.as_deref().map(|v| Box::new(v.ty()))),
+            Self::List(v) => Type::List(ty::reduce_type(v.iter().map(Value::ty)).map(Box::new)),
+            Self::Map(v) => {
+                let (key, value) = ty::reduce_map_types(v.iter().map(|(k, v)| (k.ty(), v.ty())));
+                let (key, value) = (key.map(Box::new), value.map(Box::new));
+                Type::Map { key, value }
+            }
+            Self::Tuple(v) => Type::Tuple(ty::Tuple::Tuple(
+                v.iter().map(Value::ty).map(Some).collect(),
+            )),
+            Self::Object(_) => Type::Object,
+            Self::Dynamic(v) => v.ty(),
+        }
+    }
+}
+
+pub trait IntoValue<'a>: Sized {
+    fn into_value(self) -> Value<'a>;
+}
+
+pub trait ToValue {
+    fn to_value(&self) -> Value<'_>;
 }
 
 pub trait FromValue<'a>: Sized {
@@ -129,33 +216,22 @@ pub trait FromValue<'a>: Sized {
 
 #[derive(thiserror::Error, Debug)]
 pub enum FromValueError {
+    #[error("value type mismatch: expected {expected}, but value is {actual}")]
     TypeMismatch { expected: String, actual: String },
-    Custom(String),
+
+    #[error(transparent)]
+    NulChar(#[from] std::ffi::NulError),
+
+    #[error(transparent)]
+    Utf8(#[from] Utf8Error),
+
+    #[error(transparent)]
+    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl std::fmt::Display for FromValueError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FromValueError::TypeMismatch { expected, actual } => {
-                write!(
-                    f,
-                    "value type mismatch: expected {expected}, but value is {actual}",
-                )
-            }
-            FromValueError::Custom(s) => f.write_str(s),
-        }
-    }
-}
-
-impl FromValueError {
-    pub fn value_type_mismatch<Dst>(value: &impl AsValue) -> Self
-    where
-        Dst: Reflect,
-    {
-        Self::TypeMismatch {
-            expected: DisplayTypeOption(&Dst::ty()).to_string(),
-            actual: value.value_type().to_string(),
-        }
+impl From<FromUtf8Error> for FromValueError {
+    fn from(err: FromUtf8Error) -> Self {
+        Self::Utf8(err.utf8_error())
     }
 }
 

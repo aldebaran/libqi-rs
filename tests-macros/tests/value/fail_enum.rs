@@ -1,10 +1,4 @@
-#[derive(
-    qi_macros::AsValue,
-    qi_macros::FromValue,
-    qi_macros::IntoValue,
-    qi_macros::Reflect,
-    qi_macros::StdTryFromValue,
-)]
+#[derive(qi_macros::Reflect, qi_macros::ToValue, qi_macros::IntoValue, qi_macros::FromValue)]
 enum E {
     A,
     B(i32),

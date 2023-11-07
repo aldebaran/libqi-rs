@@ -1,13 +1,14 @@
 mod de;
 
-use crate::{AsValue, FromValue};
+use crate::{reflect::RuntimeReflect, FromValue, IntoValue};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::From)]
 pub struct Dynamic<T>(pub T);
 
 impl<T> serde::Serialize for Dynamic<T>
 where
-    T: AsValue,
+    for<'a> &'a T: IntoValue<'a>,
+    T: RuntimeReflect,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -46,15 +47,15 @@ impl Fields {
     }
 }
 
-pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+pub fn serialize<'a, T, S>(value: T, serializer: S) -> Result<S::Ok, S::Error>
 where
-    T: AsValue,
+    T: 'a + IntoValue<'a> + RuntimeReflect,
     S: serde::Serializer,
 {
     use serde::ser::SerializeStruct;
     let mut serializer = serializer.serialize_struct(SERDE_STRUCT_NAME, Fields::KEYS.len())?;
-    serializer.serialize_field(Fields::Signature.key(), &value.value_signature())?;
-    serializer.serialize_field(Fields::Value.key(), &value.as_value())?;
+    serializer.serialize_field(Fields::Signature.key(), &value.signature())?;
+    serializer.serialize_field(Fields::Value.key(), &value.into_value())?;
     serializer.end()
 }
 
@@ -77,23 +78,26 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
     use serde_test::{assert_tokens, Token};
     use std::collections::BTreeMap;
 
     #[test]
     fn test_dynamic_serde_struct() {
-        #[derive(PartialEq, Debug, qi_macros::AsValue, qi_macros::FromValue)]
+        #[derive(
+            PartialEq, Debug, qi_macros::Reflect, qi_macros::ToValue, qi_macros::FromValue,
+        )]
         #[qi(value = "crate")]
-        struct MyStruct {
+        struct MyStruct<'a> {
             an_int: i32,
-            a_raw: Bytes,
+            #[qi(as_raw)]
+            a_raw: &'a [u8],
             an_option: Option<BTreeMap<String, Vec<bool>>>,
         }
+        let raw = vec![1, 2, 3];
         assert_tokens(
             &Dynamic(MyStruct {
                 an_int: 42,
-                a_raw: Bytes::from_static(&[1, 2, 3]),
+                a_raw: raw.as_slice(),
                 an_option: Some(BTreeMap::from_iter([
                     ("true_true".to_owned(), vec![true, true]),
                     ("false_true".to_owned(), vec![false, true]),
@@ -111,7 +115,7 @@ mod tests {
                 Token::Str("value"),
                 Token::Tuple { len: 3 },
                 Token::I32(42),
-                Token::Bytes(&[1, 2, 3]),
+                Token::BorrowedBytes(&[1, 2, 3]),
                 Token::Some,
                 Token::Map { len: Some(4) },
                 Token::Str("false_false"),

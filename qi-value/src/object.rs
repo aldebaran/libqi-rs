@@ -1,4 +1,4 @@
-use crate::{AsValue, FromValue, FromValueError, Map, Reflect, Signature, Type, Value};
+use crate::{ty, FromValue, FromValueError, IntoValue, Map, Reflect, Signature, Type, Value};
 
 #[derive(
     Clone,
@@ -9,11 +9,9 @@ use crate::{AsValue, FromValue, FromValueError, Map, Reflect, Signature, Type, V
     Ord,
     Hash,
     Debug,
-    qi_macros::IntoValue,
     serde::Serialize,
     serde::Deserialize,
 )]
-#[qi(value = "crate")]
 pub struct Object {
     pub meta_object: MetaObject,
     pub service_id: ServiceId,
@@ -27,13 +25,9 @@ impl Reflect for Object {
     }
 }
 
-impl AsValue for Object {
-    fn value_type(&self) -> Type {
-        Type::Object
-    }
-
-    fn as_value(&self) -> Value<'_> {
-        Value::Object(Box::new(self.clone()))
+impl<'a> IntoValue<'a> for Object {
+    fn into_value(self) -> Value<'a> {
+        Value::Object(Box::new(self))
     }
 }
 
@@ -43,7 +37,7 @@ impl FromValue<'_> for Object {
             Value::Object(object) => Ok(*object),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "an Object".to_owned(),
-                actual: value.value_type().to_string(),
+                actual: value.to_string(),
             }),
         }
     }
@@ -67,9 +61,8 @@ impl std::fmt::Display for Object {
     Debug,
     qi_macros::Reflect,
     qi_macros::FromValue,
-    qi_macros::StdTryFromValue,
-    qi_macros::AsValue,
     qi_macros::IntoValue,
+    qi_macros::ToValue,
     serde::Serialize,
     serde::Deserialize,
     derive_more::Display,
@@ -91,10 +84,9 @@ pub struct ServiceId(pub u32);
     Hash,
     Debug,
     qi_macros::Reflect,
-    qi_macros::AsValue,
     qi_macros::FromValue,
-    qi_macros::StdTryFromValue,
     qi_macros::IntoValue,
+    qi_macros::ToValue,
     serde::Serialize,
     serde::Deserialize,
     derive_more::Display,
@@ -116,10 +108,9 @@ pub struct ObjectId(pub u32);
     Hash,
     Debug,
     qi_macros::Reflect,
-    qi_macros::AsValue,
     qi_macros::FromValue,
-    qi_macros::StdTryFromValue,
     qi_macros::IntoValue,
+    qi_macros::ToValue,
     serde::Serialize,
     serde::Deserialize,
     derive_more::Display,
@@ -149,10 +140,9 @@ impl ActionId {
     Hash,
     Debug,
     qi_macros::Reflect,
-    qi_macros::AsValue,
     qi_macros::FromValue,
-    qi_macros::StdTryFromValue,
     qi_macros::IntoValue,
+    qi_macros::ToValue,
     serde::Serialize,
     serde::Deserialize,
     derive_more::From,
@@ -202,10 +192,9 @@ impl std::fmt::Display for ObjectUid {
     Hash,
     Debug,
     qi_macros::Reflect,
-    qi_macros::AsValue,
     qi_macros::FromValue,
-    qi_macros::StdTryFromValue,
     qi_macros::IntoValue,
+    qi_macros::ToValue,
     serde::Serialize,
     serde::Deserialize,
 )]
@@ -226,6 +215,10 @@ impl MetaObject {
         self.signals.iter().find(|(_, sig)| sig.name == name)
     }
 
+    pub fn property(&self, name: &str) -> Option<(&ActionId, &MetaProperty)> {
+        self.properties.iter().find(|(_, prop)| prop.name == name)
+    }
+
     pub fn method(&self, name: &str) -> Option<(&ActionId, &MetaMethod)> {
         self.methods.iter().find(|(_, method)| method.name == name)
     }
@@ -243,63 +236,26 @@ impl MetaObjectBuilder {
         }
     }
 
-    pub fn add_method(
-        mut self,
-        uid: ActionId,
-        name: String,
-        parameters_signature: Signature,
-        return_signature: Signature,
-    ) -> Self {
-        self.meta_object.methods.insert(
-            uid,
-            MetaMethod {
-                uid,
-                return_signature,
-                name,
-                parameters_signature,
-                description: String::new(),
-                parameters: Vec::new(),
-                return_description: String::new(),
-            },
-        );
+    pub fn add_method(&mut self, method: MetaMethod) -> &mut Self {
+        self.meta_object.methods.insert(method.uid, method);
         self
     }
 
-    pub fn add_signal(mut self, uid: ActionId, name: String, signature: Signature) -> Self {
-        self.meta_object.signals.insert(
-            uid,
-            MetaSignal {
-                uid,
-                name,
-                signature,
-            },
-        );
+    pub fn add_signal(&mut self, signal: MetaSignal) -> &mut Self {
+        self.meta_object.signals.insert(signal.uid, signal);
         self
     }
 
-    pub fn add_property(
-        mut self,
-        uid: ActionId,
-        name: impl Into<String>,
-        signature: impl Into<Signature>,
-    ) -> Self {
-        let name = name.into();
-        let signature = signature.into();
-        self.meta_object.properties.insert(
-            uid,
-            MetaProperty {
-                uid,
-                name: name.clone(),
-                signature: signature.clone(),
-            },
-        );
+    pub fn add_property(&mut self, property: MetaProperty) -> &mut Self {
+        let uid = property.uid;
+        self.meta_object.properties.insert(uid, property.clone());
         // Properties are also signals
         self.meta_object.signals.insert(
             uid,
             MetaSignal {
                 uid,
-                name,
-                signature,
+                name: property.name,
+                signature: property.signature,
             },
         );
         self
@@ -320,10 +276,9 @@ impl MetaObjectBuilder {
     Hash,
     Debug,
     qi_macros::Reflect,
-    qi_macros::AsValue,
     qi_macros::FromValue,
-    qi_macros::StdTryFromValue,
     qi_macros::IntoValue,
+    qi_macros::ToValue,
     serde::Serialize,
     serde::Deserialize,
 )]
@@ -338,6 +293,127 @@ pub struct MetaMethod {
     pub return_description: String,
 }
 
+impl MetaMethod {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn builder<T: Into<ActionId>>(uid: T) -> MetaMethodBuilder {
+        MetaMethodBuilder {
+            uid: uid.into(),
+            name: Default::default(),
+            description: Default::default(),
+            return_value: Default::default(),
+            parameters: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MetaMethodBuilder {
+    uid: ActionId,
+    name: String,
+    description: String,
+    return_value: MetaMethodBuilderReturnValue,
+    parameters: Vec<MetaMethodBuilderParameter>,
+}
+
+impl MetaMethodBuilder {
+    pub fn uid(&self) -> ActionId {
+        self.uid
+    }
+
+    pub fn set_name<T: Into<String>>(&mut self, name: T) -> &mut Self {
+        self.name = name.into();
+        self
+    }
+
+    pub fn set_description<T: Into<String>>(&mut self, description: T) -> &mut Self {
+        self.description = description.into();
+        self
+    }
+
+    pub fn return_value(&mut self) -> &mut MetaMethodBuilderReturnValue {
+        &mut self.return_value
+    }
+
+    pub fn add_parameter(&mut self) -> &mut MetaMethodBuilderParameter {
+        self.parameters.push(Default::default());
+        self.parameters.last_mut().unwrap()
+    }
+
+    pub fn parameter(&mut self, index: usize) -> &mut MetaMethodBuilderParameter {
+        if self.parameters.len() <= index {
+            self.parameters.resize_with(index + 1, Default::default);
+        }
+        &mut self.parameters[index]
+    }
+
+    pub fn build(self) -> MetaMethod {
+        let (parameters, parameter_types) = self
+            .parameters
+            .into_iter()
+            .map(|parameter| (parameter.parameter, parameter.ty))
+            .unzip();
+        let parameters_tuple = ty::Type::Tuple(ty::Tuple::Tuple(parameter_types));
+        let parameters_signature = Signature::new(Some(parameters_tuple));
+        MetaMethod {
+            uid: self.uid,
+            return_signature: self.return_value.signature,
+            name: self.name,
+            parameters_signature,
+            description: self.description,
+            parameters,
+            return_description: self.return_value.description,
+        }
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct MetaMethodBuilderReturnValue {
+    signature: Signature,
+    description: String,
+}
+
+impl MetaMethodBuilderReturnValue {
+    pub fn set_description<T: Into<String>>(&mut self, description: T) -> &mut Self {
+        self.description = description.into();
+        self
+    }
+
+    pub fn set_type<T: Into<Option<Type>>>(&mut self, ty: T) -> &mut Self {
+        self.set_signature(Signature::new(ty.into()))
+    }
+
+    pub fn set_signature<T: Into<Signature>>(&mut self, signature: T) -> &mut Self {
+        self.signature = signature.into();
+        self
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct MetaMethodBuilderParameter {
+    parameter: MetaMethodParameter,
+    ty: Option<Type>,
+}
+
+impl MetaMethodBuilderParameter {
+    pub fn set_name<T: Into<String>>(&mut self, name: T) -> &mut Self {
+        self.parameter.name = name.into();
+        self
+    }
+
+    pub fn set_description<T: Into<String>>(&mut self, description: T) -> &mut Self {
+        self.parameter.description = description.into();
+        self
+    }
+
+    pub fn set_type<T: Into<Option<Type>>>(&mut self, ty: T) -> &mut Self {
+        self.ty = ty.into();
+        self
+    }
+}
+
 #[derive(
     Clone,
     Default,
@@ -348,10 +424,9 @@ pub struct MetaMethod {
     Hash,
     Debug,
     qi_macros::Reflect,
-    qi_macros::AsValue,
     qi_macros::FromValue,
-    qi_macros::StdTryFromValue,
     qi_macros::IntoValue,
+    qi_macros::ToValue,
     serde::Serialize,
     serde::Deserialize,
 )]
@@ -371,10 +446,9 @@ pub struct MetaMethodParameter {
     Hash,
     Debug,
     qi_macros::Reflect,
-    qi_macros::AsValue,
     qi_macros::FromValue,
-    qi_macros::StdTryFromValue,
     qi_macros::IntoValue,
+    qi_macros::ToValue,
     serde::Serialize,
     serde::Deserialize,
 )]
@@ -395,10 +469,9 @@ pub struct MetaSignal {
     Hash,
     Debug,
     qi_macros::Reflect,
-    qi_macros::AsValue,
     qi_macros::FromValue,
-    qi_macros::StdTryFromValue,
     qi_macros::IntoValue,
+    qi_macros::ToValue,
     serde::Serialize,
     serde::Deserialize,
 )]

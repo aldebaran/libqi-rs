@@ -1,6 +1,6 @@
 use crate::{
     ty::{self, StructAnnotations, Tuple, Type},
-    AsValue, FromValue, FromValueError, Reflect, Value,
+    FromValue, FromValueError, IntoValue, Reflect, RuntimeReflect, ToValue, Value,
 };
 use derive_more::{From, Into};
 use std::borrow::Cow;
@@ -29,30 +29,35 @@ impl Reflect for Signature {
     }
 }
 
-impl AsValue for Signature {
-    fn value_type(&self) -> Type {
-        <Self as Reflect>::ty().unwrap()
-    }
-
-    fn as_value(&self) -> Value<'_> {
-        Value::String(Cow::Owned(self.to_string()))
+impl RuntimeReflect for Signature {
+    fn ty(&self) -> Type {
+        Type::String
     }
 }
 
 impl FromValue<'_> for Signature {
     fn from_value(value: Value<'_>) -> Result<Self, FromValueError> {
         match value {
-            Value::String(s) => s
-                .parse()
-                .map_err(|err: FromStrError| FromValueError::Custom(err.to_string())),
-            _ => Err(FromValueError::value_type_mismatch::<Self>(&value)),
+            Value::String(s) => std::str::from_utf8(&s)?
+                .parse::<Signature>()
+                .map_err(|err| FromValueError::Other(err.into())),
+            _ => Err(FromValueError::TypeMismatch {
+                expected: "Signature".to_owned(),
+                actual: value.to_string(),
+            }),
         }
     }
 }
 
-impl From<Signature> for Value<'_> {
-    fn from(sig: Signature) -> Self {
-        Value::String(sig.to_string().into())
+impl ToValue for Signature {
+    fn to_value(&self) -> Value<'_> {
+        Value::String(Cow::Owned(self.to_string().into_bytes()))
+    }
+}
+
+impl<'a> IntoValue<'a> for Signature {
+    fn into_value(self) -> Value<'a> {
+        Value::String(Cow::Owned(self.to_string().into_bytes()))
     }
 }
 

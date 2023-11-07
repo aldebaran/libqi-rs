@@ -42,6 +42,7 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
+mod as_raw;
 pub mod dynamic;
 pub mod map;
 pub mod object;
@@ -52,11 +53,12 @@ pub mod value;
 
 #[doc(inline)]
 pub use crate::{
+    as_raw::AsRaw,
     dynamic::Dynamic,
     map::Map,
     object::Object,
-    reflect::Reflect,
+    reflect::{Reflect, RuntimeReflect},
     signature::Signature,
     ty::Type,
-    value::{AsValue, FromValue, FromValueError, Value},
+    value::{FromValue, FromValueError, IntoValue, ToValue, Value},
 };

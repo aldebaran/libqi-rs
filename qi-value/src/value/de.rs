@@ -2,7 +2,7 @@ use super::Value;
 use crate::{
     dynamic::{self},
     ty::{self, DisplayTypeOption, DisplayTypeTuple},
-    Map, Object, Type,
+    IntoValue, Map, Object, Type,
 };
 use serde::de::DeserializeSeed;
 use std::marker::PhantomData;
@@ -77,7 +77,7 @@ impl<'de: 'a, 'a, 't> serde::de::DeserializeSeed<'de> for ValueTypeSeed<'a, 't> 
             Some(Type::Float64) => deserializer.deserialize_f64(AnyVisitor::new()),
             Some(Type::String) => deserializer.deserialize_str(AnyVisitor::new()),
             Some(Type::Raw) => deserializer.deserialize_bytes(AnyVisitor::new()),
-            Some(Type::Object) => Ok(Object::deserialize(deserializer)?.into()),
+            Some(Type::Object) => Ok(Object::deserialize(deserializer)?.into_value()),
             Some(Type::Option(value)) => {
                 let opt = deserializer.deserialize_option(OptionVisitor::new(value.as_deref()))?;
                 Ok(Value::Option(opt.map(Box::new)))
@@ -134,77 +134,77 @@ impl<'de: 'a, 'a> serde::de::Visitor<'de> for AnyVisitor<'a> {
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_f32<E>(self, v: f32) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_char<E>(self, v: char) -> Result<Self::Value, E>
@@ -225,14 +225,14 @@ impl<'de: 'a, 'a> serde::de::Visitor<'de> for AnyVisitor<'a> {
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into())
+        Ok(v.into_value())
     }
 
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
@@ -315,7 +315,7 @@ impl<'de: 'a, 'a> serde::de::Visitor<'de> for AnyVisitor<'a> {
         use serde::de::VariantAccess;
         let (index, variant): (u32, _) = data.variant()?;
         let value = variant.newtype_variant()?;
-        Ok(Value::Tuple(vec![index.into(), value]))
+        Ok(Value::Tuple(vec![index.into_value(), value]))
     }
 }
 

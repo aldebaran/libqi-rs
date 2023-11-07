@@ -1,50 +1,44 @@
 use convert_case::{Case, Casing};
-use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned, ToTokens};
+use proc_macro2::{Span, TokenStream};
+use quote::{quote, ToTokens};
 use syn::{
-    parse_quote, punctuated::Punctuated, spanned::Spanned, Attribute, Data, DataStruct,
-    DeriveInput, Error, Fields, GenericParam, Generics, Ident, Index, Lifetime, LifetimeParam,
-    LitStr, Path, Token, Type, TypeParamBound, WhereClause,
+    parse_quote, Attribute, Data, DataStruct, DeriveInput, Error, Fields, GenericParam, Generics,
+    Ident, Lifetime, LifetimeParam, LitStr, Path, TypeParamBound,
 };
 
-pub(crate) fn derive_impl(derive: Derive, input: DeriveInput) -> syn::Result<TokenStream> {
-    Ok(Container::new(derive, input)?.derive_impl())
+pub(crate) fn derive_impl(derive: Trait, input: DeriveInput) -> syn::Result<TokenStream> {
+    Ok(Derive::new(derive, input)?.derive_impl())
 }
 
-pub(crate) struct Container {
-    derive: Derive,
+pub(crate) struct Derive {
+    derive_trait: Trait,
     name: Ident,
     crate_path: Path,
     generics: Generics,
     data: ContainerData,
 }
 
-impl Container {
-    pub(crate) fn new(derive: Derive, input: DeriveInput) -> syn::Result<Self> {
-        let attrs = ContainerAttributes::new(&input.attrs)?;
+impl Derive {
+    pub(crate) fn new(derive_trait: Trait, input: DeriveInput) -> syn::Result<Self> {
+        let attrs = DeriveAttributes::new(&input.attrs)?;
         let name = input.ident;
         let crate_path = attrs.crate_path;
         let generics = input.generics;
         let data = match input.data {
             Data::Struct(data) => {
                 if attrs.transparent {
-                    ContainerData::new_struct_transparent(data)
-                        .map_err(|err| Error::new_spanned(&name, err))
+                    ContainerData::new_struct_transparent(&name, data)
                 } else {
-                    Ok(ContainerData::new_struct(
-                        name.to_string(),
-                        data,
-                        attrs.rename_all,
-                    ))
+                    ContainerData::new_struct(data, attrs.rename_all)
                 }
             }
             Data::Enum(_) | Data::Union(_) => Err(Error::new_spanned(
                 &name,
-                format!("{} cannot be derived on enums and unions", derive),
+                format!("{} cannot be derived on enums and unions", derive_trait),
             )),
         }?;
         Ok(Self {
-            derive,
+            derive_trait,
             name,
             crate_path,
             generics,
@@ -53,12 +47,11 @@ impl Container {
     }
 
     fn derive_impl(&self) -> TokenStream {
-        match self.derive {
-            Derive::Reflect => self.impl_reflect(),
-            Derive::AsValue => self.impl_as_value(),
-            Derive::FromValue => self.impl_from_value(),
-            Derive::StdTryFromValue => self.impl_std_try_from_value(),
-            Derive::IntoValue => self.impl_into_value(),
+        match self.derive_trait {
+            Trait::Reflect => self.impl_reflect(),
+            Trait::ToValue => self.impl_to_value(),
+            Trait::FromValue => self.impl_from_value(),
+            Trait::IntoValue => self.impl_into_value(),
         }
     }
 
@@ -73,7 +66,8 @@ impl Container {
         }
 
         let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-        let reflect_ty = self.reflect_ty();
+        let reflect_ty = self.reflect_ty(Reflect::Static);
+        let rt_reflect_ty = self.reflect_ty(Reflect::Runtime);
 
         quote! {
             impl #impl_generics #qi ::Reflect for #name #ty_generics #where_clause {
@@ -81,31 +75,34 @@ impl Container {
                     #reflect_ty
                 }
             }
+
+            impl #impl_generics #qi ::RuntimeReflect for #name #ty_generics #where_clause {
+                fn ty(&self) -> #qi ::Type {
+                    #rt_reflect_ty
+                }
+            }
         }
     }
 
-    fn impl_as_value(&self) -> TokenStream {
+    fn impl_to_value(&self) -> TokenStream {
         let qi = &self.crate_path;
         let name = &self.name;
 
         let mut generics = self.generics.clone();
-        let as_value_bound: TypeParamBound = parse_quote!(#qi ::AsValue);
+
+        // Add a bound `T: ToValue` for each type parameter T.
+        let to_value_bound: TypeParamBound = parse_quote!(#qi ::ToValue);
         for param in generics.type_params_mut() {
-            param.bounds.push(as_value_bound.clone());
+            param.bounds.push(to_value_bound.clone());
         }
 
         let (impl_generics, ty_generics, where_clause) = generics.split_for_impl();
-        let value_type = self.value_type();
-        let as_value = self.as_value();
+        let to_value = self.to_value();
 
         quote! {
-            impl #impl_generics #qi ::AsValue for #name #ty_generics #where_clause {
-                fn value_type(&self) -> #qi ::Type {
-                    #value_type
-                }
-
-                fn as_value(&self) -> #qi:: Value<'_> {
-                    #as_value
+            impl #impl_generics #qi ::ToValue for #name #ty_generics #where_clause {
+                fn to_value(&self) -> #qi:: Value<'_> {
+                    #to_value
                 }
             }
         }
@@ -119,20 +116,26 @@ impl Container {
 
         let mut generics = self.generics.clone();
 
-        // Add a bound `'a: 'value` for each lifetime parameter 'a.
-        for lt in generics.lifetimes_mut() {
-            lt.bounds.push(value_lt.clone());
-        }
-
         // Add a bound `T: FromValue` for each type parameter T.
         for ty in generics.type_params_mut() {
             ty.bounds.push(parse_quote!(#qi ::FromValue<#value_lt>));
         }
 
+        // Add a bound `'value: 'a` for each lifetime parameter `'a``.
+        let lifetime_params = generics
+            .lifetimes()
+            .map(|lt| lt.lifetime.clone())
+            .collect::<Vec<_>>();
+        let where_clause = generics.make_where_clause();
+        where_clause
+            .predicates
+            .push(parse_quote!(#value_lt: #(#lifetime_params)+*));
+
         let (impl_generics, ty_generics, where_clause) =
-            split_value_lt_generics(value_lt.clone(), &generics);
+            split_generics_with_value_lt_impl(value_lt.clone(), &generics);
+
         let value_ident = parse_quote!(value);
-        let from_value = self.qi_from_value(&value_ident);
+        let from_value = self.from_value(&value_ident);
         quote! {
             impl #impl_generics #qi ::FromValue<#value_lt> for #name #ty_generics #where_clause {
                 fn from_value(#value_ident: #qi ::Value<#value_lt>) -> Result<Self, #qi ::FromValueError> {
@@ -142,11 +145,10 @@ impl Container {
         }
     }
 
-    fn impl_std_try_from_value(&self) -> TokenStream {
+    fn impl_into_value(&self) -> TokenStream {
         let qi = &self.crate_path;
         let name = &self.name;
         let value_lt = qi_value_lifetime();
-        let value_ty = quote!(#qi ::Value<#value_lt>);
 
         let mut generics = self.generics.clone();
 
@@ -155,141 +157,58 @@ impl Container {
             lt.bounds.push(value_lt.clone());
         }
 
-        // Add a bound `T: FromValue` for each type parameter T.
+        // Add a bound `T: IntoValue` for each type parameter T.
         for ty in generics.type_params_mut() {
-            ty.bounds.push(parse_quote!(#qi ::FromValue<#value_lt>));
+            ty.bounds.push(parse_quote!(#qi IntoValue< #value_lt >));
         }
 
         let (impl_generics, ty_generics, where_clause) =
-            split_value_lt_generics(value_lt.clone(), &generics);
+            split_generics_with_value_lt_impl(value_lt.clone(), &generics);
 
+        let into_value = self.into_value();
         quote! {
-            impl #impl_generics std::convert::TryFrom< #value_ty > for #name #ty_generics #where_clause {
-                type Error = #qi ::FromValueError;
-                fn try_from(value: #value_ty) -> Result<Self, Self::Error> {
-                    #qi ::FromValue::from_value(value)
+            impl #impl_generics #qi ::IntoValue< #value_lt > for #name #ty_generics #where_clause {
+                fn into_value(self) -> #qi ::Value< #value_lt > {
+                    #into_value
                 }
             }
         }
     }
 
-    fn impl_into_value(&self) -> TokenStream {
-        let qi = &self.crate_path;
-        let name = &self.name;
-        let value_ident = parse_quote!(value);
-        let value_lt = qi_value_lifetime();
-
-        let mut generics = self.generics.clone();
-
-        // Add a bound `T: Into<Value>` for each type parameter T.
-        for ty in generics.type_params_mut() {
-            ty.bounds
-                .push(parse_quote!(std::convert::Into<#qi ::Value< #value_lt >>));
-        }
-
-        let (impl_generics, ty_generics, where_clause) =
-            split_value_lt_generics(value_lt.clone(), &generics);
-
-        let mut where_clause = where_clause.cloned().unwrap_or_else(|| WhereClause {
-            where_token: <Token![where]>::default(),
-            predicates: Punctuated::new(),
-        });
-
-        // Add a lifetime bound `'value: 'a` for each lifetime parameter 'a.
-        let lifetimes = generics
-            .lifetimes()
-            .map(|LifetimeParam { lifetime, .. }| lifetime);
-        let value_lt_where_predicate = parse_quote!(#value_lt: #( #lifetimes )+*);
-        where_clause.predicates.push(value_lt_where_predicate);
-
-        let this_ty = quote!(#name #ty_generics);
-
-        let value_from = self.std_into_value(&value_ident);
-        quote! {
-            impl #impl_generics std::convert::From<#this_ty> for #qi ::Value<#value_lt> #where_clause {
-                fn from(#value_ident: #this_ty) -> Self {
-                    #value_from
-                }
-            }
-        }
-    }
-
-    fn reflect_ty(&self) -> TokenStream {
+    fn reflect_ty(&self, reflect: Reflect) -> TokenStream {
+        let name_str = self.name.to_string();
         let qi = &self.crate_path;
         match &self.data {
-            ContainerData::Empty => {
-                quote!(#qi ::Type::Unit)
-            }
-            ContainerData::Field { field } => reflect_ty(qi, &field.ty),
-            ContainerData::Struct { name, fields } => {
-                let fields = fields
-                    .iter()
-                    .map(|field| struct_field(qi, field, reflect_ty(qi, &field.ty)));
-                quote! {
-                    Some(#qi ::Type::Tuple(
-                        #qi ::ty::Tuple::Struct {
-                            name: #name.to_owned(),
-                            fields: vec![ #( #fields ),* ],
-                        }
-                    ))
-                }
-            }
-            ContainerData::TupleStruct { name, fields } => {
-                let fields = fields.iter().map(|element| reflect_ty(qi, element));
-                quote! {
-                    Some(#qi ::Type::Tuple(
-                        #qi ::ty::Tuple::TupleStruct {
-                            name: #name.to_owned(),
-                            elements: vec![ #( #fields ),* ],
-                        }
-                    ))
-                }
-            }
-        }
-    }
-
-    fn value_type(&self) -> TokenStream {
-        let qi = &self.crate_path;
-        match &self.data {
-            ContainerData::Empty => quote!(#qi ::Type::Unit),
-            ContainerData::Field { field } => {
-                let field_access = field_access(quote!(self), field.ident.as_ref(), 0);
-                quote!(#qi ::AsValue::value_type(& #field_access))
-            }
-            ContainerData::Struct { name, fields } => {
-                let fields = fields.iter().enumerate().map(|(idx, field)| {
-                    let value_type =
-                        value_type(qi, field_access(quote!(self), Some(&field.ident), idx));
-                    let ty = quote!(Some(#value_type));
-                    struct_field(qi, field, ty)
-                });
-                quote! {
+            ContainerData::Empty => reflect.convert_to_ty_result(quote!(#qi ::Type::Unit)),
+            ContainerData::Field(field) => field.reflect_ty(qi, reflect),
+            ContainerData::Struct { fields } => {
+                let fields = fields.iter().map(|field| field.struct_field(qi, reflect));
+                reflect.convert_to_ty_result(quote! {
                     #qi ::Type::Tuple(
                         #qi ::ty::Tuple::Struct {
-                            name: #name.to_owned(),
+                            name: #name_str.to_owned(),
                             fields: vec![ #( #fields ),* ],
                         }
                     )
-                }
+                })
             }
-            ContainerData::TupleStruct { name, fields } => {
-                let fields = fields
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, _)| value_type(qi, field_access(quote!(self), None, idx)));
-                quote! {
-                    Some(#qi ::Type::Tuple(
+            ContainerData::TupleStruct { fields } => {
+                let fields = fields.iter().map(|field| {
+                    reflect.convert_ty_result_to_option(field.reflect_ty(qi, reflect))
+                });
+                reflect.convert_to_ty_result(quote! {
+                    #qi ::Type::Tuple(
                         #qi ::ty::Tuple::TupleStruct {
-                            name: #name.to_owned(),
+                            name: #name_str.to_owned(),
                             elements: vec![ #( #fields ),* ],
                         }
-                    ))
-                }
+                    )
+                })
             }
         }
     }
 
-    fn as_value(&self) -> TokenStream {
+    fn to_value(&self) -> TokenStream {
         let qi = &self.crate_path;
         match &self.data {
             ContainerData::Empty => {
@@ -297,29 +216,31 @@ impl Container {
                     #qi ::Value::Unit
                 }
             }
-            ContainerData::Field { field } => {
-                let field_access = field_access(quote!(self), field.ident.as_ref(), 0);
-                as_value(qi, field_access)
-            }
-            ContainerData::Struct { fields, .. } => {
-                let field_values = fields.iter().map(|field| {
-                    let field_ident = &field.ident;
-                    let field_access = quote!(self.#field_ident);
-                    as_value(qi, field_access)
-                });
+            ContainerData::Field(field) => field.to_value(qi),
+            ContainerData::Struct { fields, .. } | ContainerData::TupleStruct { fields, .. } => {
+                let fields = fields.iter().map(|field| field.to_value(qi));
                 quote! {
                     #qi ::Value::Tuple(
                         vec![
-                            #( #field_values ),*
+                            #( #fields ),*
                         ]
                     )
                 }
             }
-            ContainerData::TupleStruct { fields, .. } => {
-                let values = fields
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, _)| as_value(qi, quote!(self.#idx)));
+        }
+    }
+
+    fn into_value(&self) -> TokenStream {
+        let qi = &self.crate_path;
+        match &self.data {
+            ContainerData::Empty => {
+                quote! {
+                    #qi ::Value::Unit
+                }
+            }
+            ContainerData::Field(field) => field.into_value(qi),
+            ContainerData::Struct { fields, .. } | ContainerData::TupleStruct { fields } => {
+                let values = fields.iter().map(|field| field.into_value(qi));
                 quote! {
                     #qi ::Value::Tuple(
                         vec![
@@ -331,190 +252,155 @@ impl Container {
         }
     }
 
-    fn qi_from_value(&self, value: &Ident) -> TokenStream {
-        fn from_tuple<T>(qi: &Path, name: &Ident, value: &Ident, fields: T) -> TokenStream
+    fn from_value(&self, value: &Ident) -> TokenStream {
+        fn from_tuple<F, U>(qi: &Path, name: String, value: &Ident, struct_data: F) -> TokenStream
         where
-            T: ToTokens,
+            F: FnOnce(&TokenStream) -> U,
+            U: ToTokens,
         {
             let err_type_mismatch =
-                value_type_mismatch_error(qi, format!("a {name}"), quote!(value_type.to_string()));
+                value_type_mismatch_error(qi, quote!(#name.to_owned()), quote!(#value.to_string()));
+            let err = quote!(err);
+            let struct_data = struct_data(&err);
             quote! {
-                let value_type = #qi ::AsValue::value_type(&#value);
-                let make_err_type_mismatch = || #err_type_mismatch;
-                let tuple = match #value {
-                    #qi ::Value::Tuple(tuple) => tuple,
-                    _ => return Err(make_err_type_mismatch()),
-                };
-                let mut iter = tuple.into_iter();
-                #fields
+                let #err = #err_type_mismatch;
+                match #value {
+                    #qi ::Value::Tuple(tuple) => {
+                        let mut iter = tuple.into_iter();
+                        Ok(Self #struct_data)
+                    }
+                    _ => Err(#err),
+                }
             }
         }
 
         let qi = &self.crate_path;
         let name = &self.name;
+        let name_str = name.to_string();
         match &self.data {
             ContainerData::Empty => {
-                let err_type_mismatch = value_type_mismatch_error(
+                let err = value_type_mismatch_error(
                     qi,
-                    format!("a {name}"),
-                    quote!(#qi ::AsValue::value_type(&#value).to_string()),
+                    quote!(#name_str.to_owned()),
+                    quote!(#value.to_string()),
                 );
                 quote! {
                     match #value {
                         #qi ::Value::Unit => Ok(Self),
-                        _ => Err(#err_type_mismatch),
+                        _ => Err(#err),
                     }
                 }
             }
-            ContainerData::Field { field } => {
-                let result = quote!(#qi ::FromValue::from_value(#value));
-                match &field.ident {
+            ContainerData::Field(field) => {
+                let from_value = field.from_value(qi, quote!(value));
+                match &field.src.ident {
                     Some(ident) => {
                         quote! {
                             Ok(Self {
-                                #ident: #result?
+                                #ident: #from_value?
                             })
                         }
                     }
                     None => {
                         quote! {
-                            Ok(Self(#result?))
+                            Ok(Self(#from_value?))
                         }
                     }
                 }
             }
-            ContainerData::Struct { fields, .. } => {
+            ContainerData::Struct { fields, .. } => from_tuple(qi, name_str, value, |err| {
                 let fields = fields.iter().map(|field| {
-                    let ident = &field.ident;
-                    let value = quote!(iter.next().ok_or_else(&make_err_type_mismatch)?);
+                    let ident = &field.src.ident;
+                    let from_value = field.from_value(qi, quote!(value));
                     quote! {
-                        #ident: #qi ::FromValue::from_value(#value)?
+                        #ident: match iter.next() {
+                            Some(value) => #from_value?,
+                            None => return Err(#err),
+                        }
                     }
                 });
-                from_tuple(qi, name, value, quote!(Ok(Self { #( #fields ),* })))
-            }
-            ContainerData::TupleStruct { fields, .. } => {
-                let fields = fields.iter().map(|_| {
-                    quote! {{
-                        let value = iter.next().ok_or_else(make_err_type_mismatch)?;
-                        #qi ::FromValue::from_value(value)?
-                    }}
+                quote!({ #( #fields ),* })
+            }),
+            ContainerData::TupleStruct { fields, .. } => from_tuple(qi, name_str, value, |err| {
+                let fields = fields.iter().map(|field| {
+                    let from_value = field.from_value(qi, quote!(value));
+                    quote! {
+                        match iter.next() {
+                            Some(value) => #from_value?,
+                            None => return Err(#err),
+                        }
+                    }
                 });
-                from_tuple(qi, name, value, quote!(Ok(Self (#( #fields ),*))))
-            }
-        }
-    }
-
-    fn std_into_value(&self, value: &Ident) -> TokenStream {
-        let qi = &self.crate_path;
-        match &self.data {
-            ContainerData::Empty => {
-                quote! {
-                    #qi ::Value::Unit
-                }
-            }
-            ContainerData::Field { field } => {
-                let field_access = field_access(value, field.ident.as_ref(), 0);
-                value_from(qi, field_access)
-            }
-            ContainerData::Struct { fields, .. } => {
-                let values = fields.iter().map(|field| {
-                    let field_ident = &field.ident;
-                    value_from(qi, quote!(#value. #field_ident))
-                });
-                quote! {
-                    #qi ::Value::Tuple(
-                        vec![
-                            #( #values ),*
-                        ]
-                    )
-                }
-            }
-            ContainerData::TupleStruct { fields, .. } => {
-                let values = fields
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, _)| value_from(qi, quote!(#value. #idx)));
-                quote! {
-                    #qi ::Value::Tuple(
-                        vec![
-                            #( #values ),*
-                        ]
-                    )
-                }
-            }
+                quote!(( #( #fields ),* ))
+            }),
         }
     }
 }
 
 #[derive(Debug)]
-pub(crate) enum Derive {
+pub(crate) enum Trait {
     Reflect,
-    AsValue,
-    FromValue,
-    StdTryFromValue,
+    ToValue,
     IntoValue,
+    FromValue,
 }
 
-impl std::fmt::Display for Derive {
+impl std::fmt::Display for Trait {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Derive::Reflect => f.write_str("Reflect"),
-            Derive::AsValue => f.write_str("AsValue"),
-            Derive::FromValue => f.write_str("FromValue"),
-            Derive::StdTryFromValue => f.write_str("StdTryFromValue"),
-            Derive::IntoValue => f.write_str("IntoValue"),
+            Trait::Reflect => f.write_str("Reflect"),
+            Trait::ToValue => f.write_str("ToValue"),
+            Trait::FromValue => f.write_str("FromValue"),
+            Trait::IntoValue => f.write_str("IntoValue"),
         }
     }
 }
 
 fn qi_value_lifetime() -> Lifetime {
-    parse_quote!('__qi_value)
+    Lifetime::new("'__qi_value", Span::call_site())
 }
 
-fn split_value_lt_generics(
+fn split_generics_with_value_lt_impl(
     value_lt: Lifetime,
     generics: &Generics,
 ) -> (
-    ValueFromImplGenerics<'_>,
+    WithValueLifetimeImplGenerics<'_>,
     syn::TypeGenerics<'_>,
     Option<&syn::WhereClause>,
 ) {
     let (_, ty_generics, where_clause) = generics.split_for_impl();
     (
-        ValueFromImplGenerics { value_lt, generics },
+        WithValueLifetimeImplGenerics { value_lt, generics },
         ty_generics,
         where_clause,
     )
 }
 
-struct ValueFromImplGenerics<'a> {
+struct WithValueLifetimeImplGenerics<'a> {
     value_lt: Lifetime,
     generics: &'a Generics,
 }
 
-impl<'a> ToTokens for ValueFromImplGenerics<'a> {
+impl<'a> ToTokens for WithValueLifetimeImplGenerics<'a> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let value_lt = &self.value_lt;
         let mut generics = self.generics.clone();
-        let lifetimes = generics
-            .lifetimes()
-            .map(|LifetimeParam { lifetime, .. }| lifetime);
-        let mut lt_param = LifetimeParam::new(value_lt.clone());
-        lt_param.bounds.extend(lifetimes.cloned());
-        generics.params.push(GenericParam::Lifetime(lt_param));
+        generics
+            .params
+            .push(GenericParam::Lifetime(LifetimeParam::new(
+                self.value_lt.clone(),
+            )));
         let (impl_generics, _, _) = generics.split_for_impl();
         impl_generics.to_tokens(tokens)
     }
 }
 
-struct ContainerAttributes {
+struct DeriveAttributes {
     crate_path: Path,
     transparent: bool,
     rename_all: Option<Case>,
 }
 
-impl ContainerAttributes {
+impl DeriveAttributes {
     /// Parses attributes with syntax:
     /// #[qi(value = "...", transparent, rename_all = "...")].
     fn new(attrs: &[Attribute]) -> syn::Result<Self> {
@@ -533,19 +419,7 @@ impl ContainerAttributes {
                         transparent = true;
                         Ok(())
                     } else if meta.path.is_ident("rename_all") {
-                        let value = meta.value()?; // parses the '='
-                        let value_lit_str: LitStr = value.parse()?;
-                        rename_all = Some(match value_lit_str.value().as_str() {
-                            "lowercase" => Case::Lower,
-                            "UPPERCASE" => Case::Upper,
-                            "PascalCase" => Case::Pascal,
-                            "camelCase" => Case::Camel,
-                            "snake_case" => Case::Snake,
-                            "SCREAMING_SNAKE_CASE" => Case::ScreamingSnake,
-                            "kebab-case" => Case::Kebab,
-                            "SCREAMING-KEBAB-CASE" => Case::UpperKebab,
-                            _ => return Err(meta.error("unknown \"rename_all\" value")),
-                        });
+                        rename_all = Some(parse_rename_attribute(&meta)?);
                         Ok(())
                     } else {
                         Err(meta.error("unknown attribute"))
@@ -564,132 +438,265 @@ impl ContainerAttributes {
 
 enum ContainerData {
     Empty,
-    Field {
-        field: syn::Field,
-    },
-    Struct {
-        name: String,
-        fields: Vec<RenamedField>,
-    },
-    TupleStruct {
-        name: String,
-        fields: Vec<Type>,
-    },
+    Field(Field),
+    Struct { fields: Vec<Field> },
+    TupleStruct { fields: Vec<Field> },
 }
 
 impl ContainerData {
-    fn new_struct(name: String, data: DataStruct, rename_all: Option<Case>) -> Self {
-        match data.fields {
+    fn new_struct(data: DataStruct, rename_all: Option<Case>) -> syn::Result<Self> {
+        Ok(match data.fields {
             Fields::Named(fields) => {
                 let fields = fields
                     .named
                     .into_iter()
-                    .map(|field| RenamedField {
-                        ident: field.ident.unwrap(),
-                        rename: rename_all,
-                        ty: field.ty,
-                    })
-                    .collect();
-                Self::Struct { name, fields }
+                    .enumerate()
+                    .map(|(idx, field)| Field::new(field, idx, rename_all))
+                    .collect::<syn::Result<_>>()?;
+                Self::Struct { fields }
             }
             Fields::Unnamed(fields) => {
-                let fields = fields.unnamed.into_iter().map(|field| field.ty).collect();
-                Self::TupleStruct { name, fields }
+                let fields = fields
+                    .unnamed
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, field)| Field::new(field, idx, rename_all))
+                    .collect::<syn::Result<_>>()?;
+                Self::TupleStruct { fields }
             }
-            Fields::Unit => Self::TupleStruct {
-                name,
-                fields: vec![],
-            },
-        }
+            Fields::Unit => Self::TupleStruct { fields: vec![] },
+        })
     }
 
-    fn new_struct_transparent(data: DataStruct) -> Result<Self, MakeContainerContentError> {
-        let field = data.fields.into_iter().try_fold(None, |ty, field| {
-            if ty.is_some() {
-                Err(MakeContainerContentError::TransparentWithMoreThanOneField)
-            } else {
-                Ok(Some(field))
-            }
-        })?;
-        Ok(match field {
-            Some(field) => Self::Field { field },
+    fn new_struct_transparent(name: &Ident, data: DataStruct) -> syn::Result<Self> {
+        let mut field_iter = data.fields.into_iter();
+        if field_iter.len() > 1 {
+            return Err(syn::Error::new_spanned(
+                name,
+                "`qi(transparent)` requires struct to have at most one field",
+            ));
+        }
+        Ok(match field_iter.next() {
+            Some(field) => Self::Field(Field::new(field, 0, None)?),
             None => Self::Empty,
         })
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-enum MakeContainerContentError {
-    #[error("`qi(transparent)` requires struct to have at most one field")]
-    TransparentWithMoreThanOneField,
+struct Field {
+    src: syn::Field,
+    index: syn::Index,
+    attrs: FieldAttributes,
 }
 
-struct RenamedField {
-    ident: Ident,
+impl Field {
+    fn new(src: syn::Field, index: usize, rename: Option<Case>) -> syn::Result<Self> {
+        let index = syn::Index::from(index);
+        let attrs = FieldAttributes::new(rename, &src.attrs)?;
+        Ok(Self { src, index, attrs })
+    }
+
+    fn reflect_ty(&self, qi: &Path, reflect: Reflect) -> TokenStream {
+        let ty = &self.src.ty;
+        match (reflect, self.attrs.as_raw) {
+            (Reflect::Static, false) => Reflect::static_ty(qi, ty),
+            (Reflect::Static, true) => Reflect::static_ty(qi, quote!(#qi ::AsRaw<#ty>)),
+            (Reflect::Runtime, false) => Reflect::runtime_ty(qi, self.access_on(quote!(self))),
+            (Reflect::Runtime, true) => {
+                let access = self.access_on(quote!(self));
+                Reflect::runtime_ty(qi, quote!(#qi ::AsRaw(&#access)))
+            }
+        }
+    }
+
+    fn struct_field(&self, qi: &Path, reflect: Reflect) -> TokenStream {
+        let field_name = self.name();
+        let ty = reflect.convert_ty_result_to_option(self.reflect_ty(qi, reflect));
+        quote! {
+            #qi ::ty::StructField {
+                name: #field_name .to_owned(),
+                ty: #ty,
+            }
+        }
+    }
+
+    fn access_on<T>(&self, receiver: T) -> TokenStream
+    where
+        T: ToTokens,
+    {
+        match &self.src.ident {
+            Some(ident) => quote!(#receiver.#ident),
+            None => {
+                let index = &self.index;
+                quote!(#receiver.#index)
+            }
+        }
+    }
+
+    fn name(&self) -> Option<String> {
+        self.src.ident.as_ref().map(|ident| {
+            let name = ident.to_string();
+            match self.attrs.rename {
+                Some(case) => name.to_case(case),
+                None => name,
+            }
+        })
+    }
+
+    fn into_value(&self, qi: &Path) -> TokenStream {
+        let mut value = self.access_on(quote!(self));
+        if self.attrs.as_raw {
+            value = quote!(#qi:: AsRaw(#value));
+        }
+        quote!(#qi ::IntoValue::into_value(#value))
+    }
+
+    fn to_value(&self, qi: &Path) -> TokenStream {
+        let value = self.access_on(quote!(self));
+        let value_ref = quote!(&#value);
+        if self.attrs.as_raw {
+            quote!(#qi ::IntoValue::into_value(#qi:: AsRaw(#value_ref)))
+        } else {
+            quote!(#qi ::ToValue::to_value(#value_ref))
+        }
+    }
+
+    fn from_value<T>(&self, qi: &Path, value: T) -> TokenStream
+    where
+        T: ToTokens,
+    {
+        let mut result = quote!(#qi ::FromValue::from_value(#value));
+        if self.attrs.as_raw {
+            result = quote!(#result .map(|#qi ::AsRaw(value)| value));
+        }
+        result
+    }
+}
+
+struct FieldAttributes {
+    as_raw: bool,
     rename: Option<Case>,
-    ty: Type,
 }
 
-fn reflect_ty<T: ToTokens>(qi: &Path, ty: T) -> TokenStream {
-    quote_spanned!(ty.span()=> < #ty as #qi ::Reflect >::ty())
+impl FieldAttributes {
+    /// Parses attributes with syntax:
+    /// #[qi(rename = "...", as_raw)].
+    fn new(mut rename: Option<Case>, attrs: &[Attribute]) -> syn::Result<Self> {
+        let mut as_raw = false;
+        for attr in attrs {
+            if attr.path().is_ident("qi") {
+                attr.parse_nested_meta(|meta| {
+                    if meta.path.is_ident("rename") {
+                        rename = Some(parse_rename_attribute(&meta)?);
+                        Ok(())
+                    } else if meta.path.is_ident("as_raw") {
+                        as_raw = true;
+                        Ok(())
+                    } else {
+                        Err(meta.error("unknown attribute"))
+                    }
+                })?;
+            }
+        }
+        Ok(Self { as_raw, rename })
+    }
 }
 
-fn value_type<T: ToTokens>(qi: &Path, value: T) -> TokenStream {
-    quote_spanned!(value.span()=> #qi ::AsValue::value_type(&#value))
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reflect {
+    Static,
+    Runtime,
 }
 
-fn field_access<T: ToTokens>(object: T, field: Option<&Ident>, index: usize) -> TokenStream {
-    match field {
-        Some(field) => quote!(#object.#field),
-        None => {
-            let index = Index::from(index);
-            quote!(#object.#index)
+impl Reflect {
+    fn static_ty<T>(qi: &Path, ty: T) -> TokenStream
+    where
+        T: ToTokens,
+    {
+        quote!(< #ty as #qi ::Reflect >::ty())
+    }
+
+    fn runtime_ty<T>(qi: &Path, value: T) -> TokenStream
+    where
+        T: ToTokens,
+    {
+        quote!(#qi ::RuntimeReflect::ty(&#value))
+    }
+
+    fn convert_to_ty_result<T>(self, value: T) -> TokenStream
+    where
+        T: ToTokens,
+    {
+        match self {
+            Reflect::Static => some(value),
+            Reflect::Runtime => value.into_token_stream(),
+        }
+    }
+
+    fn convert_ty_result_to_option<T>(self, value: T) -> TokenStream
+    where
+        T: ToTokens,
+    {
+        match self {
+            Reflect::Static => value.into_token_stream(),
+            Reflect::Runtime => some(value),
         }
     }
 }
 
-fn struct_field<T: ToTokens>(qi: &Path, field: &RenamedField, ty: T) -> TokenStream {
-    let field_name = field.ident.to_string();
-    let field_name = match field.rename {
-        Some(case) => field_name.to_case(case),
-        None => field_name,
-    };
-    quote! {
-        #qi ::ty::StructField {
-            name: #field_name .to_owned(),
-            ty: #ty,
-        }
+fn parse_rename_attribute(meta: &syn::meta::ParseNestedMeta) -> syn::Result<Case> {
+    let value = meta.value()?; // parses the '='
+    let value_lit_str: LitStr = value.parse()?;
+    match value_lit_str.value().as_str() {
+        "lowercase" => Ok(Case::Lower),
+        "UPPERCASE" => Ok(Case::Upper),
+        "PascalCase" => Ok(Case::Pascal),
+        "camelCase" => Ok(Case::Camel),
+        "snake_case" => Ok(Case::Snake),
+        "SCREAMING_SNAKE_CASE" => Ok(Case::ScreamingSnake),
+        "kebab-case" => Ok(Case::Kebab),
+        "SCREAMING-KEBAB-CASE" => Ok(Case::UpperKebab),
+        _ => Err(meta.error("unknown \"rename_all\" value")),
     }
 }
 
-fn as_value<T: ToTokens>(qi: &Path, v: T) -> TokenStream {
-    quote!(#qi ::AsValue::as_value(&#v))
+impl ToTokens for Field {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        self.src.to_tokens(tokens)
+    }
 }
 
-fn value_type_mismatch_error<T: ToTokens>(qi: &Path, expected: String, actual: T) -> TokenStream {
+fn some<T>(value: T) -> TokenStream
+where
+    T: ToTokens,
+{
+    quote!(Some(#value))
+}
+
+fn value_type_mismatch_error(
+    qi: &Path,
+    expected: impl ToTokens,
+    actual: impl ToTokens,
+) -> TokenStream {
     quote! {
         #qi ::FromValueError::TypeMismatch {
-            expected: #expected.to_owned(),
+            expected: #expected,
             actual: #actual,
         }
     }
-}
-
-fn value_from<T: ToTokens>(qi: &Path, v: T) -> TokenStream {
-    quote!(#qi ::Value::from(#v))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use syn::Expr;
+    use syn::{Expr, Type};
 
     #[test]
     fn test_reflect_ty() {
         let qi = &parse_quote!(my_value_crate);
         let ty: &Type = &parse_quote!(MyType);
-        let reflect_ty = reflect_ty(qi, ty);
+        let reflect_ty = Reflect::static_ty(qi, ty);
         let reflect_ty_expr: Expr = parse_quote!(#reflect_ty);
         assert_eq!(
             reflect_ty_expr,

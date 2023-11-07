@@ -7,3 +7,11 @@ pub trait Reflect {
         Signature(Self::ty())
     }
 }
+
+pub trait RuntimeReflect {
+    fn ty(&self) -> Type;
+
+    fn signature(&self) -> Signature {
+        Signature(Some(self.ty()))
+    }
+}

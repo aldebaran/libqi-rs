@@ -6,6 +6,7 @@ impl serde::Serialize for Value<'_> {
     where
         S: serde::Serializer,
     {
+        use serde::ser::Error;
         match self {
             Value::Unit => serializer.serialize_unit(),
             Value::Bool(v) => serializer.serialize_bool(*v),
@@ -19,7 +20,9 @@ impl serde::Serialize for Value<'_> {
             Value::UInt64(v) => serializer.serialize_u64(*v),
             Value::Float32(v) => serializer.serialize_f32(v.0),
             Value::Float64(v) => serializer.serialize_f64(v.0),
-            Value::String(v) => serializer.serialize_str(v),
+            Value::String(v) => {
+                serializer.serialize_str(std::str::from_utf8(v).map_err(S::Error::custom)?)
+            }
             Value::Raw(v) => serializer.serialize_bytes(v),
             Value::Option(opt) => match opt {
                 Some(v) => serializer.serialize_some(v),
