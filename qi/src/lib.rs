@@ -45,6 +45,6 @@
 #![doc = include_str!("../README.md")]
 
 pub use qi_format as format;
-pub use qi_messaging::{self as messaging, session};
-pub use qi_object::{self as object, Node, ServiceDirectory, ServiceInfo, Uri};
+pub use qi_messaging as messaging;
+pub use qi_services as services;
 pub use qi_value as value;

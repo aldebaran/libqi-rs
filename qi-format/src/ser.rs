@@ -5,107 +5,111 @@
 /// - `i128`
 /// - `u128`
 use crate::{write::*, Error, Result};
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 
-fn to_writer<W, T>(writer: W, value: &T) -> Result<()>
-where
-    W: std::io::Write,
-    T: ?Sized + serde::Serialize,
-{
-    let mut serializer = Serializer::from_writer(writer);
-    value.serialize(&mut serializer)?;
-    Ok(())
-}
-
-pub fn to_bytes<T>(serializable: &T) -> Result<Bytes>
+pub fn to_bytes<T>(value: &T) -> Result<Bytes>
 where
     T: serde::Serialize,
 {
-    let mut writer = BytesMut::new().writer();
-    to_writer(&mut writer, serializable)?;
-    Ok(writer.into_inner().freeze())
+    let mut bytes = BytesMut::new();
+    let serializer = Serializer::to_buf(&mut bytes);
+    value.serialize(serializer)?;
+    Ok(bytes.freeze())
 }
 
-#[derive(Default, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub struct Serializer<W> {
-    writer: W,
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Serializer<'a, B> {
+    bytes: &'a mut B,
 }
 
-impl<W> Serializer<W>
+impl<'a, B> Serializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    pub fn from_writer(writer: W) -> Self {
-        Self { writer }
+    pub fn to_buf(bytes: &'a mut B) -> Self {
+        Self { bytes }
     }
 }
 
-impl<'s, W> serde::Serializer for &'s mut Serializer<W>
+impl<'a, B> serde::Serializer for Serializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    type Ok = ();
+    type Ok = &'a mut B;
     type Error = Error;
 
-    type SerializeSeq = SeqSerializer<'s, W>;
-    type SerializeTuple = SeqSerializer<'s, W>;
-    type SerializeTupleStruct = SeqSerializer<'s, W>;
-    type SerializeTupleVariant = SeqSerializer<'s, W>;
-    type SerializeMap = SeqSerializer<'s, W>;
-    type SerializeStruct = SeqSerializer<'s, W>;
-    type SerializeStructVariant = SeqSerializer<'s, W>;
+    type SerializeSeq = SeqSerializer<'a, B>;
+    type SerializeTuple = SeqSerializer<'a, B>;
+    type SerializeTupleStruct = SeqSerializer<'a, B>;
+    type SerializeTupleVariant = SeqSerializer<'a, B>;
+    type SerializeMap = SeqSerializer<'a, B>;
+    type SerializeStruct = SeqSerializer<'a, B>;
+    type SerializeStructVariant = SeqSerializer<'a, B>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok> {
-        write_bool(&mut self.writer, v)
+        write_bool(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok> {
-        write_i8(&mut self.writer, v)
+        write_i8(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok> {
-        write_u8(&mut self.writer, v)
+        write_u8(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok> {
-        write_i16(&mut self.writer, v)
+        write_i16(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok> {
-        write_u16(&mut self.writer, v)
+        write_u16(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok> {
-        write_i32(&mut self.writer, v)
+        write_i32(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok> {
-        write_u32(&mut self.writer, v)
+        write_u32(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok> {
-        write_i64(&mut self.writer, v)
+        write_i64(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok> {
-        write_u64(&mut self.writer, v)
+        write_u64(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok> {
-        write_f32(&mut self.writer, v)
+        write_f32(self.bytes, v);
+        Ok(self.bytes)
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok> {
-        write_f64(&mut self.writer, v)
+        write_f64(self.bytes, v);
+        Ok(self.bytes)
     }
 
     // bytes -> raw
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok> {
-        write_raw(&mut self.writer, v)
+        write_raw(self.bytes, v)?;
+        Ok(self.bytes)
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok> {
-        write_str(&mut self.writer, v)
+        write_str(self.bytes, v)?;
+        Ok(self.bytes)
     }
 
     // equivalence: char -> str
@@ -117,7 +121,8 @@ where
 
     // option -> optional
     fn serialize_none(self) -> Result<Self::Ok> {
-        write_bool(&mut self.writer, false)
+        write_bool(self.bytes, false);
+        Ok(self.bytes)
     }
 
     // option -> optional
@@ -125,21 +130,21 @@ where
     where
         T: serde::Serialize,
     {
-        write_bool(self.writer.by_ref(), true)?;
+        write_bool(self.bytes, true);
         value.serialize(self)
     }
 
     // sequence -> list
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
         let size = len.ok_or(Error::UnspecifiedListMapSize)?;
-        let list_ser = SeqSerializer::new_list_or_map(self, size)?;
-        Ok(list_ser)
+        write_size(self.bytes, size)?;
+        Ok(SeqSerializer::new(self.bytes, size))
     }
 
     // unit -> unit
     fn serialize_unit(self) -> Result<Self::Ok> {
         // nothing
-        Ok(())
+        Ok(self.bytes)
     }
 
     // equivalence: unit_struct -> unit
@@ -149,7 +154,7 @@ where
 
     // tuple -> tuple
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
-        Ok(SeqSerializer::new_tuple(self, len))
+        Ok(SeqSerializer::new(self.bytes, len))
     }
 
     // equivalence: tuple_struct(T...) -> tuple(T...)
@@ -168,9 +173,7 @@ where
 
     // map(T,U) -> map(T,U)
     fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap> {
-        let size = len.ok_or(Error::UnspecifiedListMapSize)?;
-        let map_ser = SeqSerializer::new_list_or_map(self, size)?;
-        Ok(map_ser)
+        self.serialize_seq(len)
     }
 
     // equivalence: newtype_struct(T) -> tuple(T)
@@ -192,7 +195,7 @@ where
         _variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        write_u32(self.writer.by_ref(), variant_index)?;
+        write_u32(self.bytes, variant_index);
         self.serialize_tuple(len)
     }
 
@@ -239,28 +242,19 @@ where
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct SeqSerializer<'s, W> {
-    serializer: &'s mut Serializer<W>,
+pub struct SeqSerializer<'a, B> {
+    buf: &'a mut B,
     size: usize,
     elements_left: usize,
 }
 
-impl<'s, W> SeqSerializer<'s, W>
+impl<'a, B> SeqSerializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    fn new_list_or_map(serializer: &'s mut Serializer<W>, size: usize) -> Result<Self> {
-        write_size(serializer.writer.by_ref(), size)?;
-        Ok(Self {
-            serializer,
-            size,
-            elements_left: size,
-        })
-    }
-
-    fn new_tuple(serializer: &'s mut Serializer<W>, size: usize) -> Self {
+    fn new(buf: &'a mut B, size: usize) -> Self {
         Self {
-            serializer,
+            buf,
             size,
             elements_left: size,
         }
@@ -278,15 +272,16 @@ where
     where
         T: ?Sized + serde::Serialize,
     {
-        value.serialize(&mut *self.serializer)
+        value.serialize(Serializer::to_buf(self.buf))?;
+        Ok(())
     }
 }
 
-impl<'s, W> serde::ser::SerializeSeq for SeqSerializer<'s, W>
+impl<'a, B> serde::ser::SerializeSeq for SeqSerializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    type Ok = ();
+    type Ok = &'a mut B;
     type Error = Error;
 
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
@@ -298,15 +293,15 @@ where
     }
 
     fn end(self) -> Result<Self::Ok> {
-        Ok(())
+        Ok(self.buf)
     }
 }
 
-impl<'s, W> serde::ser::SerializeMap for SeqSerializer<'s, W>
+impl<'a, B> serde::ser::SerializeMap for SeqSerializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    type Ok = ();
+    type Ok = &'a mut B;
     type Error = Error;
 
     fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<()>
@@ -321,19 +316,20 @@ where
     where
         T: serde::Serialize,
     {
-        self.serialize(value)
+        self.serialize(value)?;
+        Ok(())
     }
 
     fn end(self) -> Result<Self::Ok> {
-        Ok(())
+        Ok(self.buf)
     }
 }
 
-impl<'s, W> serde::ser::SerializeTuple for SeqSerializer<'s, W>
+impl<'a, B> serde::ser::SerializeTuple for SeqSerializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    type Ok = ();
+    type Ok = &'a mut B;
     type Error = Error;
 
     fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
@@ -345,15 +341,15 @@ where
     }
 
     fn end(self) -> Result<Self::Ok> {
-        Ok(())
+        Ok(self.buf)
     }
 }
 
-impl<'s, W> serde::ser::SerializeTupleStruct for SeqSerializer<'s, W>
+impl<'a, B> serde::ser::SerializeTupleStruct for SeqSerializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    type Ok = ();
+    type Ok = &'a mut B;
     type Error = Error;
 
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<()>
@@ -365,15 +361,15 @@ where
     }
 
     fn end(self) -> Result<Self::Ok> {
-        Ok(())
+        Ok(self.buf)
     }
 }
 
-impl<'s, W> serde::ser::SerializeTupleVariant for SeqSerializer<'s, W>
+impl<'a, B> serde::ser::SerializeTupleVariant for SeqSerializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    type Ok = ();
+    type Ok = &'a mut B;
     type Error = Error;
 
     fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<()>
@@ -385,15 +381,15 @@ where
     }
 
     fn end(self) -> Result<Self::Ok> {
-        Ok(())
+        Ok(self.buf)
     }
 }
 
-impl<'s, W> serde::ser::SerializeStruct for SeqSerializer<'s, W>
+impl<'a, B> serde::ser::SerializeStruct for SeqSerializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    type Ok = ();
+    type Ok = &'a mut B;
     type Error = Error;
 
     fn serialize_field<T: ?Sized>(&mut self, _key: &'static str, value: &T) -> Result<()>
@@ -405,15 +401,15 @@ where
     }
 
     fn end(self) -> Result<Self::Ok> {
-        Ok(())
+        Ok(self.buf)
     }
 }
 
-impl<'s, W> serde::ser::SerializeStructVariant for SeqSerializer<'s, W>
+impl<'a, B> serde::ser::SerializeStructVariant for SeqSerializer<'a, B>
 where
-    W: std::io::Write,
+    B: bytes::BufMut,
 {
-    type Ok = ();
+    type Ok = &'a mut B;
     type Error = Error;
 
     fn serialize_field<T: ?Sized>(&mut self, _key: &'static str, value: &T) -> Result<()>
@@ -425,7 +421,7 @@ where
     }
 
     fn end(self) -> Result<Self::Ok> {
-        Ok(())
+        Ok(self.buf)
     }
 }
 
@@ -451,12 +447,12 @@ mod tests {
     #[test]
     fn test_serializer_serialize_bool() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_bool(true).unwrap();
         assert_eq!(buf, [1]);
 
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_bool(false).unwrap();
         assert_eq!(buf, [0]);
     }
@@ -464,7 +460,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_i8() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_i8(42).unwrap();
         assert_eq!(buf, [42]);
     }
@@ -472,7 +468,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_u8() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_u8(42).unwrap();
         assert_eq!(buf, [42]);
     }
@@ -480,7 +476,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_i16() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_i16(42).unwrap();
         assert_eq!(buf, [42, 0]);
     }
@@ -488,7 +484,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_u16() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_u16(42).unwrap();
         assert_eq!(buf, [42, 0]);
     }
@@ -496,7 +492,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_i32() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_i32(42).unwrap();
         assert_eq!(buf, [42, 0, 0, 0]);
     }
@@ -504,7 +500,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_u32() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_u32(42).unwrap();
         assert_eq!(buf, [42, 0, 0, 0]);
     }
@@ -512,7 +508,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_i64() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_i64(42).unwrap();
         assert_eq!(buf, [42, 0, 0, 0, 0, 0, 0, 0]);
     }
@@ -520,7 +516,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_u64() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_u64(42).unwrap();
         assert_eq!(buf, [42, 0, 0, 0, 0, 0, 0, 0]);
     }
@@ -528,7 +524,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_f32() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_f32(1.0).unwrap();
         assert_eq!(buf, [0, 0, 128, 63]);
     }
@@ -536,7 +532,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_f64() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_f64(1.0).unwrap();
         assert_eq!(buf, [0, 0, 0, 0, 0, 0, 240, 63]);
     }
@@ -544,7 +540,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_bytes() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_bytes(&[1, 2, 3, 4, 5]).unwrap();
         assert_eq!(buf, [5, 0, 0, 0, 1, 2, 3, 4, 5]);
     }
@@ -552,12 +548,12 @@ mod tests {
     #[test]
     fn test_serializer_serialize_option() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_some(&42i16).unwrap();
         assert_eq!(buf, [1, 42, 0]);
 
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_none().unwrap();
         assert_eq!(buf, [0]);
     }
@@ -565,7 +561,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_unit() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_unit().unwrap();
         assert_eq!(buf, []);
     }
@@ -573,7 +569,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_sequence() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         use serde::ser::SerializeSeq;
         let mut seq = serializer.serialize_seq(Some(3)).unwrap();
         seq.serialize_element(&12i16).unwrap();
@@ -588,7 +584,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_sequence_unknown_size() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         assert_matches!(
             serializer.serialize_seq(None),
             Err(Error::UnspecifiedListMapSize)
@@ -598,7 +594,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_tuple() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         use serde::ser::SerializeTuple;
         let mut tuple = serializer.serialize_tuple(2).unwrap();
         tuple.serialize_element(&42i16).unwrap();
@@ -615,7 +611,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_map() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(Some(2)).unwrap();
         map.serialize_entry(&31, &false).unwrap();
@@ -632,7 +628,7 @@ mod tests {
     #[test]
     fn test_serializer_serialize_map_unknown_size() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         assert_matches!(
             serializer.serialize_map(None),
             Err(Error::UnspecifiedListMapSize)
@@ -647,7 +643,7 @@ mod tests {
     // char -> str
     fn test_serializer_serialize_char() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_char('a').unwrap();
         assert_eq!(buf, [1, 0, 0, 0, 97]);
     }
@@ -656,7 +652,7 @@ mod tests {
     // str -> bytes.
     fn test_serializer_serialize_str() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_str("abc").unwrap();
         assert_eq!(buf, [3, 0, 0, 0, 97, 98, 99]);
     }
@@ -665,7 +661,7 @@ mod tests {
     // struct -> tuple.
     fn test_serializer_serialize_struct() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         use serde::ser::SerializeStruct;
         let mut st = serializer.serialize_struct("MyStruct", 2).unwrap();
         st.serialize_field("w", &23u16).unwrap();
@@ -683,7 +679,7 @@ mod tests {
     // newtype_struct -> tuple(T) = T
     fn test_serializer_serialize_newtype_struct() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer
             .serialize_newtype_struct("MyStruct", &12i32)
             .unwrap();
@@ -694,7 +690,7 @@ mod tests {
     // unit_struct -> unit
     fn test_serializer_serialize_unit_struct() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer.serialize_unit_struct("MyStruct").unwrap();
         assert_eq!(buf, []);
     }
@@ -703,7 +699,7 @@ mod tests {
     // tuple_struct -> tuple
     fn test_serializer_serialize_tuple_struct() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         use serde::ser::SerializeTupleStruct;
         let mut tuple = serializer.serialize_tuple_struct("MyStruct", 2).unwrap();
         tuple.serialize_field(&234u16).unwrap();
@@ -721,7 +717,7 @@ mod tests {
     // unit_variant -> tuple(uint32) = uint32
     fn test_serializer_serialize_unit_variant() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer
             .serialize_unit_variant("MyEnum", 23, "MyVariant")
             .unwrap();
@@ -732,7 +728,7 @@ mod tests {
     // newtype_variant(T) -> tuple(uint32, T)
     fn test_serializer_serialize_newtype_variant() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         serializer
             .serialize_newtype_variant("MyEnum", 123, "MyVariant", "abc")
             .unwrap();
@@ -743,7 +739,7 @@ mod tests {
     // tuple_variant(T...) -> tuple(uint32, tuple(T...)) = tuple(uint32, T...)
     fn test_serializer_serialize_tuple_variant() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         use serde::ser::SerializeTupleVariant;
         let mut tuple = serializer
             .serialize_tuple_variant("MyEnum", 913, "MyVariant", 2)
@@ -762,7 +758,7 @@ mod tests {
     // struct_variant(T...) -> tuple(uint32, tuple(T...)) = tuple(uint32, T...)
     fn test_serializer_serialize_struct_variant() {
         let mut buf = Vec::new();
-        let mut serializer = super::Serializer::from_writer(&mut buf);
+        let serializer = super::Serializer::to_buf(&mut buf);
         use serde::ser::SerializeStructVariant;
         let mut st = serializer
             .serialize_struct_variant("MyEnum", 128, "MyVariant", 3)

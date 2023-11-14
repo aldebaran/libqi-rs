@@ -1,5 +1,8 @@
-use crate::{capabilities::CapabilitiesMap, format, value::Dynamic};
+use crate::capabilities::CapabilitiesMap;
 use bytes::Bytes;
+use qi_format as format;
+use qi_value::Dynamic;
+pub use qi_value::{ActionId as Action, ObjectId as Object, ServiceId as Service};
 
 #[derive(
     Default,
@@ -115,6 +118,14 @@ pub struct Address {
 }
 
 impl Address {
+    pub fn new(service: Service, object: Object, action: Action) -> Self {
+        Self {
+            service,
+            object,
+            action,
+        }
+    }
+
     pub const fn service(&self) -> Service {
         self.service
     }
@@ -125,78 +136,6 @@ impl Address {
 
     pub const fn action(&self) -> Action {
         self.action
-    }
-}
-
-#[derive(
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct Service(pub(crate) u32);
-
-impl Service {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-}
-
-#[derive(
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct Object(pub(crate) u32);
-
-impl Object {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-}
-
-#[derive(
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct Action(pub(crate) u32);
-
-impl Action {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
     }
 }
 
@@ -377,9 +316,9 @@ impl Message {
         &self.body
     }
 
-    pub fn deserialize_body<T>(&self) -> Result<T, format::Error>
+    pub fn deserialize_body<'s: 'de, 'de, T>(&'s self) -> Result<T, format::Error>
     where
-        T: serde::de::DeserializeOwned,
+        T: serde::de::Deserialize<'de>,
     {
         format::from_bytes(&self.body)
     }

@@ -1,8 +1,9 @@
 use once_cell::sync::OnceCell;
 use qi_messaging::capabilities::CapabilitiesMap;
+use qi_value::{Dynamic, IntoValue};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-struct Capabilities {
+pub(crate) struct Capabilities {
     client_server_socket: bool,
     remote_cancelable_calls: bool,
     object_ptr_uid: bool,
@@ -28,26 +29,45 @@ impl Capabilities {
         Self {
             client_server_socket: map
                 .get(Self::CLIENT_SERVER_SOCKET)
-                .copied()
+                .cloned()
+                .and_then(|Dynamic(v)| v.cast().ok())
                 .unwrap_or(false),
             remote_cancelable_calls: map
                 .get(Self::REMOTE_CANCELABLE_CALLS)
-                .copied()
+                .cloned()
+                .and_then(|Dynamic(v)| v.cast().ok())
                 .unwrap_or(false),
-            object_ptr_uid: map.get(Self::OBJECT_PTR_UID).copied().unwrap_or(false),
+            object_ptr_uid: map
+                .get(Self::OBJECT_PTR_UID)
+                .cloned()
+                .and_then(|Dynamic(v)| v.cast().ok())
+                .unwrap_or(false),
             relative_endpoint_uri: map
                 .get(Self::RELATIVE_ENDPOINT_URI)
-                .copied()
+                .cloned()
+                .and_then(|Dynamic(v)| v.cast().ok())
                 .unwrap_or(false),
         }
     }
 
-    fn to_map(self) -> CapabilitiesMap {
+    fn to_map(self) -> CapabilitiesMap<'static> {
         CapabilitiesMap::from_iter([
-            (Self::CLIENT_SERVER_SOCKET, self.client_server_socket),
-            (Self::REMOTE_CANCELABLE_CALLS, self.remote_cancelable_calls),
-            (Self::OBJECT_PTR_UID, self.object_ptr_uid),
-            (Self::RELATIVE_ENDPOINT_URI, self.relative_endpoint_uri),
+            (
+                Self::CLIENT_SERVER_SOCKET.to_owned(),
+                self.client_server_socket.into_dynamic_value(),
+            ),
+            (
+                Self::REMOTE_CANCELABLE_CALLS.to_owned(),
+                self.remote_cancelable_calls.into_dynamic_value(),
+            ),
+            (
+                Self::OBJECT_PTR_UID.to_owned(),
+                self.object_ptr_uid.into_dynamic_value(),
+            ),
+            (
+                Self::RELATIVE_ENDPOINT_URI.to_owned(),
+                self.relative_endpoint_uri.into_dynamic_value(),
+            ),
         ])
     }
 }
@@ -56,13 +76,6 @@ impl Default for Capabilities {
     fn default() -> Self {
         Self::new()
     }
-}
-
-pub(crate) trait CapabilitiesMapExt {
-    fn check_required(&self) -> Result<&Self, ExpectedKeyValueError<bool>>;
-    fn check_intersect_with_local(self) -> Result<Self, ExpectedKeyValueError<bool>>
-    where
-        Self: Sized;
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
@@ -110,6 +123,6 @@ const LOCAL_CAPABILITIES: Capabilities = Capabilities::new();
 
 static LOCAL_CAPABILITIES_MAP: OnceCell<CapabilitiesMap> = OnceCell::new();
 
-pub(crate) fn local_map() -> &'static CapabilitiesMap {
+pub(crate) fn local_map() -> &'static CapabilitiesMap<'static> {
     LOCAL_CAPABILITIES_MAP.get_or_init(|| LOCAL_CAPABILITIES.to_map())
 }

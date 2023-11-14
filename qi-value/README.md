@@ -4,7 +4,7 @@ Values of the `qi` type system as defined in the `spec:/aldebaran/framework/2022
 
 ## Minimum Rust Required Version (MSRV)
 
-This crate requires Rust 1.63+.
+This crate requires Rust 1.68+.
 
 ## Mapping between `serde` and `qi` type systems
 

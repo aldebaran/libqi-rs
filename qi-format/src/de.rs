@@ -12,9 +12,9 @@ use crate::{read, Error, Result};
 use bytes::Bytes;
 use serde::de::IntoDeserializer;
 
-pub fn from_bytes<'v, T>(bytes: &'v Bytes) -> Result<T>
+pub fn from_bytes<'v: 'de, 'de, T>(bytes: &'v Bytes) -> Result<T>
 where
-    T: serde::de::Deserialize<'v>,
+    T: serde::de::Deserialize<'de>,
 {
     let mut de = Deserializer::from_slice(bytes);
     T::deserialize(&mut de)
@@ -63,7 +63,7 @@ trait StrDeserializer<'de> {
         V: serde::de::Visitor<'de>;
 }
 
-impl<'de> StrDeserializer<'de> for &'de str {
+impl<'s: 'de, 'de> StrDeserializer<'de> for &'s str {
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,
@@ -105,7 +105,7 @@ trait BytesDeserializer<'de> {
         V: serde::de::Visitor<'de>;
 }
 
-impl<'de> BytesDeserializer<'de> for &'de [u8] {
+impl<'b: 'de, 'de> BytesDeserializer<'de> for &'b [u8] {
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
     where
         V: serde::de::Visitor<'de>,

@@ -6,12 +6,12 @@ license-file = "../LICENSE.txt"
 repository = "https://github.com/nyibbang/libqi-rs"
 version = "0.1.0-dev"
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.68"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 qi-value = { path = "../qi-value" }
 qi-format = { path = "../qi-format" }
-qi-object = { path = "../qi-object" }
+qi-services = { path = "../qi-services" }
 qi-messaging = { path = "../qi-messaging" }

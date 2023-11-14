@@ -2,11 +2,8 @@ use super::*;
 use bytes::Bytes;
 use pretty_assertions::assert_eq;
 use qi_value::{
-    object::{
-        ActionId, MetaMethod, MetaObject, MetaProperty, MetaSignal, Object, ObjectId, ObjectUid,
-        ServiceId,
-    },
-    ty, Dynamic, Map, Reflect, Signature, Type,
+    object::{MetaMethod, MetaObject, MetaProperty, MetaSignal, Object, ObjectUid},
+    ty, ActionId, Dynamic, Map, ObjectId, Reflect, ServiceId, Signature, Type,
 };
 use std::collections::BTreeMap;
 

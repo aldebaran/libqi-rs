@@ -1,9 +1,15 @@
 mod de;
 
-use crate::{reflect::RuntimeReflect, FromValue, IntoValue};
+use crate::{reflect::RuntimeReflect, FromValue, IntoValue, Value};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::From)]
 pub struct Dynamic<T>(pub T);
+
+impl<'a> Dynamic<Value<'a>> {
+    pub fn into_owned(self) -> Dynamic<Value<'static>> {
+        Dynamic(self.0.into_owned())
+    }
+}
 
 impl<T> serde::Serialize for Dynamic<T>
 where

@@ -45,9 +45,11 @@
 
 pub mod capabilities;
 pub mod channel;
+pub mod client;
 pub mod codec;
 pub mod endpoint;
 pub mod message;
+pub mod notifications;
 
-use qi_format as format;
-use qi_value as value;
+pub use client::{Call, Client, Error, Future, Post};
+pub use notifications::{Capabilities, Event, Notification};

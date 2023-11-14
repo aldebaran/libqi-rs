@@ -44,6 +44,7 @@
 
 mod as_raw;
 pub mod dynamic;
+mod ids;
 pub mod map;
 pub mod object;
 mod reflect;
@@ -55,6 +56,7 @@ pub mod value;
 pub use crate::{
     as_raw::AsRaw,
     dynamic::Dynamic,
+    ids::{ActionId, ObjectId, ServiceId},
     map::Map,
     object::Object,
     reflect::{Reflect, RuntimeReflect},

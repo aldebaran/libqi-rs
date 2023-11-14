@@ -43,10 +43,13 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-// pub mod control;
+pub mod error;
+mod node;
 pub mod object;
-pub mod service;
+mod session;
 pub mod signal;
+
+pub use {error::Error, object::Object};
 
 #[cfg(test)]
 mod tests;

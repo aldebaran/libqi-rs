@@ -1,15 +1,18 @@
 use crate::{
-    capabilities,
+    capabilities::CapabilitiesMap,
     message::{self, Address, Id, Message},
+    Call, Capabilities, Client, Error, Event, Notification, Post,
 };
 use bytes::Bytes;
+use erased_serde::Serialize;
 use futures::{
     future::{abortable, AbortHandle, Abortable, Aborted},
     ready,
     stream::{self, FusedStream, FuturesUnordered},
-    FutureExt, Sink, SinkExt, Stream, StreamExt,
+    Sink, SinkExt, Stream, StreamExt,
 };
 use pin_project_lite::pin_project;
+use qi_format as format;
 use std::{
     fmt::Debug,
     pin::Pin,
@@ -20,21 +23,21 @@ use tokio::{
     select,
     sync::{broadcast, mpsc, oneshot},
 };
-use tokio_util::sync::{
-    CancellationToken, DropGuard, PollSendError, PollSender, WaitForCancellationFutureOwned,
-};
+use tokio_util::sync::{CancellationToken, PollSender, WaitForCancellationFutureOwned};
 use tower::{Service, ServiceExt};
 use tracing::debug;
 
-pub fn open<'a, M, Svc, P>(
+pub fn open<'a, M, Svc>(
     messages: M,
     service: Svc,
-    posts: P,
-) -> (impl Stream<Item = Message> + 'a, Client)
+) -> (
+    impl Stream<Item = Message> + 'a,
+    broadcast::Receiver<Notification<'static>>,
+    Client,
+)
 where
-    M: Stream<Item = Message> + 'a,
-    Svc: Service<Call, Response = Reply, Error = Abandon> + 'a,
-    P: Sink<Post> + 'a,
+    M: Stream<Item = Message> + Unpin + 'a,
+    Svc: Service<Call<Bytes>, Response = Bytes, Error = Error> + Sink<Post<Bytes>> + Unpin + 'a,
     Svc::Future: 'a,
 {
     const FIRST_ID: u32 = 1;
@@ -44,8 +47,7 @@ where
 
     let dispatch = Endpoint {
         service,
-        posts: Box::pin(posts),
-        messages: Box::pin(messages.fuse()),
+        messages: messages.fuse(),
         id: AtomicU32::new(FIRST_ID),
         requests,
         notifications: notifications_sender,
@@ -56,272 +58,39 @@ where
         let message = endpoint.next_message().await;
         message.map(move |message| (message, endpoint))
     });
-    let client = Client {
-        requests: PollSender::new(requests_sender),
-        notifications,
-    };
+    let client = Client::new(PollSender::new(requests_sender));
 
-    (messages, client)
+    (messages, notifications, client)
 }
 
-#[derive(Debug)]
-pub struct Client {
-    requests: PollSender<Request>,
-    notifications: broadcast::Receiver<Notification>,
-}
-
-impl Clone for Client {
-    fn clone(&self) -> Self {
-        Self {
-            requests: self.requests.clone(),
-            notifications: self.notifications.resubscribe(),
-        }
-    }
-}
-
-impl Service<Call> for Client {
-    type Response = Reply;
-    type Error = CallError;
-    type Future = CallFuture;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.requests.poll_reserve(cx)?.map(Ok)
-    }
-
-    fn call(&mut self, call: Call) -> CallFuture {
-        let (response_sender, response_receiver) = oneshot::channel();
-        let cancel_token = CancellationToken::new();
-        let request = Request::Call {
-            call,
-            cancel_token: cancel_token.clone(),
-            response_sender,
-        };
-        let inner = match self.requests.send_item(request) {
-            Ok(()) => CallInnerFuture::RequestSent {
-                response_receiver,
-                drop_guard: Some(cancel_token.drop_guard()),
-            },
-            Err(_send_err) => CallInnerFuture::SendError,
-        };
-        CallFuture(inner)
-    }
-}
-
-impl Sink<Post> for Client {
-    type Error = CallError;
-
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.requests.poll_ready_unpin(cx)?.map(Ok)
-    }
-
-    fn start_send(mut self: Pin<&mut Self>, post: Post) -> Result<(), Self::Error> {
-        Ok(self.requests.start_send_unpin(Request::Post(post))?)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.requests.poll_flush_unpin(cx)?.map(Ok)
-    }
-
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.requests.poll_close_unpin(cx)?.map(Ok)
-    }
-}
-
-#[derive(
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct Call {
-    pub(crate) address: message::Address,
-    pub(crate) body: Bytes,
-}
-
-#[derive(
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct Reply {
-    pub(crate) body: Bytes,
-}
-
-#[derive(
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct Post {
-    pub(crate) address: message::Address,
-    pub(crate) body: Bytes,
-}
-
-#[derive(
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct Event {
-    pub(crate) address: message::Address,
-    pub(crate) body: Bytes,
-}
-
-#[derive(Default, Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Capabilities {
-    pub(crate) address: message::Address,
-    pub(crate) capabilities: capabilities::CapabilitiesMap,
-}
-
-#[derive(Clone, PartialEq, Eq, Debug, derive_more::From, serde::Serialize, serde::Deserialize)]
-pub enum Notification {
-    Event(Event),
-    Capabilities(Capabilities),
-}
-
-#[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    derive_more::From,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub enum Abandon {
-    Error(String),
-    Canceled,
-}
-
-#[derive(Debug)]
-#[must_use = "futures do nothing until polled"]
-pub struct CallFuture(CallInnerFuture);
-
-impl CallFuture {
-    pub fn cancel(&mut self) {
-        if let CallInnerFuture::RequestSent { drop_guard, .. } = &mut self.0 {
-            if let Some(guard) = drop_guard.take() {
-                guard.disarm().cancel()
-            }
-        }
-    }
-}
-
-impl std::future::Future for CallFuture {
-    type Output = Result<Reply, CallError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match &mut self.0 {
-            CallInnerFuture::SendError => Poll::Ready(Err(CallError::Disconnected)),
-            CallInnerFuture::RequestSent {
-                response_receiver, ..
-            } => {
-                let reply = ready!(response_receiver.poll_unpin(cx)?)?;
-                Poll::Ready(Ok(reply))
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-enum CallInnerFuture {
-    SendError,
-    RequestSent {
-        response_receiver: oneshot::Receiver<Result<Reply, Abandon>>,
-        drop_guard: Option<DropGuard>,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum CallError {
-    #[error("{0}")]
-    Message(String),
-
-    #[error("client is disconnected")]
-    Disconnected,
-
-    #[error("canceled")]
-    Canceled,
-}
-
-impl From<PollSendError<Request>> for CallError {
-    fn from(_err: PollSendError<Request>) -> Self {
-        Self::Disconnected
-    }
-}
-
-impl From<oneshot::error::RecvError> for CallError {
-    fn from(_err: oneshot::error::RecvError) -> Self {
-        Self::Disconnected
-    }
-}
-
-impl From<Abandon> for CallError {
-    fn from(failure: Abandon) -> Self {
-        match failure {
-            Abandon::Error(err) => Self::Message(err),
-            Abandon::Canceled => Self::Canceled,
-        }
-    }
-}
-
-#[derive(Debug)]
-enum Request {
+pub(crate) enum ClientRequest {
     Call {
-        call: Call,
+        address: message::Address,
+        args: Box<dyn Serialize + Send>,
         cancel_token: CancellationToken,
-        response_sender: oneshot::Sender<Result<Reply, Abandon>>,
+        response_sender: oneshot::Sender<Result<Bytes, Error>>,
     },
-    Post(Post),
+    Post {
+        address: message::Address,
+        value: Box<dyn Serialize + Send>,
+    },
 }
 
 #[derive(Debug)]
-pub struct Endpoint<M, Svc, P, F> {
+pub struct Endpoint<M, Svc, F> {
     messages: M,
     service: Svc,
-    posts: P,
     id: AtomicU32,
-    requests: mpsc::Receiver<Request>,
-    notifications: broadcast::Sender<Notification>,
+    requests: mpsc::Receiver<ClientRequest>,
+    notifications: broadcast::Sender<Notification<'static>>,
     service_call_futures: FuturesUnordered<ServiceCallFuture<F>>,
     client_calls: FuturesUnordered<ClientCallFuture>,
 }
 
-impl<M, Svc, P> Endpoint<M, Svc, P, Svc::Future>
+impl<M, Svc> Endpoint<M, Svc, Svc::Future>
 where
     M: FusedStream<Item = Message> + Unpin,
-    Svc: Service<Call, Response = Reply, Error = Abandon>,
-    P: Sink<Post> + Unpin,
+    Svc: Service<Call<Bytes>, Response = Bytes, Error = Error> + Sink<Post<Bytes>> + Unpin,
 {
     async fn next_message(&mut self) -> Option<Message> {
         loop {
@@ -340,14 +109,14 @@ where
                 Some((id, address, result)) = self.service_call_futures.next(),
                     if !self.service_call_futures.is_terminated() => {
                     let message = match result {
-                        Ok(reply) => Message::reply(id, address).set_body(reply.body).build(),
-                        Err(Abandon::Error(err)) => match Message::error(id, address, &err) {
+                        Ok(reply) => Message::reply(id, address).set_body(reply).build(),
+                        Err(Error::Canceled) => Message::canceled(id, address).build(),
+                        Err(err) => match Message::error(id, address, &err.to_string()) {
                             Ok(builder) => builder.build(),
                             Err(err) => Message::error(id, address,
                                 &format!("the call request has terminated with an error, \
                                     but the serialization of the error message failed: {err}")).unwrap().build()
                         }
-                        Err(Abandon::Canceled) => Message::canceled(id, address).build(),
                     };
                     break Some(message)
                 }
@@ -382,14 +151,14 @@ where
         let address = message.address;
         let call = Call {
             address,
-            body: message.body,
+            args: message.body,
         };
         let ready = self.service.ready().await;
         let service_call_future = match ready {
-            Err(abandon) => ServiceCallFuture::ReadyError {
+            Err(error) => ServiceCallFuture::ReadyError {
                 id,
                 address,
-                abandon: Some(abandon),
+                error: Some(error),
             },
             Ok(service) => {
                 let (future, abort) = abortable(service.call(call));
@@ -406,7 +175,7 @@ where
 
     fn handle_reply(&mut self, message: Message) {
         if let Some(client_call) = self.find_client_call_mut(message.id) {
-            client_call.handle_response(Ok(Reply { body: message.body }));
+            client_call.handle_response(Ok(message.body));
         }
     }
 
@@ -419,16 +188,16 @@ where
                     but the deserialization of the error message failed: {err}"
                 ),
             };
-            client_call.handle_response(Err(Abandon::Error(description)));
+            client_call.handle_response(Err(Error::Other(description.into())));
         }
     }
 
     async fn handle_post(&mut self, message: Message) {
         let post = Post {
             address: message.address,
-            body: message.body,
+            value: message.body,
         };
-        let _res = self.posts.send(post).await;
+        let _res = self.service.send(post).await;
     }
 
     fn handle_event(&self, message: Message) {
@@ -441,10 +210,10 @@ where
     }
 
     fn handle_capabilities(&self, message: Message) {
-        if let Ok(map) = message.deserialize_body() {
+        if let Ok(map) = message.deserialize_body::<CapabilitiesMap<'_>>() {
             let capabilities = Capabilities {
                 address: message.address,
-                capabilities: map,
+                capabilities: map.into_iter().map(|(k, v)| (k, v.into_owned())).collect(),
             };
             let notification = Notification::Capabilities(capabilities);
             let _res = self.notifications.send(notification);
@@ -473,18 +242,26 @@ where
 
     fn handle_canceled(&mut self, message: Message) {
         if let Some(client_call) = self.find_client_call_mut(message.id) {
-            client_call.handle_response(Err(Abandon::Canceled));
+            client_call.handle_response(Err(Error::Canceled));
         }
     }
 
-    fn handle_client_request(&self, request: Request) -> Option<Message> {
+    fn handle_client_request(&self, request: ClientRequest) -> Option<Message> {
         let id = self.new_id();
         match request {
-            Request::Call {
-                call,
+            ClientRequest::Call {
+                address,
+                args,
                 response_sender,
                 cancel_token,
             } => {
+                let body = match format::to_bytes(&args) {
+                    Ok(body) => body,
+                    Err(err) => {
+                        let _res = response_sender.send(Err(Error::Other(err.into())));
+                        return None;
+                    }
+                };
                 let client_call = ClientCallFuture {
                     id,
                     cancelled: cancel_token.cancelled_owned(),
@@ -492,11 +269,12 @@ where
                     response_sender: Some(response_sender),
                 };
                 self.client_calls.push(client_call);
-                let message = Message::call(id, call.address).set_body(call.body).build();
+                let message = Message::call(id, address).set_body(body).build();
                 Some(message)
             }
-            Request::Post(post) => {
-                let message = Message::post(id, post.address).set_body(post.body).build();
+            ClientRequest::Post { address, value } => {
+                let body = format::to_bytes(&value).ok()?;
+                let message = Message::post(id, address).set_body(body).build();
                 Some(message)
             }
         }
@@ -521,7 +299,7 @@ pin_project! {
         ReadyError {
             id: Id,
             address: Address,
-            abandon: Option<Abandon>,
+            error: Option<Error>,
         },
         Call {
             id: Id,
@@ -550,19 +328,15 @@ impl<F> ServiceCallFuture<F> {
 
 impl<F> std::future::Future for ServiceCallFuture<F>
 where
-    F: std::future::Future<Output = Result<Reply, Abandon>>,
+    F: std::future::Future<Output = Result<Bytes, Error>>,
 {
-    type Output = (Id, Address, Result<Reply, Abandon>);
+    type Output = (Id, Address, Result<Bytes, Error>);
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
-            ServiceCallFutureProj::ReadyError {
-                id,
-                address,
-                abandon,
-            } => match abandon.take() {
-                Some(abandon) => {
-                    let value = (*id, *address, Err(abandon));
+            ServiceCallFutureProj::ReadyError { id, address, error } => match error.take() {
+                Some(error) => {
+                    let value = (*id, *address, Err(error));
                     Poll::Ready(value)
                 }
                 None => Poll::Pending,
@@ -575,7 +349,7 @@ where
             } => {
                 let result = match ready!(future.poll(cx)) {
                     Ok(result) => result,
-                    Err(Aborted) => Err(Abandon::Canceled),
+                    Err(Aborted) => Err(Error::Canceled),
                 };
                 Poll::Ready((*id, *address, result))
             }
@@ -590,12 +364,12 @@ pin_project! {
         #[pin]
         cancelled: WaitForCancellationFutureOwned,
         waker: Option<Waker>,
-        response_sender: Option<oneshot::Sender<Result<Reply, Abandon>>>,
+        response_sender: Option<oneshot::Sender<Result<Bytes, Error>>>,
     }
 }
 
 impl ClientCallFuture {
-    fn handle_response(self: Pin<&mut Self>, response: Result<Reply, Abandon>) {
+    fn handle_response(self: Pin<&mut Self>, response: Result<Bytes, Error>) {
         let this = self.project();
         if let Some(sender) = this.response_sender.take() {
             let _res = sender.send(response);
@@ -632,12 +406,64 @@ impl std::future::Future for ClientCallFuture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::{future, sink};
+    use futures::{future, sink, SinkExt};
     use std::sync::Arc;
     use tokio::sync::Barrier;
     use tokio_test::{
         assert_pending, assert_ready, assert_ready_eq, stream_mock::StreamMockBuilder, task,
     };
+
+    struct ServiceSinkPair<Svc, Sink>(Svc, Sink);
+
+    impl<Req, Svc, Sink> tower::Service<Req> for ServiceSinkPair<Svc, Sink>
+    where
+        Svc: tower::Service<Req>,
+    {
+        type Response = Svc::Response;
+        type Error = Svc::Error;
+        type Future = Svc::Future;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            self.0.poll_ready(cx)
+        }
+
+        fn call(&mut self, req: Req) -> Self::Future {
+            self.0.call(req)
+        }
+    }
+
+    impl<T, Svc, Sink> futures::Sink<T> for ServiceSinkPair<Svc, Sink>
+    where
+        Svc: Unpin,
+        Sink: futures::Sink<T> + Unpin,
+    {
+        type Error = Sink::Error;
+
+        fn poll_ready(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            self.1.poll_ready_unpin(cx)
+        }
+
+        fn start_send(mut self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+            self.1.start_send_unpin(item)
+        }
+
+        fn poll_flush(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            self.1.poll_flush_unpin(cx)
+        }
+
+        fn poll_close(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            self.1.poll_close_unpin(cx)
+        }
+    }
 
     #[tokio::test]
     async fn test_concurrent_service_calls() {
@@ -651,7 +477,7 @@ mod tests {
             let wait_barrier = Arc::clone(&service_wait_barrier);
             async move {
                 let _res = wait_barrier.wait().await;
-                Ok(Reply::default())
+                Ok(Bytes::new())
             }
         });
 
@@ -664,7 +490,7 @@ mod tests {
         let messages = messages_builder.build();
         let posts = sink::drain();
 
-        let (messages, _) = open(messages, service, posts);
+        let (messages, _, _) = open(messages, ServiceSinkPair(service, posts));
         let mut messages = task::spawn(messages);
 
         // No message is produced yet, the service is blocked.
@@ -696,7 +522,7 @@ mod tests {
             .build();
         let posts = sink::drain();
 
-        let (messages, _) = open(messages, service, posts);
+        let (messages, _, _) = open(messages, ServiceSinkPair(service, posts));
         let mut messages = task::spawn(messages);
 
         // One cancelled message is produced.

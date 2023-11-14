@@ -2,7 +2,7 @@ pub mod de;
 mod impls;
 mod ser;
 
-use crate::{map::Map, reflect::RuntimeReflect, ty, Object, Type};
+use crate::{map::Map, reflect::RuntimeReflect, ty, Dynamic, Object, Type};
 use ordered_float::OrderedFloat;
 use std::{borrow::Cow, str::Utf8Error, string::FromUtf8Error};
 
@@ -39,7 +39,7 @@ impl<'a> Value<'a> {
         T::from_value(self)
     }
 
-    pub fn into_owned<'b>(self) -> Value<'b> {
+    pub fn into_owned(self) -> Value<'static> {
         match self {
             Self::Unit => Value::Unit,
             Self::Bool(v) => Value::Bool(v),
@@ -204,10 +204,18 @@ impl RuntimeReflect for Value<'_> {
 
 pub trait IntoValue<'a>: Sized {
     fn into_value(self) -> Value<'a>;
+
+    fn into_dynamic_value(self) -> Dynamic<Value<'a>> {
+        Dynamic(self.into_value())
+    }
 }
 
 pub trait ToValue {
     fn to_value(&self) -> Value<'_>;
+
+    fn to_dynamic_value(&self) -> Dynamic<Value<'_>> {
+        Dynamic(self.to_value())
+    }
 }
 
 pub trait FromValue<'a>: Sized {

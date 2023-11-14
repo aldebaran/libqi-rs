@@ -1,16 +1,49 @@
 mod authentication;
 mod capabilities;
 
-#[derive(Debug)]
-struct ControlService;
+use futures::{future::BoxFuture, FutureExt};
+use qi_messaging::{self as messaging, capabilities::CapabilitiesMap, message};
+use qi_value::{ActionId, ObjectId, ServiceId};
 
-impl ControlService {
-    fn authenticate(&self, parameters: &CapabilitiesMap) -> CapabilitiesMap {
-        let reply = authentication::verify_attempt(parameters);
-        self.remote_authentication_sender.send_replace(true);
-        reply
+use crate::error::Error;
+
+pub(crate) const SERVICE_ID: ServiceId = ServiceId(0);
+pub(crate) const OBJECT_ID: ObjectId = ObjectId(0);
+pub(crate) const AUTHENTICATE_ACTION_ID: ActionId = ActionId(0);
+
+#[derive(Clone, Debug)]
+struct Client {
+    client: messaging::Client,
+}
+
+impl tower::Service<authentication::Authenticate> for Client {
+    type Response = ();
+    type Error = Error;
+    type Future = BoxFuture<'static, Result<(), Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        tower::Service::<messaging::Call<CapabilitiesMap>>::poll_ready(&mut self.client, cx)
+            .map_err(Into::into)
+    }
+
+    fn call(&mut self, auth: authentication::Authenticate) -> Self::Future {
+        let call = self.client.call(messaging::Call::new(
+            message::Address::new(SERVICE_ID, OBJECT_ID, AUTHENTICATE_ACTION_ID),
+            auth.capabilities,
+        ));
+        async move {
+            let reply = call.await?;
+            Ok(())
+        }
+        .boxed()
     }
 }
+
+#[derive(Debug)]
+struct Control {}
 
 // fn update_capabilities(
 //     &self,

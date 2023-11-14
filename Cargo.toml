@@ -4,7 +4,7 @@ members = [
     "qi-macros",
     "qi-format",
     "qi-messaging",
-    "qi-object",
+    "qi-services",
     "tests-macros",
     # "qi-tools",
     # "qi",

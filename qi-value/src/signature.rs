@@ -2,11 +2,22 @@ use crate::{
     ty::{self, StructAnnotations, Tuple, Type},
     FromValue, FromValueError, IntoValue, Reflect, RuntimeReflect, ToValue, Value,
 };
-use derive_more::{From, Into};
+use serde_with::serde_as;
 use std::borrow::Cow;
 
-#[derive(Debug, Default, PartialEq, Eq, PartialOrd, Ord, Clone, Hash, From, Into)]
-#[into(owned, ref, ref_mut)]
+#[serde_as]
+#[derive(
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Clone,
+    Hash,
+    serde_with::SerializeDisplay,
+    serde_with::DeserializeFromStr,
+)]
 pub struct Signature(pub(crate) Option<Type>);
 
 impl Signature {
@@ -534,39 +545,6 @@ pub enum AnnotationsError {
 
     #[error(transparent)]
     ZipError(#[from] ty::ZipStructFieldsSizeError),
-}
-
-impl serde::Serialize for Signature {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Signature {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        struct Visitor;
-        impl<'de> serde::de::Visitor<'de> for Visitor {
-            type Value = Signature;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a borrowed or owned string")
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                v.parse().map_err(serde::de::Error::custom)
-            }
-        }
-        deserializer.deserialize_str(Visitor)
-    }
 }
 
 #[cfg(test)]

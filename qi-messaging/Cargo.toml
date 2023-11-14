@@ -6,7 +6,7 @@ license-file = "../LICENSE.txt"
 repository = "https://github.com/nyibbang/libqi-rs"
 version = "0.1.0-dev"
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.68"
 
 [dependencies]
 bytes = { version = "1.4.0", features = ["serde"] }
@@ -21,6 +21,7 @@ qi-value = { path = "../qi-value" }
 qi-format = { path = "../qi-format" }
 tower = { version = "0.4.13", features = ["util"] }
 pin-project-lite = "0.2.13"
+erased-serde = "0.3.31"
 
 [dev-dependencies]
 assert_matches = "1.5.0"

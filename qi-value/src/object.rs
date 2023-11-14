@@ -1,4 +1,7 @@
-use crate::{ty, FromValue, FromValueError, IntoValue, Map, Reflect, Signature, Type, Value};
+use crate::{
+    ty, ActionId, FromValue, FromValueError, IntoValue, Map, ObjectId, Reflect, ServiceId,
+    Signature, Type, Value,
+};
 
 #[derive(
     Clone,
@@ -46,86 +49,6 @@ impl FromValue<'_> for Object {
 impl std::fmt::Display for Object {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "object(uid={})", &self.object_uid)
-    }
-}
-
-#[derive(
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    qi_macros::Reflect,
-    qi_macros::FromValue,
-    qi_macros::IntoValue,
-    qi_macros::ToValue,
-    serde::Serialize,
-    serde::Deserialize,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
-#[serde(transparent)]
-#[qi(value = "crate", transparent)]
-pub struct ServiceId(pub u32);
-
-#[derive(
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    qi_macros::Reflect,
-    qi_macros::FromValue,
-    qi_macros::IntoValue,
-    qi_macros::ToValue,
-    serde::Serialize,
-    serde::Deserialize,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
-#[serde(transparent)]
-#[qi(value = "crate", transparent)]
-pub struct ObjectId(pub u32);
-
-#[derive(
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    qi_macros::Reflect,
-    qi_macros::FromValue,
-    qi_macros::IntoValue,
-    qi_macros::ToValue,
-    serde::Serialize,
-    serde::Deserialize,
-    derive_more::Display,
-    derive_more::From,
-    derive_more::Into,
-)]
-#[serde(transparent)]
-#[qi(value = "crate", transparent)]
-pub struct ActionId(pub u32);
-
-impl ActionId {
-    pub fn incr(&mut self) -> Self {
-        let old_id = self.0;
-        self.0 = self.0.wrapping_add(1);
-        Self(old_id)
     }
 }
 
@@ -335,11 +258,6 @@ impl MetaMethodBuilder {
 
     pub fn return_value(&mut self) -> &mut MetaMethodBuilderReturnValue {
         &mut self.return_value
-    }
-
-    pub fn add_parameter(&mut self) -> &mut MetaMethodBuilderParameter {
-        self.parameters.push(Default::default());
-        self.parameters.last_mut().unwrap()
     }
 
     pub fn parameter(&mut self, index: usize) -> &mut MetaMethodBuilderParameter {
