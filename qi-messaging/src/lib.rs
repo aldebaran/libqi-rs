@@ -28,7 +28,6 @@
     clippy::rc_buffer,
     clippy::rc_mutex,
     clippy::rest_pat_in_fully_bound_structs,
-    clippy::same_name_method,
     clippy::mod_module_files,
     clippy::str_to_string,
     clippy::string_slice,
@@ -43,13 +42,19 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-pub mod capabilities;
-pub mod channel;
-pub mod client;
+mod capabilities;
+mod client;
 pub mod codec;
-pub mod endpoint;
+mod endpoint;
+mod error;
 pub mod message;
-pub mod notifications;
+mod service;
 
-pub use client::{Call, Client, Error, Future, Post};
-pub use notifications::{Capabilities, Event, Notification};
+pub use {
+    capabilities::{CapabilitiesMap, CapabilitiesMapExt},
+    client::{Call, Client, Event, Post},
+    endpoint::endpoint,
+    error::Error,
+    message::Message,
+    service::Service,
+};

@@ -48,3 +48,5 @@ pub use qi_format as format;
 pub use qi_messaging as messaging;
 pub use qi_services as services;
 pub use qi_value as value;
+
+pub use services::Node;

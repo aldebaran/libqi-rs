@@ -9,14 +9,11 @@ use qi_value::{ActionId, Value};
     Ord,
     Hash,
     Debug,
-    serde::Serialize,
-    serde::Deserialize,
     qi_macros::Reflect,
     qi_macros::FromValue,
     qi_macros::ToValue,
     qi_macros::IntoValue,
 )]
-#[serde(transparent)]
 #[qi(transparent)]
 pub struct SignalLink(u64);
 

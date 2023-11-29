@@ -56,7 +56,7 @@ fn test_to_from_value_serializable() {
     ]);
     let actual_value = to_bytes(&sample_in).unwrap();
     assert_eq!(actual_value, expected_value);
-    let sample_out: Serializable = from_bytes(&actual_value).unwrap();
+    let sample_out: Serializable = from_buf(actual_value).unwrap();
     assert_eq!(sample_in, sample_out);
 }
 
@@ -67,8 +67,8 @@ fn test_dynamic_to_from_value() {
         0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f, 0x63, 0x61,
         0x6c, 0x69, 0x7a, 0x65, 0x64,
     ]);
-    let dynamic: Dynamic<&str> = from_bytes(&value_in).unwrap();
-    assert_eq!(dynamic, Dynamic("The robot is not localized"));
+    let dynamic: Dynamic<String> = from_buf(value_in.as_ref()).unwrap();
+    assert_eq!(dynamic, Dynamic("The robot is not localized".to_owned()));
     let value_out = to_bytes(&dynamic).unwrap();
     assert_eq!(value_in, value_out);
 }
@@ -182,7 +182,7 @@ fn test_object_to_from_value() {
         0x05, 0xd6, 0x3f, 0xe4, 0x39, 0xf9, 0x47, 0x7e, 0x96, 0xfc, 0x2f, 0x2c, 0x3d,
     ]);
 
-    let object_in: Object = from_bytes(&value_in).unwrap();
+    let object_in: Object = from_buf(value_in).unwrap();
 
     assert_eq!(
         object_in,
@@ -482,6 +482,6 @@ fn test_object_to_from_value() {
             ]),
         }
     );
-    let object_out = from_bytes(&to_bytes(&object_in).unwrap()).unwrap();
+    let object_out = from_buf(to_bytes(&object_in).unwrap()).unwrap();
     assert_eq!(object_in, object_out);
 }

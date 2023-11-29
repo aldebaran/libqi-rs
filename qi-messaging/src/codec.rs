@@ -46,26 +46,10 @@ use crate::message::{Action, Address, Header, Id, Message, Object, Service, Type
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tracing::instrument;
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-pub struct Codec {
-    state: DecoderState,
-}
+#[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
+pub struct Encoder;
 
-impl Codec {
-    pub(crate) fn new() -> Self {
-        Self {
-            state: DecoderState::Header,
-        }
-    }
-}
-
-impl Default for Codec {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl tokio_util::codec::Encoder<Message> for Codec {
+impl tokio_util::codec::Encoder<Message> for Encoder {
     type Error = EncodeError;
 
     #[instrument(level = "trace", name = "encode", skip_all, err)]
@@ -86,7 +70,26 @@ pub enum EncodeError {
     IO(#[from] std::io::Error),
 }
 
-impl tokio_util::codec::Decoder for Codec {
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
+pub struct Decoder {
+    state: DecoderState,
+}
+
+impl Decoder {
+    pub fn new() -> Self {
+        Self {
+            state: DecoderState::Header,
+        }
+    }
+}
+
+impl Default for Decoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl tokio_util::codec::Decoder for Decoder {
     type Item = Message;
     type Error = DecodeError;
 
@@ -339,9 +342,8 @@ mod tests {
             body: Bytes::from_static(&[1, 2, 3]),
         };
         let mut encoder_buf = BytesMut::new();
-        let mut encoder = Codec::new();
         let res =
-            tokio_util::codec::Encoder::encode(&mut encoder, message.clone(), &mut encoder_buf);
+            tokio_util::codec::Encoder::encode(&mut Encoder, message.clone(), &mut encoder_buf);
         assert_matches!(res, Ok(()));
     }
 
@@ -349,7 +351,7 @@ mod tests {
     fn test_decoder_not_enough_data_for_header() {
         let data = [0x42, 0xde, 0xad];
         let mut buf = BytesMut::from_iter(data);
-        let mut decoder = Codec::new();
+        let mut decoder = Decoder::new();
         let res = tokio_util::codec::Decoder::decode(&mut decoder, &mut buf);
         assert_matches!(res, Ok(None));
     }
@@ -365,7 +367,7 @@ mod tests {
             1, 2, 3, // body
         ];
         let mut buf = BytesMut::from_iter(data);
-        let mut decoder = Codec::new();
+        let mut decoder = Decoder::new();
         let res = tokio_util::codec::Decoder::decode(&mut decoder, &mut buf);
         assert_matches!(res, Ok(None));
     }
@@ -374,7 +376,7 @@ mod tests {
     fn test_decoder_garbage_magic_cookie() {
         let data = [1; HEADER_SIZE];
         let mut buf = BytesMut::from_iter(data);
-        let mut decoder = Codec::new();
+        let mut decoder = Decoder::new();
         let res = tokio_util::codec::Decoder::decode(&mut decoder, &mut buf);
         assert_matches!(res, Err(DecodeError::InvalidMagicCookieValue(0x01010101)));
     }
@@ -390,7 +392,7 @@ mod tests {
             1, 2, 3, 4, // body
         ];
         let mut buf = BytesMut::from_iter(data);
-        let mut decoder = Codec::new();
+        let mut decoder = Decoder::new();
         let res = tokio_util::codec::Decoder::decode(&mut decoder, &mut buf);
         assert_matches!(res, Ok(Some(_msg)));
     }

@@ -6,6 +6,7 @@
 /// - `u128`
 use crate::{write::*, Error, Result};
 use bytes::{Bytes, BytesMut};
+use sealed::sealed;
 
 pub fn to_bytes<T>(value: &T) -> Result<Bytes>
 where
@@ -15,6 +16,25 @@ where
     let serializer = Serializer::to_buf(&mut bytes);
     value.serialize(serializer)?;
     Ok(bytes.freeze())
+}
+
+#[sealed]
+pub trait IntoValueExt {
+    fn serialize_value(self) -> Result<Bytes>;
+    fn serialize_dynamic_value(self) -> Result<Bytes>;
+}
+
+#[sealed]
+impl<'a, T> IntoValueExt for T
+where
+    T: qi_value::IntoValue<'a>,
+{
+    fn serialize_value(self) -> Result<Bytes> {
+        to_bytes(&self.into_value())
+    }
+    fn serialize_dynamic_value(self) -> Result<Bytes> {
+        to_bytes(&self.into_value().into_dynamic())
+    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -114,9 +134,7 @@ where
 
     // equivalence: char -> str
     fn serialize_char(self, v: char) -> Result<Self::Ok> {
-        let buf = &mut [0; 4];
-        let str = v.encode_utf8(buf);
-        self.serialize_str(str)
+        self.serialize_str(v.encode_utf8(&mut [0; 4]))
     }
 
     // option -> optional

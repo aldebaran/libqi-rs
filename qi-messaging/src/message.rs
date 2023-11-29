@@ -1,4 +1,3 @@
-use crate::capabilities::CapabilitiesMap;
 use bytes::Bytes;
 use qi_format as format;
 use qi_value::Dynamic;
@@ -118,7 +117,7 @@ pub struct Address {
 }
 
 impl Address {
-    pub fn new(service: Service, object: Object, action: Action) -> Self {
+    pub const fn new(service: Service, object: Object, action: Action) -> Self {
         Self {
             service,
             object,
@@ -249,21 +248,6 @@ impl Message {
             .set_address(address)
     }
 
-    /// Builds a "capabilities" message.
-    ///
-    /// This sets the ty, the id, the address and the body of the message.
-    pub fn capabilities(
-        id: Id,
-        address: Address,
-        map: &CapabilitiesMap,
-    ) -> Result<Builder, format::Error> {
-        Builder::new()
-            .set_id(id)
-            .set_ty(Type::Capabilities)
-            .set_address(address)
-            .set_value(&map)
-    }
-
     /// Builds a "cancel" message.
     ///
     /// This sets the ty, the id, the address and the body of the message.
@@ -320,7 +304,7 @@ impl Message {
     where
         T: serde::de::Deserialize<'de>,
     {
-        format::from_bytes(&self.body)
+        format::from_buf(&*self.body)
     }
 
     pub fn deserialize_error_description(&self) -> Result<String, format::Error> {

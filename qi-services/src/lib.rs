@@ -1,5 +1,4 @@
 #![deny(unreachable_pub, unsafe_code)]
-// TODO: #![deny(missing_docs)]
 #![warn(unused_crate_dependencies)]
 #![warn(
     clippy::all,
@@ -43,13 +42,20 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
+mod channel;
 pub mod error;
 mod node;
 pub mod object;
-mod session;
+mod sd;
+pub mod service;
+pub mod session;
 pub mod signal;
+pub mod space;
 
-pub use {error::Error, object::Object};
-
-#[cfg(test)]
-mod tests;
+pub use {
+    channel::Address,
+    error::{ConnectionError, Error},
+    node::Node,
+    object::{BoxObject, Object, ObjectExt},
+    sd::ServiceDirectory,
+};

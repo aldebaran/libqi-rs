@@ -87,6 +87,10 @@ impl ObjectUid {
         Self(bytes)
     }
 
+    pub fn from_bytes(bytes: [u8; 20]) -> Self {
+        Self(bytes)
+    }
+
     pub const fn bytes(&self) -> &[u8; 20] {
         &self.0
     }
@@ -134,16 +138,29 @@ impl MetaObject {
         MetaObjectBuilder::new()
     }
 
-    pub fn signal(&self, name: &str) -> Option<(&ActionId, &MetaSignal)> {
-        self.signals.iter().find(|(_, sig)| sig.name == name)
+    pub fn signal(&self, address: &MemberAddress) -> Option<(&ActionId, &MetaSignal)> {
+        self.signals.iter().find(|(sig_id, sig)| match address {
+            MemberAddress::Id(id) => *sig_id == id,
+            MemberAddress::Name(name) => &sig.name == name,
+        })
     }
 
-    pub fn property(&self, name: &str) -> Option<(&ActionId, &MetaProperty)> {
-        self.properties.iter().find(|(_, prop)| prop.name == name)
+    pub fn property(&self, address: &MemberAddress) -> Option<(&ActionId, &MetaProperty)> {
+        self.properties
+            .iter()
+            .find(|(prop_id, prop)| match address {
+                MemberAddress::Id(id) => *prop_id == id,
+                MemberAddress::Name(name) => &prop.name == name,
+            })
     }
 
-    pub fn method(&self, name: &str) -> Option<(&ActionId, &MetaMethod)> {
-        self.methods.iter().find(|(_, method)| method.name == name)
+    pub fn method(&self, address: &MemberAddress) -> Option<(&ActionId, &MetaMethod)> {
+        self.methods
+            .iter()
+            .find(|(method_id, method)| match address {
+                MemberAddress::Id(id) => *method_id == id,
+                MemberAddress::Name(name) => &method.name == name,
+            })
     }
 }
 
@@ -398,4 +415,89 @@ pub struct MetaProperty {
     pub uid: ActionId,
     pub name: String,
     pub signature: Signature,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum MemberAddress {
+    Id(ActionId),
+    Name(String),
+}
+
+impl From<ActionId> for MemberAddress {
+    fn from(value: ActionId) -> Self {
+        Self::Id(value)
+    }
+}
+
+impl From<String> for MemberAddress {
+    fn from(value: String) -> Self {
+        Self::Name(value)
+    }
+}
+
+impl From<&str> for MemberAddress {
+    fn from(value: &str) -> Self {
+        Self::Name(value.to_owned())
+    }
+}
+
+impl PartialEq<&str> for MemberAddress {
+    fn eq(&self, other: &&str) -> bool {
+        match self {
+            Self::Name(name) => name == other,
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<String> for MemberAddress {
+    fn eq(&self, other: &String) -> bool {
+        match self {
+            Self::Name(name) => name == other,
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq<ActionId> for MemberAddress {
+    fn eq(&self, other: &ActionId) -> bool {
+        match self {
+            Self::Id(id) => id == other,
+            _ => false,
+        }
+    }
+}
+
+impl std::fmt::Display for MemberAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MemberAddress::Id(id) => id.fmt(f),
+            MemberAddress::Name(name) => name.fmt(f),
+        }
+    }
+}
+
+impl<'a> IntoValue<'a> for MemberAddress {
+    fn into_value(self) -> Value<'a> {
+        match self {
+            MemberAddress::Id(id) => id.into_value(),
+            MemberAddress::Name(name) => name.into_value(),
+        }
+    }
+}
+
+impl<'a> FromValue<'a> for MemberAddress {
+    fn from_value(value: Value<'a>) -> Result<Self, FromValueError> {
+        // IMPROVE: not ideal to clone the value here.
+        if let Ok(id) = ActionId::from_value(value.clone()) {
+            Ok(Self::Id(id))
+        } else if let Ok(name) = String::from_value(value.clone()) {
+            Ok(Self::Name(name))
+        } else {
+            Err(FromValueError::TypeMismatch {
+                expected: "an object member address".to_owned(),
+                actual: value.to_string(),
+            })
+        }
+    }
 }

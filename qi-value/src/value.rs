@@ -2,7 +2,7 @@ pub mod de;
 mod impls;
 mod ser;
 
-use crate::{map::Map, reflect::RuntimeReflect, ty, Dynamic, Object, Type};
+use crate::{map::Map, reflect::RuntimeReflect, ty, Object, Type};
 use ordered_float::OrderedFloat;
 use std::{borrow::Cow, str::Utf8Error, string::FromUtf8Error};
 
@@ -21,7 +21,8 @@ pub enum Value<'a> {
     UInt64(u64),
     Float32(OrderedFloat<f32>),
     Float64(OrderedFloat<f64>),
-    String(Cow<'a, [u8]>),
+    String(Cow<'a, str>),
+    ByteString(Cow<'a, [u8]>),
     Raw(Cow<'a, [u8]>),
     Option(Option<Box<Value<'a>>>),
     List(Vec<Value<'a>>),
@@ -39,6 +40,18 @@ impl<'a> Value<'a> {
         T::from_value(self)
     }
 
+    pub fn as_string_bytes(&'a self) -> Option<&'a [u8]> {
+        match self {
+            Self::String(s) => Some(s.as_bytes()),
+            Self::ByteString(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn into_dynamic(self) -> Self {
+        Self::Dynamic(Box::new(self))
+    }
+
     pub fn into_owned(self) -> Value<'static> {
         match self {
             Self::Unit => Value::Unit,
@@ -53,6 +66,7 @@ impl<'a> Value<'a> {
             Self::UInt64(v) => Value::UInt64(v),
             Self::Float32(v) => Value::Float32(v),
             Self::Float64(v) => Value::Float64(v),
+            Self::ByteString(v) => Value::ByteString(v.into_owned().into()),
             Self::String(v) => Value::String(v.into_owned().into()),
             Self::Raw(v) => Value::Raw(v.into_owned().into()),
             Self::Option(v) => Value::Option(v.map(|v| Box::new(v.into_owned()))),
@@ -79,27 +93,20 @@ impl std::fmt::Display for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Unit => f.write_str("()"),
-            Value::Bool(v) => write!(f, "{}", v),
-            Value::Int8(v) => write!(f, "{}", v),
-            Value::UInt8(v) => write!(f, "{}", v),
-            Value::Int16(v) => write!(f, "{}", v),
-            Value::UInt16(v) => write!(f, "{}", v),
-            Value::Int32(v) => write!(f, "{}", v),
-            Value::UInt32(v) => write!(f, "{}", v),
-            Value::Int64(v) => write!(f, "{}", v),
-            Value::UInt64(v) => write!(f, "{}", v),
-            Value::Float32(v) => write!(f, "{}", v),
-            Value::Float64(v) => write!(f, "{}", v),
-            Value::String(v) => {
-                if matches!(v, Cow::Borrowed(_)) {
-                    f.write_str("&")?;
-                }
-                write!(f, "{}", String::from_utf8_lossy(v))
-            }
+            Value::Bool(v) => v.fmt(f),
+            Value::Int8(v) => v.fmt(f),
+            Value::UInt8(v) => v.fmt(f),
+            Value::Int16(v) => v.fmt(f),
+            Value::UInt16(v) => v.fmt(f),
+            Value::Int32(v) => v.fmt(f),
+            Value::UInt32(v) => v.fmt(f),
+            Value::Int64(v) => v.fmt(f),
+            Value::UInt64(v) => v.fmt(f),
+            Value::Float32(v) => v.fmt(f),
+            Value::Float64(v) => v.fmt(f),
+            Value::String(v) => v.fmt(f),
+            Value::ByteString(v) => String::from_utf8_lossy(v).fmt(f),
             Value::Raw(v) => {
-                if matches!(v, Cow::Borrowed(_)) {
-                    f.write_str("&")?;
-                }
                 write!(f, "raw[len={}]", v.len())
             }
             Value::Option(v) => {
@@ -184,7 +191,7 @@ impl RuntimeReflect for Value<'_> {
             Self::UInt64(_) => Type::UInt64,
             Self::Float32(_) => Type::Float32,
             Self::Float64(_) => Type::Float64,
-            Self::String(_) => Type::String,
+            Self::String(_) | Self::ByteString(_) => Type::String,
             Self::Raw(_) => Type::Raw,
             Self::Option(v) => Type::Option(v.as_deref().map(|v| Box::new(v.ty()))),
             Self::List(v) => Type::List(ty::reduce_type(v.iter().map(Value::ty)).map(Box::new)),
@@ -204,18 +211,10 @@ impl RuntimeReflect for Value<'_> {
 
 pub trait IntoValue<'a>: Sized {
     fn into_value(self) -> Value<'a>;
-
-    fn into_dynamic_value(self) -> Dynamic<Value<'a>> {
-        Dynamic(self.into_value())
-    }
 }
 
 pub trait ToValue {
     fn to_value(&self) -> Value<'_>;
-
-    fn to_dynamic_value(&self) -> Dynamic<Value<'_>> {
-        Dynamic(self.to_value())
-    }
 }
 
 pub trait FromValue<'a>: Sized {
@@ -224,7 +223,7 @@ pub trait FromValue<'a>: Sized {
 
 #[derive(thiserror::Error, Debug)]
 pub enum FromValueError {
-    #[error("value type mismatch: expected {expected}, but value is {actual}")]
+    #[error("value type mismatch: expected \"{expected}\", found \"{actual}\"")]
     TypeMismatch { expected: String, actual: String },
 
     #[error(transparent)]

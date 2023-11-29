@@ -36,14 +36,9 @@ impl<'a> IntoValue<'a> for () {
 }
 
 impl FromValue<'_> for () {
-    fn from_value(value: Value<'_>) -> Result<Self, FromValueError> {
-        match value {
-            Value::Unit => Ok(()),
-            _ => Err(FromValueError::TypeMismatch {
-                expected: "unit".to_owned(),
-                actual: value.to_string(),
-            }),
-        }
+    fn from_value(_value: Value<'_>) -> Result<Self, FromValueError> {
+        // Any value is convertible to unit.
+        Ok(())
     }
 }
 
@@ -75,7 +70,7 @@ macro_rules! impl_from_to_value_copy {
                     Value::$vt(v) => Ok(v),
                     _ => Err(FromValueError::TypeMismatch {
                         expected: <$t as Reflect>::ty().unwrap().to_string(),
-                        actual: value.to_string(),
+                        actual: value.ty().to_string(),
                     }),
                 }
             }
@@ -125,7 +120,7 @@ impl FromValue<'_> for f32 {
             Value::Float32(v) => Ok(v.0),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a float32".to_owned(),
-                actual: value.to_string(),
+                actual: value.ty().to_string(),
             }),
         }
     }
@@ -153,7 +148,7 @@ impl FromValue<'_> for f64 {
             Value::Float64(v) => Ok(v.0),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a float64".to_owned(),
-                actual: value.to_string(),
+                actual: value.ty().to_string(),
             }),
         }
     }
@@ -193,9 +188,7 @@ impl ToValue for char {
 
 impl<'a> IntoValue<'a> for char {
     fn into_value(self) -> Value<'a> {
-        let mut buf = vec![0; self.len_utf8()];
-        self.encode_utf8(&mut buf);
-        Value::String(Cow::Owned(buf))
+        Value::String(self.to_string().into())
     }
 }
 
@@ -207,18 +200,20 @@ impl<'a> FromValue<'a> for char {
                 actual: actual.to_string(),
             }
         }
-        match value {
-            Value::String(s) => {
-                let mut chars = std::str::from_utf8(&s)?.chars();
-                let c = chars.next().ok_or_else(|| make_error("an empty string"))?;
-                if chars.next().is_some() {
-                    return Err(make_error(format!(
-                        "a string of size {}",
-                        chars.count() + 2
-                    )));
-                }
-                Ok(c)
+        fn from_str(s: &str) -> Result<char, FromValueError> {
+            let mut chars = s.chars();
+            let c = chars.next().ok_or_else(|| make_error("an empty string"))?;
+            if chars.next().is_some() {
+                return Err(make_error(format!(
+                    "a string of size {}",
+                    chars.count() + 2
+                )));
             }
+            Ok(c)
+        }
+        match value {
+            Value::String(s) => from_str(&s),
+            Value::ByteString(s) => from_str(std::str::from_utf8(&s)?),
             _ => Err(make_error(value)),
         }
     }
@@ -230,17 +225,18 @@ impl_reflect!(impl for &str => String);
 
 impl ToValue for str {
     fn to_value(&self) -> Value<'_> {
-        Value::String(Cow::Borrowed(self.as_bytes()))
+        Value::String(Cow::Borrowed(self))
     }
 }
 
 impl<'long: 'short, 'short> FromValue<'long> for &'short str {
     fn from_value(value: Value<'long>) -> Result<Self, FromValueError> {
         match value {
-            Value::String(Cow::Borrowed(s)) => Ok(std::str::from_utf8(s)?),
+            Value::String(Cow::Borrowed(s)) => Ok(s),
+            Value::ByteString(Cow::Borrowed(s)) => Ok(std::str::from_utf8(s)?),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a borrowed string".to_owned(),
-                actual: value.to_string(),
+                actual: value.ty().to_string(),
             }),
         }
     }
@@ -252,23 +248,24 @@ impl_reflect!(impl for String => String);
 
 impl ToValue for String {
     fn to_value(&self) -> Value<'_> {
-        Value::String(Cow::Borrowed(self.as_bytes()))
+        Value::String(Cow::Borrowed(self))
     }
 }
 
 impl<'a> IntoValue<'a> for String {
     fn into_value(self) -> Value<'a> {
-        Value::String(Cow::Owned(self.into_bytes()))
+        Value::String(Cow::Owned(self))
     }
 }
 
 impl FromValue<'_> for String {
     fn from_value(value: Value<'_>) -> Result<Self, FromValueError> {
         match value {
-            Value::String(s) => Ok(String::from_utf8(s.into_owned())?),
+            Value::String(s) => Ok(s.into_owned()),
+            Value::ByteString(s) => Ok(String::from_utf8(s.into_owned())?),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a String".to_owned(),
-                actual: value.to_string(),
+                actual: value.ty().to_string(),
             }),
         }
     }
@@ -283,13 +280,13 @@ impl_reflect!(impl for std::ffi::CString => Raw);
 
 impl ToValue for std::ffi::CString {
     fn to_value(&self) -> Value<'_> {
-        Value::String(Cow::Borrowed(self.as_bytes()))
+        Value::ByteString(Cow::Borrowed(self.as_bytes()))
     }
 }
 
 impl<'a> IntoValue<'a> for std::ffi::CString {
     fn into_value(self) -> Value<'a> {
-        Value::String(Cow::Owned(self.into_bytes()))
+        Value::ByteString(Cow::Owned(self.as_bytes().to_owned()))
     }
 }
 
@@ -299,7 +296,7 @@ impl<'a> FromValue<'a> for std::ffi::CString {
             Value::String(s) => Ok(Self::new(s.into_owned())?),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a C String".to_owned(),
-                actual: value.to_string(),
+                actual: value.ty().to_string(),
             }),
         }
     }
@@ -352,7 +349,7 @@ where
             Value::Option(o) => o.map(|v| (*v).cast()).transpose(),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "an optional value".to_owned(),
-                actual: value.to_string(),
+                actual: value.ty().to_string(),
             }),
         }
     }
@@ -380,7 +377,7 @@ impl FromValue<'_> for Bytes {
             Value::Raw(r) => Ok(Self::copy_from_slice(&r)),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "Bytes".to_owned(),
-                actual: value.to_string(),
+                actual: value.ty().to_string(),
             }),
         }
     }
@@ -436,7 +433,7 @@ macro_rules! impl_list_value {
                     Value::List(list) => list.into_iter().map(Value::cast).collect(),
                     _ => Err(FromValueError::TypeMismatch {
                         expected: "a list".to_owned(),
-                        actual: value.to_string(),
+                        actual: value.ty().to_string(),
                     }),
                 }
             }
@@ -487,7 +484,7 @@ impl<'long: 'short, 'short> FromValue<'long> for &'short [u8] {
             Value::Raw(Cow::Borrowed(r)) => Ok(r),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a slice of bytes".to_owned(),
-                actual: value.to_string(),
+                actual: value.ty().to_string(),
             }),
         }
     }
@@ -562,7 +559,7 @@ macro_rules! from_value_map_expr {
                 .collect(),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a map".to_owned(),
-                actual: $value.to_string(),
+                actual: $value.ty().to_string(),
             }),
         }
     };
@@ -630,7 +627,7 @@ impl<T> FromValue<'_> for [T; 0] {
             Value::Unit => Ok([]),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "an array of size 0".to_owned(),
-                actual: value.to_string(),
+                actual: value.ty().to_string(),
             }),
         }
     }
@@ -702,7 +699,7 @@ macro_rules! impl_array_value {
                             },
                             _ => Err(FromValueError::TypeMismatch {
                                 expected: format!("an array of size {}", N),
-                                actual: value.to_string(),
+                                actual: value.ty().to_string(),
                             })
                         }
                     }
@@ -805,7 +802,7 @@ macro_rules! impl_tuple_value {
                         }
                         _ => Err(FromValueError::TypeMismatch {
                             expected: format!("a tuple of size {}", $len),
-                            actual: value.to_string(),
+                            actual: value.ty().to_string(),
                         })
                     }
                 }

@@ -1,11 +1,11 @@
 use crate::{value::de::ValueTypeSeed, Signature, Value};
 use std::marker::PhantomData;
 
-pub(crate) struct DynamicVisitor<'a> {
-    phantom: PhantomData<&'a ()>,
+pub(crate) struct DynamicVisitor<'v> {
+    phantom: PhantomData<&'v ()>,
 }
 
-impl<'a> DynamicVisitor<'a> {
+impl<'v> DynamicVisitor<'v> {
     pub(crate) fn new() -> Self {
         Self {
             phantom: PhantomData,
@@ -13,8 +13,8 @@ impl<'a> DynamicVisitor<'a> {
     }
 }
 
-impl<'de: 'a, 'a> serde::de::Visitor<'de> for DynamicVisitor<'a> {
-    type Value = Value<'a>;
+impl<'de, 'v> serde::de::Visitor<'de> for DynamicVisitor<'v> {
+    type Value = Value<'v>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter.write_str("a dynamic value")

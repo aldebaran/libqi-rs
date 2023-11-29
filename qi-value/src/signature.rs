@@ -3,7 +3,6 @@ use crate::{
     FromValue, FromValueError, IntoValue, Reflect, RuntimeReflect, ToValue, Value,
 };
 use serde_with::serde_as;
-use std::borrow::Cow;
 
 #[serde_as]
 #[derive(
@@ -29,6 +28,10 @@ impl Signature {
         Self(None)
     }
 
+    pub fn to_type(&self) -> Option<&Type> {
+        self.0.as_ref()
+    }
+
     pub fn into_type(self) -> Option<Type> {
         self.0
     }
@@ -48,10 +51,13 @@ impl RuntimeReflect for Signature {
 
 impl FromValue<'_> for Signature {
     fn from_value(value: Value<'_>) -> Result<Self, FromValueError> {
+        fn from_str(str: &str) -> Result<Signature, FromValueError> {
+            str.parse()
+                .map_err(|err: FromStrError| FromValueError::Other(err.into()))
+        }
         match value {
-            Value::String(s) => std::str::from_utf8(&s)?
-                .parse::<Signature>()
-                .map_err(|err| FromValueError::Other(err.into())),
+            Value::String(s) => from_str(&s),
+            Value::ByteString(s) => from_str(std::str::from_utf8(&s)?),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "Signature".to_owned(),
                 actual: value.to_string(),
@@ -62,13 +68,13 @@ impl FromValue<'_> for Signature {
 
 impl ToValue for Signature {
     fn to_value(&self) -> Value<'_> {
-        Value::String(Cow::Owned(self.to_string().into_bytes()))
+        Value::String(self.to_string().into())
     }
 }
 
 impl<'a> IntoValue<'a> for Signature {
     fn into_value(self) -> Value<'a> {
-        Value::String(Cow::Owned(self.to_string().into_bytes()))
+        Value::String(self.to_string().into())
     }
 }
 

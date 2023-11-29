@@ -86,7 +86,7 @@ fn test_basic_derive_to_value() {
                     Value::Unit,
                     Value::List(li)
                 ] => {
-                    assert_eq!(*s, "cookies".as_bytes());
+                    assert_eq!(*s, "cookies");
                     assert_eq!(
                         li.as_slice(),
                         &[
@@ -119,7 +119,7 @@ fn test_basic_derive_into_value() {
                     Value::String(Cow::Owned(s)),
                     Value::Bool(false), Value::Unit, Value::List(li)
                 ] => {
-                    assert_eq!(s, "muffins".as_bytes());
+                    assert_eq!(s, "muffins");
                     assert_eq!(
                         li.as_slice(),
                         &[
@@ -203,7 +203,7 @@ fn test_borrows_derive_to_value() {
                     Value::String(Cow::Borrowed(s)),
                     Value::Raw(Cow::Borrowed([1, 20, 100, 200]))
                 ] => {
-                    assert_eq!(*s, "cupcakes".as_bytes());
+                    assert_eq!(*s, "cupcakes");
                 }
             )
         }
@@ -225,7 +225,7 @@ fn test_borrows_derive_into_value() {
                     Value::String(Cow::Borrowed(s)),
                     Value::Raw(Cow::Borrowed([7, 5, 3, 2, 1]))
                 ] => {
-                    assert_eq!(*s, "apples".as_bytes());
+                    assert_eq!(*s, "apples");
                 }
             )
         }
@@ -273,7 +273,7 @@ fn test_transparent_derive_to_value() {
             s: "mangoes".to_owned()
         }
         .to_value(),
-        Value::String("mangoes".as_bytes().into()),
+        Value::String("mangoes".into()),
     )
 }
 
@@ -285,7 +285,7 @@ fn test_transparent_derive_into_value() {
             s: "pears".to_owned()
         }
         .into_value(),
-        Value::String("pears".as_bytes().into()),
+        Value::String("pears".into()),
     )
 }
 
@@ -327,7 +327,7 @@ fn test_empty_derive_to_value() {
             s: "mangoes".to_owned()
         }
         .to_value(),
-        Value::String("mangoes".as_bytes().into()),
+        Value::String("mangoes".into()),
     )
 }
 
@@ -339,7 +339,7 @@ fn test_empty_derive_into_value() {
             s: "pears".to_owned()
         }
         .into_value(),
-        Value::String("pears".as_bytes().into()),
+        Value::String("pears".into()),
     )
 }
 

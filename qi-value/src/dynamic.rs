@@ -1,6 +1,6 @@
 mod de;
 
-use crate::{reflect::RuntimeReflect, FromValue, IntoValue, Value};
+use crate::{reflect::RuntimeReflect, FromValue, IntoValue, Reflect, ToValue, Value};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::From)]
 pub struct Dynamic<T>(pub T);
@@ -8,6 +8,54 @@ pub struct Dynamic<T>(pub T);
 impl<'a> Dynamic<Value<'a>> {
     pub fn into_owned(self) -> Dynamic<Value<'static>> {
         Dynamic(self.0.into_owned())
+    }
+}
+
+impl<T> std::fmt::Display for Dynamic<T>
+where
+    T: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<T> Reflect for Dynamic<T> {
+    fn ty() -> Option<crate::Type> {
+        None
+    }
+}
+
+impl<T> ToValue for Dynamic<T>
+where
+    T: ToValue,
+{
+    fn to_value(&self) -> Value<'_> {
+        Value::Dynamic(Box::new(self.0.to_value()))
+    }
+}
+
+impl<'a, T> IntoValue<'a> for Dynamic<T>
+where
+    T: IntoValue<'a>,
+{
+    fn into_value(self) -> Value<'a> {
+        Value::Dynamic(Box::new(self.0.into_value()))
+    }
+}
+
+impl<'a, T> FromValue<'a> for Dynamic<T>
+where
+    T: FromValue<'a>,
+{
+    fn from_value(value: Value<'a>) -> Result<Self, crate::FromValueError> {
+        match value {
+            Value::Dynamic(v) => Ok(Self(T::from_value(*v)?)),
+            _ => Err(crate::FromValueError::TypeMismatch {
+                expected: "a dynamic value".to_owned(),
+                actual: value.to_string(),
+            }),
+        }
     }
 }
 
@@ -24,9 +72,9 @@ where
     }
 }
 
-impl<'de: 'a, 'a, T> serde::Deserialize<'de> for Dynamic<T>
+impl<'de, 'v, T> serde::Deserialize<'de> for Dynamic<T>
 where
-    T: FromValue<'a>,
+    T: FromValue<'v>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -65,9 +113,9 @@ where
     serializer.end()
 }
 
-pub fn deserialize<'de: 'a, 'a, T, D>(deserializer: D) -> Result<T, D::Error>
+pub fn deserialize<'de, 'v, T, D>(deserializer: D) -> Result<T, D::Error>
 where
-    T: FromValue<'a>,
+    T: FromValue<'v>,
     D: serde::Deserializer<'de>,
 {
     use serde::de::Error;
@@ -93,17 +141,16 @@ mod tests {
             PartialEq, Debug, qi_macros::Reflect, qi_macros::ToValue, qi_macros::FromValue,
         )]
         #[qi(value = "crate")]
-        struct MyStruct<'a> {
+        struct MyStruct {
             an_int: i32,
             #[qi(as_raw)]
-            a_raw: &'a [u8],
+            a_raw: Vec<u8>,
             an_option: Option<BTreeMap<String, Vec<bool>>>,
         }
-        let raw = vec![1, 2, 3];
         assert_tokens(
             &Dynamic(MyStruct {
                 an_int: 42,
-                a_raw: raw.as_slice(),
+                a_raw: vec![1, 2, 3],
                 an_option: Some(BTreeMap::from_iter([
                     ("true_true".to_owned(), vec![true, true]),
                     ("false_true".to_owned(), vec![false, true]),
@@ -155,9 +202,9 @@ mod tests {
     fn test_dynamic_serde_with() {
         #[derive(PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
         #[serde(transparent)]
-        struct DynString<'a>(#[serde(with = "super")] &'a str);
+        struct DynString(#[serde(with = "super")] String);
         assert_tokens(
-            &DynString("Cookies are good"),
+            &DynString("Cookies are good".to_owned()),
             &[
                 Token::Struct {
                     name: "Dynamic",

@@ -1,296 +1,117 @@
-mod authentication;
-mod capabilities;
-
-use futures::{future::BoxFuture, FutureExt};
-use qi_messaging::{self as messaging, capabilities::CapabilitiesMap, message};
-use qi_value::{ActionId, ObjectId, ServiceId};
-
+use super::{
+    authentication::{Authenticator, CapabilitiesMapExt},
+    capabilities,
+};
 use crate::error::Error;
+use futures::{future::BoxFuture, FutureExt};
+use messaging::{message, Service};
+use qi_format::{de::BufExt, ser::IntoValueExt};
+use qi_messaging::{
+    self as messaging, CapabilitiesMap, CapabilitiesMapExt as MessagingCapabilitiesMapExt,
+};
+use qi_value::{ActionId, Dynamic, ObjectId, ServiceId, Value};
+use std::{collections::HashMap, future::Future, sync::Arc};
+use tokio::sync::RwLock;
 
-pub(crate) const SERVICE_ID: ServiceId = ServiceId(0);
-pub(crate) const OBJECT_ID: ObjectId = ObjectId(0);
-pub(crate) const AUTHENTICATE_ACTION_ID: ActionId = ActionId(0);
+pub(super) const SERVICE_ID: ServiceId = ServiceId(0);
+pub(super) const OBJECT_ID: ObjectId = ObjectId(0);
+pub(super) const AUTHENTICATE_ACTION_ID: ActionId = ActionId(8);
 
-#[derive(Clone, Debug)]
-struct Client {
-    client: messaging::Client,
+pub(super) fn is_addressed_by(address: message::Address) -> bool {
+    address.service() == SERVICE_ID && address.object() == OBJECT_ID
 }
 
-impl tower::Service<authentication::Authenticate> for Client {
-    type Response = ();
-    type Error = Error;
-    type Future = BoxFuture<'static, Result<(), Error>>;
+const fn authenticate_address() -> message::Address {
+    message::Address::new(SERVICE_ID, OBJECT_ID, AUTHENTICATE_ACTION_ID)
+}
 
-    fn poll_ready(
-        &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        tower::Service::<messaging::Call<CapabilitiesMap>>::poll_ready(&mut self.client, cx)
-            .map_err(Into::into)
+pub(crate) trait ControlService {
+    type Future: std::future::Future<Output = Result<CapabilitiesMap, Error>>;
+
+    fn call_authenticate(&self, request: CapabilitiesMap) -> Self::Future;
+}
+
+pub(super) struct Control {
+    authenticator: Box<dyn Authenticator + Send + Sync + 'static>,
+    capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
+}
+
+impl Control {
+    pub(super) fn new<A>(
+        authenticator: A,
+        capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
+    ) -> Self
+    where
+        A: Authenticator + Send + Sync + 'static,
+    {
+        Self {
+            authenticator: Box::new(authenticator),
+            capabilities,
+        }
     }
 
-    fn call(&mut self, auth: authentication::Authenticate) -> Self::Future {
-        let call = self.client.call(messaging::Call::new(
-            message::Address::new(SERVICE_ID, OBJECT_ID, AUTHENTICATE_ACTION_ID),
-            auth.capabilities,
-        ));
+    fn authenticate(
+        &self,
+        request: CapabilitiesMap,
+    ) -> impl Future<Output = Result<CapabilitiesMap, Error>> {
+        let mut resolved_capabilities =
+            capabilities::local_map().clone().intersected_with(&request);
+        let parameters = request.into_iter().map(|(k, v)| (k, v.0)).collect();
+        let result = self.authenticator.verify(parameters);
+        let capabilities = Arc::clone(&self.capabilities);
         async move {
-            let reply = call.await?;
-            Ok(())
+            result?;
+            *capabilities.write().await = Some(resolved_capabilities.clone());
+            resolved_capabilities.insert_authentication_state_done();
+            Ok(resolved_capabilities)
         }
-        .boxed()
+    }
+}
+
+impl std::fmt::Debug for Control {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Server({:?})", self.capabilities)
+    }
+}
+
+impl ControlService for Control {
+    type Future = BoxFuture<'static, Result<CapabilitiesMap, Error>>;
+
+    fn call_authenticate(&self, request: CapabilitiesMap) -> Self::Future {
+        self.authenticate(request).boxed()
     }
 }
 
 #[derive(Debug)]
-struct Control {}
+pub(crate) struct Client(messaging::Client);
 
-// fn update_capabilities(
-//     &self,
-//     remote: CapabilitiesMap,
-// ) -> impl Future<Output = Result<(), UpdateCapabilitiesError>> {
-//     let check_result = remote.check_intersect_with_local();
-//     let self_capabilities = Arc::clone(&self.capabilities);
-//     async move {
-//         match check_result {
-//             Ok(capabilities) => {
-//                 *self_capabilities.lock_owned().await = capabilities;
-//                 Ok(())
-//             }
-//             Err(err) => Err(UpdateCapabilitiesError(err)),
-//         }
-//     }
-// }
+impl Client {
+    pub(crate) fn new(client: messaging::Client) -> Self {
+        Self(client)
+    }
 
-//     capabilities: Arc<Mutex<CapabilitiesMap>>,
-//     remote_authentication_receiver: watch::Receiver<bool>,
-// }
-// async fn authenticate(&self, params: CapabilitiesMap) -> Result<(), AuthenticateToRemoteError> {
-//     use crate::service::Service;
-//     let authenticate = Authenticate::new_outgoing();
-//     let call = authenticate
-//         .to_messaging_call()
-//         .map_err(AuthenticateToRemoteError::SerializeLocalCapabilities)?;
-//     trace!("sending authentication request to server");
-//     let reply = client.call(call).await?;
-//     let result_capabilities = reply
-//         .value()
-//         .map_err(AuthenticateToRemoteError::DeserializeRemoteCapabilities)?;
-//     trace!(capabilities = ?result_capabilities, "received authentication result and capabilities from server");
-//     authentication::verify_result(&result_capabilities)?;
-//     let capabilities = result_capabilities
-//         .check_intersect_with_local()
-//         .map_err(AuthenticateToRemoteError::MissingRequiredCapabilities)?;
-//     trace!(
-//         ?capabilities,
-//         "resolved capabilities between local and remote"
-//     );
-//     *self.capabilities.lock().await = capabilities;
-//     Ok(())
-// }
-// impl Control {
-//     #[instrument(name = "authenticate", level = "trace", skip_all, ret)]
-//     pub(super) async fn authenticate_to_remote(
-//         &self,
-//         client: &mut client::Client,
-//     ) -> Result<(), AuthenticateToRemoteError> {
-//         use crate::service::Service;
-//         let authenticate = Authenticate::new_outgoing();
-//         let call = authenticate
-//             .to_messaging_call()
-//             .map_err(AuthenticateToRemoteError::SerializeLocalCapabilities)?;
-//         trace!("sending authentication request to server");
-//         let reply = client.call(call).await?;
-//         let result_capabilities = reply
-//             .value()
-//             .map_err(AuthenticateToRemoteError::DeserializeRemoteCapabilities)?;
-//         trace!(capabilities = ?result_capabilities, "received authentication result and capabilities from server");
-//         authentication::verify_result(&result_capabilities)?;
-//         let capabilities = result_capabilities
-//             .check_intersect_with_local()
-//             .map_err(AuthenticateToRemoteError::MissingRequiredCapabilities)?;
-//         trace!(
-//             ?capabilities,
-//             "resolved capabilities between local and remote"
-//         );
-//         *self.capabilities.lock().await = capabilities;
-//         Ok(())
-//     }
+    pub(crate) fn authenticate(
+        &self,
+        parameters: HashMap<String, Value<'_>>,
+    ) -> impl Future<Output = Result<CapabilitiesMap, Error>> {
+        let mut request = capabilities::local_map().clone();
+        request.extend(
+            parameters
+                .into_iter()
+                .map(|(k, v)| (k, Dynamic(v.into_owned()))),
+        );
+        self.call_authenticate(request)
+    }
+}
 
-//     #[instrument(name = "authentication", level = "trace", skip_all, ret)]
-//     pub(super) async fn remote_authentication(&mut self) -> Result<(), RemoteAuthenticationError> {
-//         match self
-//             .remote_authentication_receiver
-//             .wait_for(|auth| {
-//                 trace!(result = auth, "received remote authentication result");
-//                 *auth
-//             })
-//             .await
-//         {
-//             Ok(_ref) => Ok(()),
-//             Err(_err) => Err(RemoteAuthenticationError::ServiceClosed),
-//         }
-//     }
-// }
+impl ControlService for Client {
+    type Future = BoxFuture<'static, Result<CapabilitiesMap, Error>>;
 
-// #[derive(Debug, thiserror::Error)]
-// pub(super) enum AuthenticateToRemoteError {
-//     #[error(transparent)]
-//     Client(#[from] client::Error),
-
-//     #[error("the authentication request was canceled")]
-//     Canceled,
-
-//     #[error("error serializing local capabilities")]
-//     SerializeLocalCapabilities(#[source] format::Error),
-
-//     #[error("error deserializing remote capabilities")]
-//     DeserializeRemoteCapabilities(#[source] format::Error),
-
-//     #[error("error verifying the authentication result")]
-//     VerifyAuthenticationResult(#[from] VerifyAuthenticationResultError),
-
-//     #[error("some required capabilities are missing")]
-//     MissingRequiredCapabilities(#[from] capabilities::ExpectedKeyValueError<bool>),
-// }
-
-// impl From<CallTermination<client::Error>> for AuthenticateToRemoteError {
-//     fn from(value: CallTermination<client::Error>) -> Self {
-//         match value {
-//             CallTermination::Canceled => Self::Canceled,
-//             CallTermination::Error(err) => Self::Client(err),
-//         }
-//     }
-// }
-
-// pub(super) use authentication::VerifyResultError as VerifyAuthenticationResultError;
-
-// #[derive(Debug, thiserror::Error)]
-// pub(super) enum RemoteAuthenticationError {
-//     #[error("control service closed")]
-//     ServiceClosed,
-// }
-
-// #[derive(Debug)]
-// pub(super) struct Service {
-//     capabilities: Arc<Mutex<CapabilitiesMap>>,
-//     remote_authentication_sender: watch::Sender<bool>,
-// }
-
-// impl Service {
-//     fn authenticate(&self, parameters: &CapabilitiesMap) -> CapabilitiesMap {
-//         let reply = authenticate(parameters);
-//         self.remote_authentication_sender.send_replace(true);
-//         reply
-//     }
-
-//     fn update_capabilities(
-//         &self,
-//         remote: CapabilitiesMap,
-//     ) -> impl Future<Output = Result<(), UpdateCapabilitiesError>> {
-//         let check_result = remote.check_intersect_with_local();
-//         let self_capabilities = Arc::clone(&self.capabilities);
-//         async move {
-//             match check_result {
-//                 Ok(capabilities) => {
-//                     *self_capabilities.lock_owned().await = capabilities;
-//                     Ok(())
-//                 }
-//                 Err(err) => Err(UpdateCapabilitiesError(err)),
-//             }
-//         }
-//     }
-// }
-
-// impl crate::Service<Call, Notification> for Service {
-//     type CallReply = CapabilitiesMap;
-//     type Error = Error;
-//     type CallFuture = future::Ready<CallResult<Self::CallReply, Self::Error>>;
-//     type NotifyFuture = future::BoxFuture<'static, Result<(), Self::Error>>;
-
-//     fn call(&mut self, call: Call) -> Self::CallFuture {
-//         match call {
-//             Call::Authenticate(Authenticate(parameters)) => {
-//                 future::ok(self.authenticate(&parameters))
-//             }
-//         }
-//     }
-
-//     fn notify(&mut self, notif: Notification) -> Self::NotifyFuture {
-//         match notif {
-//             Notification::Capabilities(Capabilities(capabilities)) => self
-//                 .update_capabilities(capabilities)
-//                 .map_err(Error::Capabilities)
-//                 .boxed(),
-//         }
-//     }
-// }
-
-// #[derive(Debug, Clone)]
-// pub(super) enum Call {
-//     Authenticate(Authenticate),
-// }
-
-// impl Call {
-//     pub(super) fn from_messaging(call: &messaging::Call) -> Result<Option<Self>, format::Error> {
-//         Ok(match Subject::from_message(*call.subject()) {
-//             Some(Authenticate::SUBJECT) => {
-//                 let capabilities = call.value()?;
-//                 Some(Self::Authenticate(Authenticate(capabilities)))
-//             }
-//             Some(_) | None => None,
-//         })
-//     }
-// }
-
-// #[derive(Debug, Clone, derive_more::Into)]
-// pub(super) struct Authenticate(CapabilitiesMap);
-
-// impl Authenticate {
-//     const SUBJECT: Subject = Subject(ActionId::new(8));
-
-//     pub(super) fn new_outgoing() -> Self {
-//         Self(capabilities::local().clone())
-//     }
-
-//     pub(super) fn to_messaging_call(&self) -> Result<messaging::Call, format::Error> {
-//         messaging::Call::new(Self::SUBJECT.into()).with_value(&self.0)
-//     }
-// }
-
-// #[derive(Debug, Clone)]
-// pub(super) enum Notification {
-//     Capabilities(Capabilities),
-// }
-
-// impl Notification {
-//     pub(super) fn from_messaging(
-//         notif: messaging::Notification,
-//     ) -> Result<Self, messaging::Notification> {
-//         match notif {
-//             messaging::Notification::Capabilities(capabilities_notif)
-//                 if capabilities_notif.subject() == &Capabilities::SUBJECT =>
-//             {
-//                 Ok(Self::Capabilities(Capabilities(capabilities_notif.into())))
-//             }
-//             _ => Err(notif),
-//         }
-//     }
-// }
-
-// #[derive(Debug, Clone, derive_more::Into)]
-// pub(super) struct Capabilities(CapabilitiesMap);
-
-// impl Capabilities {
-//     const SUBJECT: Subject = Subject(ActionId::new(0));
-// }
-
-// #[derive(Debug, thiserror::Error)]
-// pub(super) enum Error {
-//     #[error(transparent)]
-//     Capabilities(#[from] UpdateCapabilitiesError),
-// }
-
-// #[derive(Debug, thiserror::Error)]
-// #[error("error updating capabilities")]
-// pub(super) struct UpdateCapabilitiesError(#[from] capabilities::ExpectedKeyValueError<bool>);
+    fn call_authenticate(&self, request: CapabilitiesMap) -> Self::Future {
+        let call = request.serialize_value().map(|value| {
+            self.0
+                .call(messaging::Call::new(authenticate_address(), value))
+        });
+        async move { Ok(call?.await?.deserialize_value()?) }.boxed()
+    }
+}

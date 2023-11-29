@@ -1,16 +1,11 @@
 use crate::{
     endpoint::{self, ClientRequest},
-    message,
+    message, Error, Service,
 };
 use bytes::Bytes;
-use futures::{ready, FutureExt, SinkExt};
-use qi_format as format;
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
+use futures::{future::BoxFuture, FutureExt, SinkExt};
 use tokio::sync::oneshot;
-use tokio_util::sync::{CancellationToken, DropGuard, PollSendError, PollSender};
+use tokio_util::sync::{CancellationToken, PollSender};
 
 #[derive(Clone)]
 pub struct Client {
@@ -29,61 +24,41 @@ impl std::fmt::Debug for Client {
     }
 }
 
-impl<T> tower::Service<Call<T>> for Client
-where
-    T: serde::Serialize + Send + 'static,
-{
-    type Response = Bytes;
-    type Error = Error;
-    type Future = Future;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.requests.poll_reserve(cx)?.map(Ok)
+impl Service for Client {
+    fn call(&self, call: Call) -> BoxFuture<'static, Result<Bytes, Error>> {
+        let mut requests = self.requests.clone();
+        async move {
+            let (response_sender, response_receiver) = oneshot::channel();
+            let cancel_token = CancellationToken::new();
+            let call = ClientRequest::Call {
+                call,
+                cancel_token: cancel_token.clone(),
+                response_sender,
+            };
+            requests.send(call).await?;
+            let _drop_guard = cancel_token.drop_guard();
+            let response = response_receiver.await??;
+            Ok(response)
+        }
+        .boxed()
     }
 
-    fn call(&mut self, call: Call<T>) -> Future {
-        let (response_sender, response_receiver) = oneshot::channel();
-        let cancel_token = CancellationToken::new();
-        let request = ClientRequest::Call {
-            address: call.address,
-            args: Box::new(call.args),
-            cancel_token: cancel_token.clone(),
-            response_sender,
-        };
-        let inner = match self.requests.send_item(request) {
-            Ok(()) => InnerFuture::RequestSent {
-                response_receiver,
-                drop_guard: Some(cancel_token.drop_guard()),
-            },
-            Err(_send_err) => InnerFuture::SendError,
-        };
-        Future(inner)
-    }
-}
-
-impl<T> futures::Sink<Post<T>> for Client
-where
-    T: serde::Serialize + Send + 'static,
-{
-    type Error = Error;
-
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.requests.poll_ready_unpin(cx)?.map(Ok)
+    fn post(&self, post: Post) -> BoxFuture<'static, Result<(), Error>> {
+        let mut requests = self.requests.clone();
+        async move {
+            requests.send(ClientRequest::Post(post)).await?;
+            Ok(())
+        }
+        .boxed()
     }
 
-    fn start_send(mut self: Pin<&mut Self>, post: Post<T>) -> Result<(), Self::Error> {
-        Ok(self.requests.start_send_unpin(ClientRequest::Post {
-            address: post.address,
-            value: Box::new(post.value),
-        })?)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.requests.poll_flush_unpin(cx)?.map(Ok)
-    }
-
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.requests.poll_close_unpin(cx)?.map(Ok)
+    fn event(&self, event: Event) -> BoxFuture<'static, Result<(), Error>> {
+        let mut requests = self.requests.clone();
+        async move {
+            requests.send(ClientRequest::Event(event)).await?;
+            Ok(())
+        }
+        .boxed()
     }
 }
 
@@ -99,41 +74,31 @@ where
     serde::Serialize,
     serde::Deserialize,
 )]
-pub struct Call<T> {
+pub struct Call {
     pub(crate) address: message::Address,
-    pub(crate) args: T,
+    pub(crate) value: Bytes,
 }
 
-impl<T> Call<T> {
-    pub fn new(address: message::Address, args: T) -> Self {
-        Self { address, args }
-    }
-}
-
-#[derive(
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub struct Post<T> {
-    pub(crate) address: message::Address,
-    pub(crate) value: T,
-}
-
-impl<T> Post<T> {
-    pub fn new(address: message::Address, value: T) -> Self {
+impl Call {
+    pub fn new(address: message::Address, value: Bytes) -> Self {
         Self { address, value }
     }
+
+    pub fn address(&self) -> message::Address {
+        self.address
+    }
+
+    pub fn value(&self) -> &Bytes {
+        &self.value
+    }
+
+    pub fn value_mut(&mut self) -> &mut Bytes {
+        &mut self.value
+    }
 }
 
 #[derive(
+    Default,
     Clone,
     PartialEq,
     Eq,
@@ -141,77 +106,55 @@ impl<T> Post<T> {
     Ord,
     Hash,
     Debug,
-    derive_more::From,
     serde::Serialize,
     serde::Deserialize,
 )]
-pub enum CallTermination {
-    Error(String),
-    Canceled,
+pub struct Post {
+    pub(crate) address: message::Address,
+    pub(crate) value: Bytes,
 }
 
-#[derive(Debug)]
-#[must_use = "futures do nothing until polled"]
-pub struct Future(InnerFuture);
+impl Post {
+    pub fn new(address: message::Address, value: Bytes) -> Self {
+        Self { address, value }
+    }
 
-impl Future {
-    pub fn cancel(&mut self) {
-        if let InnerFuture::RequestSent { drop_guard, .. } = &mut self.0 {
-            if let Some(guard) = drop_guard.take() {
-                guard.disarm().cancel()
-            }
-        }
+    pub fn address(&self) -> message::Address {
+        self.address
+    }
+
+    pub fn value(&self) -> &Bytes {
+        &self.value
     }
 }
 
-impl std::future::Future for Future {
-    type Output = Result<Bytes, Error>;
+#[derive(
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+pub struct Event {
+    pub(crate) address: message::Address,
+    pub(crate) value: Bytes,
+}
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match &mut self.0 {
-            InnerFuture::SendError => Poll::Ready(Err(Error::Disconnected)),
-            InnerFuture::RequestSent {
-                response_receiver, ..
-            } => {
-                let reply = ready!(response_receiver.poll_unpin(cx)?)?;
-                Poll::Ready(Ok(reply))
-            }
-        }
+impl Event {
+    pub fn new(address: message::Address, value: Bytes) -> Self {
+        Self { address, value }
     }
-}
 
-#[derive(Debug)]
-enum InnerFuture {
-    SendError,
-    RequestSent {
-        response_receiver: oneshot::Receiver<Result<Bytes, Error>>,
-        drop_guard: Option<DropGuard>,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("client is disconnected")]
-    Disconnected,
-
-    #[error("format error")]
-    Format(#[from] format::Error),
-
-    #[error("canceled")]
-    Canceled,
-
-    #[error(transparent)]
-    Other(Box<dyn std::error::Error + Send + Sync>),
-}
-
-impl From<PollSendError<ClientRequest>> for Error {
-    fn from(_err: PollSendError<ClientRequest>) -> Self {
-        Self::Disconnected
+    pub fn address(&self) -> message::Address {
+        self.address
     }
-}
 
-impl From<oneshot::error::RecvError> for Error {
-    fn from(_err: oneshot::error::RecvError) -> Self {
-        Self::Disconnected
+    pub fn value(&self) -> &Bytes {
+        &self.value
     }
 }

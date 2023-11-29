@@ -70,12 +70,18 @@ pub struct ObjectId(pub u32);
 #[qi(value = "crate", transparent)]
 pub struct ActionId(pub u32);
 
+impl ActionId {
+    pub fn wrapping_next(&mut self) -> Self {
+        let old_id = self.0;
+        self.0 = self.0.wrapping_add(1);
+        Self(old_id)
+    }
+}
+
 impl Iterator for ActionId {
     type Item = Self;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let old_id = self.0;
-        self.0 = self.0.wrapping_add(1);
-        Some(Self(old_id))
+        Some(self.wrapping_next())
     }
 }

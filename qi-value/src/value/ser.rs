@@ -6,30 +6,25 @@ impl serde::Serialize for Value<'_> {
     where
         S: serde::Serializer,
     {
-        use serde::ser::Error;
         match self {
-            Value::Unit => serializer.serialize_unit(),
-            Value::Bool(v) => serializer.serialize_bool(*v),
-            Value::Int8(v) => serializer.serialize_i8(*v),
-            Value::UInt8(v) => serializer.serialize_u8(*v),
-            Value::Int16(v) => serializer.serialize_i16(*v),
-            Value::UInt16(v) => serializer.serialize_u16(*v),
-            Value::Int32(v) => serializer.serialize_i32(*v),
-            Value::UInt32(v) => serializer.serialize_u32(*v),
-            Value::Int64(v) => serializer.serialize_i64(*v),
-            Value::UInt64(v) => serializer.serialize_u64(*v),
-            Value::Float32(v) => serializer.serialize_f32(v.0),
-            Value::Float64(v) => serializer.serialize_f64(v.0),
-            Value::String(v) => {
-                serializer.serialize_str(std::str::from_utf8(v).map_err(S::Error::custom)?)
-            }
+            Value::Unit => ().serialize(serializer),
+            Value::Bool(v) => v.serialize(serializer),
+            Value::Int8(v) => v.serialize(serializer),
+            Value::UInt8(v) => v.serialize(serializer),
+            Value::Int16(v) => v.serialize(serializer),
+            Value::UInt16(v) => v.serialize(serializer),
+            Value::Int32(v) => v.serialize(serializer),
+            Value::UInt32(v) => v.serialize(serializer),
+            Value::Int64(v) => v.serialize(serializer),
+            Value::UInt64(v) => v.serialize(serializer),
+            Value::Float32(v) => v.serialize(serializer),
+            Value::Float64(v) => v.serialize(serializer),
+            Value::String(v) => v.serialize(serializer),
+            Value::ByteString(v) => v.serialize(serializer),
             Value::Raw(v) => serializer.serialize_bytes(v),
-            Value::Option(opt) => match opt {
-                Some(v) => serializer.serialize_some(v),
-                None => serializer.serialize_none(),
-            },
-            Value::List(list) => serializer.collect_seq(list),
-            Value::Map(map) => serializer.collect_map(map.iter().map(|(k, v)| (k, v))),
+            Value::Option(opt) => opt.serialize(serializer),
+            Value::List(list) => list.serialize(serializer),
+            Value::Map(map) => map.serialize(serializer),
             Value::Tuple(elements) => {
                 use serde::ser::SerializeTuple;
                 let mut serializer = serializer.serialize_tuple(elements.len())?;

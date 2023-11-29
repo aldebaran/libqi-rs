@@ -16,15 +16,15 @@ pub use ser::{to_bytes, Serializer};
 
 pub mod de;
 #[doc(inline)]
-pub use de::{from_bytes, Deserializer};
+pub use de::{from_buf, Deserializer};
 
 #[cfg(test)]
 mod tests;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("input/output error")]
-    Io(#[from] std::io::Error),
+    #[error("short read")]
+    ShortRead,
 
     #[error("the value '{0}' is not a `bool` value")]
     NotABoolValue(u8),
@@ -44,8 +44,17 @@ pub enum Error {
     #[error("string data is not valid UTF-8")]
     InvalidStringUtf8(#[from] std::str::Utf8Error),
 
+    #[error("value conversion error")]
+    FromValue(#[from] qi_value::FromValueError),
+
     #[error("{0}")]
     Custom(std::string::String),
+}
+
+impl From<std::string::FromUtf8Error> for Error {
+    fn from(err: std::string::FromUtf8Error) -> Self {
+        Self::InvalidStringUtf8(err.utf8_error())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -5,7 +5,10 @@ members = [
     "qi-format",
     "qi-messaging",
     "qi-services",
+    "qi",
+
+    # examples/tests
+    "examples",
     "tests-macros",
     # "qi-tools",
-    # "qi",
 ]

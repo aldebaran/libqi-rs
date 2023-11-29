@@ -1,26 +1,34 @@
 use qi_value::{Dynamic, Value};
 use std::{cmp::Ordering, collections::HashMap};
 
-pub type CapabilitiesMap<'a> = HashMap<String, Dynamic<Value<'a>>>;
+pub type CapabilitiesMap = HashMap<String, Dynamic<Value<'static>>>;
 
-pub fn intersect_with<'a, 'l>(
-    lhs: &'l mut CapabilitiesMap<'a>,
-    rhs: &CapabilitiesMap<'_>,
-) -> &'l mut CapabilitiesMap<'a> {
-    for (key, other_value) in rhs.iter() {
-        if let Some(value) = lhs.get_mut(key) {
-            // Prefer values from this map when no ordering can be made. Only use the other map
-            // values if they are strictly inferior.
-            if let Some(Ordering::Less) = other_value.partial_cmp(value) {
-                *value = other_value.clone().into_owned();
+pub trait CapabilitiesMapExt: private::Sealed {
+    fn intersected_with(self, other: &CapabilitiesMap) -> Self;
+}
+
+impl CapabilitiesMapExt for CapabilitiesMap {
+    fn intersected_with(mut self, other: &CapabilitiesMap) -> Self {
+        for (key, other_value) in other.iter() {
+            if let Some(value) = self.get_mut(key) {
+                // Prefer values from this map when no ordering can be made. Only use the other map
+                // values if they are strictly inferior.
+                if let Some(Ordering::Less) = other_value.partial_cmp(value) {
+                    *value = other_value.clone().into_owned();
+                }
             }
         }
+
+        // Only keep capabilities that were present in `other`.
+        self.retain(|k, _| other.get(k).is_some());
+
+        self
     }
+}
 
-    // Only keep capabilities that were present in `other`.
-    lhs.retain(|k, _| rhs.get(k).is_some());
-
-    lhs
+mod private {
+    pub trait Sealed {}
+    impl Sealed for super::CapabilitiesMap {}
 }
 
 #[cfg(test)]
@@ -31,23 +39,23 @@ mod tests {
 
     #[test]
     fn test_capability_map_merge_with() {
-        let mut m = CapabilitiesMap::from_iter([
-            ("A".to_owned(), true.into_dynamic_value()),
-            ("B".to_owned(), true.into_dynamic_value()),
-            ("C".to_owned(), false.into_dynamic_value()),
-            ("D".to_owned(), false.into_dynamic_value()),
-            ("E".to_owned(), true.into_dynamic_value()),
-            ("F".to_owned(), false.into_dynamic_value()),
+        let m = CapabilitiesMap::from_iter([
+            ("A".to_owned(), Dynamic(true.into_value())),
+            ("B".to_owned(), Dynamic(true.into_value())),
+            ("C".to_owned(), Dynamic(false.into_value())),
+            ("D".to_owned(), Dynamic(false.into_value())),
+            ("E".to_owned(), Dynamic(true.into_value())),
+            ("F".to_owned(), Dynamic(false.into_value())),
         ]);
         let m2 = CapabilitiesMap::from_iter([
-            ("A".to_owned(), true.into_dynamic_value()),
-            ("B".to_owned(), false.into_dynamic_value()),
-            ("C".to_owned(), true.into_dynamic_value()),
-            ("D".to_owned(), false.into_dynamic_value()),
-            ("G".to_owned(), true.into_dynamic_value()),
-            ("H".to_owned(), false.into_dynamic_value()),
+            ("A".to_owned(), Dynamic(true.into_value())),
+            ("B".to_owned(), Dynamic(false.into_value())),
+            ("C".to_owned(), Dynamic(true.into_value())),
+            ("D".to_owned(), Dynamic(false.into_value())),
+            ("G".to_owned(), Dynamic(true.into_value())),
+            ("H".to_owned(), Dynamic(false.into_value())),
         ]);
-        intersect_with(&mut m, &m2);
+        let m = m.intersected_with(&m2);
         assert_matches!(m.get("A"), Some(Dynamic(Value::Bool(true))));
         assert_matches!(m.get("B"), Some(Dynamic(Value::Bool(false))));
         assert_matches!(m.get("C"), Some(Dynamic(Value::Bool(false))));

@@ -1,5 +1,5 @@
 use once_cell::sync::OnceCell;
-use qi_messaging::capabilities::CapabilitiesMap;
+use qi_messaging::CapabilitiesMap;
 use qi_value::{Dynamic, IntoValue};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -50,23 +50,23 @@ impl Capabilities {
         }
     }
 
-    fn to_map(self) -> CapabilitiesMap<'static> {
+    fn to_map(self) -> CapabilitiesMap {
         CapabilitiesMap::from_iter([
             (
                 Self::CLIENT_SERVER_SOCKET.to_owned(),
-                self.client_server_socket.into_dynamic_value(),
+                Dynamic(self.client_server_socket.into_value()),
             ),
             (
                 Self::REMOTE_CANCELABLE_CALLS.to_owned(),
-                self.remote_cancelable_calls.into_dynamic_value(),
+                Dynamic(self.remote_cancelable_calls.into_value()),
             ),
             (
                 Self::OBJECT_PTR_UID.to_owned(),
-                self.object_ptr_uid.into_dynamic_value(),
+                Dynamic(self.object_ptr_uid.into_value()),
             ),
             (
                 Self::RELATIVE_ENDPOINT_URI.to_owned(),
-                self.relative_endpoint_uri.into_dynamic_value(),
+                Dynamic(self.relative_endpoint_uri.into_value()),
             ),
         ])
     }
@@ -80,7 +80,7 @@ impl Default for Capabilities {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
 #[error("expected key \"{0}\" to have value \"{1}\"")]
-pub(crate) struct ExpectedKeyValueError<T>(String, T);
+pub struct ExpectedKeyValueError<T>(String, T);
 
 /// Checks that the capabilities have the required values that are only supported by this implementation.
 ///
@@ -120,9 +120,8 @@ pub(crate) fn check_required(
 }
 
 const LOCAL_CAPABILITIES: Capabilities = Capabilities::new();
-
 static LOCAL_CAPABILITIES_MAP: OnceCell<CapabilitiesMap> = OnceCell::new();
 
-pub(crate) fn local_map() -> &'static CapabilitiesMap<'static> {
+pub(crate) fn local_map() -> &'static CapabilitiesMap {
     LOCAL_CAPABILITIES_MAP.get_or_init(|| LOCAL_CAPABILITIES.to_map())
 }
