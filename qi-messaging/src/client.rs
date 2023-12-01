@@ -1,20 +1,23 @@
-use crate::{
-    endpoint::{self, ClientRequest},
-    message, Error, Service,
-};
+use crate::{message, Error, Service};
 use bytes::Bytes;
-use futures::{future::BoxFuture, FutureExt, SinkExt};
-use tokio::sync::oneshot;
-use tokio_util::sync::{CancellationToken, PollSender};
+use futures::{future::BoxFuture, FutureExt};
+use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct Client {
-    requests: PollSender<endpoint::ClientRequest>,
+    requests: mpsc::Sender<Request>,
 }
 
 impl Client {
-    pub(crate) fn new(requests: PollSender<ClientRequest>) -> Self {
+    pub(crate) fn new(requests: mpsc::Sender<Request>) -> Self {
         Self { requests }
+    }
+
+    pub fn downgrade(&self) -> WeakClient {
+        WeakClient {
+            requests: self.requests.downgrade(),
+        }
     }
 }
 
@@ -26,11 +29,11 @@ impl std::fmt::Debug for Client {
 
 impl Service for Client {
     fn call(&self, call: Call) -> BoxFuture<'static, Result<Bytes, Error>> {
-        let mut requests = self.requests.clone();
+        let requests = self.requests.clone();
         async move {
             let (response_sender, response_receiver) = oneshot::channel();
             let cancel_token = CancellationToken::new();
-            let call = ClientRequest::Call {
+            let call = Request::Call {
                 call,
                 cancel_token: cancel_token.clone(),
                 response_sender,
@@ -44,22 +47,50 @@ impl Service for Client {
     }
 
     fn post(&self, post: Post) -> BoxFuture<'static, Result<(), Error>> {
-        let mut requests = self.requests.clone();
+        let requests = self.requests.clone();
         async move {
-            requests.send(ClientRequest::Post(post)).await?;
+            requests.send(Request::Post(post)).await?;
             Ok(())
         }
         .boxed()
     }
 
     fn event(&self, event: Event) -> BoxFuture<'static, Result<(), Error>> {
-        let mut requests = self.requests.clone();
+        let requests = self.requests.clone();
         async move {
-            requests.send(ClientRequest::Event(event)).await?;
+            requests.send(Request::Event(event)).await?;
             Ok(())
         }
         .boxed()
     }
+}
+
+#[derive(Clone)]
+pub struct WeakClient {
+    requests: mpsc::WeakSender<Request>,
+}
+
+impl WeakClient {
+    pub fn upgrade(&self) -> Option<Client> {
+        self.requests.upgrade().map(|requests| Client { requests })
+    }
+}
+
+impl std::fmt::Debug for WeakClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WeakClient")
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum Request {
+    Call {
+        call: Call,
+        cancel_token: CancellationToken,
+        response_sender: oneshot::Sender<Result<Bytes, Error>>,
+    },
+    Post(Post),
+    Event(Event),
 }
 
 #[derive(

@@ -3,14 +3,16 @@ use qi_value::{Dynamic, Value};
 use sealed::sealed;
 use std::collections::HashMap;
 
+pub type Parameters = HashMap<String, Value<'static>>;
+
 pub trait Authenticator {
-    fn verify(&self, parameters: HashMap<String, Value<'_>>) -> Result<(), Error>;
+    fn verify(&self, parameters: Parameters) -> Result<(), Error>;
 }
 
 pub struct PermissiveAuthenticator;
 
 impl Authenticator for PermissiveAuthenticator {
-    fn verify(&self, _parameters: HashMap<String, Value<'_>>) -> Result<(), Error> {
+    fn verify(&self, _parameters: Parameters) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -27,7 +29,7 @@ impl UserTokenAuthenticator {
 }
 
 impl Authenticator for UserTokenAuthenticator {
-    fn verify(&self, mut parameters: HashMap<String, Value<'_>>) -> Result<(), Error> {
+    fn verify(&self, mut parameters: Parameters) -> Result<(), Error> {
         let user: &str = parameters
             .remove(USER_KEY)
             .ok_or_else(|| Error::UserValue("missing".to_owned()))?

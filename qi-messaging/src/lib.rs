@@ -52,7 +52,7 @@ mod service;
 
 pub use {
     capabilities::{CapabilitiesMap, CapabilitiesMapExt},
-    client::{Call, Client, Event, Post},
+    client::{Call, Client, Event, Post, WeakClient},
     endpoint::endpoint,
     error::Error,
     message::Message,

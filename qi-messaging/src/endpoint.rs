@@ -1,4 +1,5 @@
 use crate::{
+    client,
     message::{self, Address, Id, Message},
     Call, Client, Error, Event, Post, Service,
 };
@@ -9,9 +10,11 @@ use futures::{
     stream::{self, FusedStream, FuturesUnordered},
     FutureExt, Stream, StreamExt,
 };
+use pin_project_lite::pin_project;
 use std::{
     collections::HashMap,
     fmt::Debug,
+    marker::PhantomData,
     pin::Pin,
     sync::atomic::AtomicU32,
     task::{Context, Poll},
@@ -20,10 +23,10 @@ use tokio::{
     select,
     sync::{mpsc, oneshot},
 };
-use tokio_util::sync::{CancellationToken, DropGuard, PollSender};
+use tokio_util::sync::DropGuard;
 use tracing::debug;
 
-pub fn endpoint<'a, M, Svc>(messages: M, service: Svc) -> (Endpoint<'a, M, Svc>, Client)
+pub fn endpoint<'a, M, E, Svc>(messages: M, service: Svc) -> (Endpoint<'a, M, E, Svc>, Client)
 where
     Svc: Service,
 {
@@ -39,55 +42,52 @@ where
         service_futures: FuturesUnordered::new(),
         client_call_responses: HashMap::new(),
         client_call_cancellations: FuturesUnordered::new(),
+        phantom: PhantomData,
     };
-    let client = Client::new(PollSender::new(requests_sender));
+    let client = Client::new(requests_sender);
     (endpoint, client)
 }
 
-#[derive(Debug)]
-pub(crate) enum ClientRequest {
-    Call {
-        call: Call,
-        cancel_token: CancellationToken,
-        response_sender: oneshot::Sender<Result<Bytes, Error>>,
-    },
-    Post(Post),
-    Event(Event),
+pin_project! {
+    #[derive(Debug)]
+    pub struct Endpoint<'a, M, E, Svc> {
+        #[pin]
+        messages: M,
+        service: Svc,
+        id: AtomicU32,
+        requests: mpsc::Receiver<client::Request>,
+        #[pin]
+        service_call_futures: FuturesUnordered<ServiceCallFuture<'a>>,
+        #[pin]
+        service_futures: FuturesUnordered<BoxFuture<'a, Result<(), Error>>>,
+        client_call_responses: HashMap<Id, (oneshot::Sender<Result<Bytes, Error>>, DropGuard)>,
+        client_call_cancellations: FuturesUnordered<BoxFuture<'static, (Id, Address)>>,
+        phantom: PhantomData<E>,
+    }
 }
 
-#[derive(Debug)]
-pub struct Endpoint<'a, M, Svc> {
-    messages: M,
-    service: Svc,
-    id: AtomicU32,
-    requests: mpsc::Receiver<ClientRequest>,
-    service_call_futures: FuturesUnordered<ServiceCallFuture<'a>>,
-    service_futures: FuturesUnordered<BoxFuture<'a, Result<(), Error>>>,
-    client_call_responses: HashMap<Id, (oneshot::Sender<Result<Bytes, Error>>, DropGuard)>,
-    client_call_cancellations: FuturesUnordered<BoxFuture<'static, (Id, Address)>>,
-}
-
-impl<'a, 'r, M, Svc> Endpoint<'a, M, Svc>
+impl<'a, 'r, M, E, Svc> Endpoint<'a, M, E, Svc>
 where
-    M: FusedStream<Item = Message> + Unpin,
+    M: FusedStream<Item = Result<Message, E>>,
     Svc: Service + 'a,
 {
-    pub async fn next_message(&mut self) -> Option<Message> {
+    pub async fn next_message(mut self: Pin<&mut Self>) -> Result<Option<Message>, E> {
         loop {
+            let mut this = self.as_mut().project();
             select! {
                 // Receive a dispatched message.
-                Some(message) = self.messages.next(), if !self.messages.is_terminated() => {
-                    self.handle_message(message)
+                Some(message) = this.messages.next(), if !this.messages.is_terminated() => {
+                    self.as_mut().handle_message(message?)
                 }
                 // Receive a request from a client.
-                Some(request) = self.requests.recv() => {
-                    if let Some(message) = self.handle_client_request(request) {
-                        break Some(message)
+                Some(request) = this.requests.recv() => {
+                    if let Some(message) = self.as_mut().handle_client_request(request) {
+                        break Ok(Some(message))
                     }
                 }
                 // Try finishing service calls.
-                Some((id, address, result)) = self.service_call_futures.next(),
-                    if !self.service_call_futures.is_terminated() => {
+                Some((id, address, result)) = this.service_call_futures.next(),
+                    if !this.service_call_futures.is_terminated() => {
                     let message = match result {
                         Ok(reply) => Message::reply(id, address).set_body(reply).build(),
                         Err(Error::Canceled) => Message::canceled(id, address).build(),
@@ -98,41 +98,42 @@ where
                                     but the serialization of the error message failed: {err}")).unwrap().build()
                         }
                     };
-                    break Some(message)
+                    break Ok(Some(message))
                 }
                 // Try finishing service posts/events.
-                Some(_result) = self.service_futures.next(), if !self.service_futures.is_terminated() => {
+                Some(_result) = this.service_futures.next(), if !this.service_futures.is_terminated() => {
                     // nothing, failures to post or send events are not handled.
                 }
                 // Try finishing client call cancellations. A cancellation means that the client
                 // future was dropped, which can occur before or after we've received the response.
                 // If no response was received before the cancellation, we send a cancel message, otherwise we do nothing.
-                Some((call_id, address)) = self.client_call_cancellations.next(), if !self.client_call_cancellations.is_terminated() => {
+                Some((call_id, address)) = this.client_call_cancellations.next(), if !this.client_call_cancellations.is_terminated() => {
                     if self.client_call_responses.contains_key(&call_id) {
                         let id = self.new_id();
                         let message = Message::cancel(id, address, call_id).build();
-                        break Some(message);
+                        break Ok(Some(message));
                     }
                 }
                 // No more work to do, no more message will be produced.
                 else => {
-                    break None
+                    break Ok(None)
                 }
             }
         }
     }
 
-    pub fn into_messages_stream(self) -> impl Stream<Item = Message> + FusedStream + 'a
+    pub fn into_messages_stream(self) -> impl Stream<Item = Result<Message, E>> + 'a
     where
         M: 'a,
         Svc: 'a,
+        E: 'a,
     {
-        stream::unfold(self, |mut ep| async move {
-            ep.next_message().await.map(|msg| (msg, ep))
+        stream::try_unfold(Box::pin(self), |mut ep| async move {
+            Ok(ep.as_mut().next_message().await?.map(|msg| (msg, ep)))
         })
     }
 
-    fn handle_message(&mut self, message: Message) {
+    fn handle_message(self: Pin<&mut Self>, message: Message) {
         match message.ty {
             message::Type::Call => self.handle_call(message),
             message::Type::Reply => self.handle_reply(message),
@@ -145,7 +146,7 @@ where
         }
     }
 
-    fn handle_call(&mut self, message: Message) {
+    fn handle_call(self: Pin<&mut Self>, message: Message) {
         let id = message.id;
         let address = message.address;
         let call = Call {
@@ -161,11 +162,11 @@ where
         });
     }
 
-    fn handle_reply(&mut self, message: Message) {
+    fn handle_reply(self: Pin<&mut Self>, message: Message) {
         self.send_client_call_response(&message.id, Ok(message.body));
     }
 
-    fn handle_error(&mut self, message: Message) {
+    fn handle_error(self: Pin<&mut Self>, message: Message) {
         let description = match message.deserialize_error_description() {
             Ok(description) => description,
             Err(err) => format!(
@@ -176,7 +177,7 @@ where
         self.send_client_call_response(&message.id, Err(Error::Message(description)));
     }
 
-    fn handle_post(&mut self, message: Message) {
+    fn handle_post(self: Pin<&mut Self>, message: Message) {
         let post = Post {
             address: message.address,
             value: message.body,
@@ -185,7 +186,7 @@ where
         self.service_futures.push(post.boxed());
     }
 
-    fn handle_event(&mut self, message: Message) {
+    fn handle_event(self: Pin<&mut Self>, message: Message) {
         let event = Event {
             address: message.address,
             value: message.body,
@@ -194,7 +195,7 @@ where
         self.service_futures.push(event.boxed());
     }
 
-    fn handle_cancel(&mut self, message: Message) {
+    fn handle_cancel(self: Pin<&mut Self>, message: Message) {
         let id: Id = match message.deserialize_body() {
             Ok(id) => id,
             Err(err) => {
@@ -206,7 +207,9 @@ where
                 return;
             }
         };
-        if let Some(service_call_future) = Pin::new(&mut self.service_call_futures)
+        if let Some(service_call_future) = self
+            .project()
+            .service_call_futures
             .iter_pin_mut()
             .find(|future| future.id() == id)
         {
@@ -214,22 +217,23 @@ where
         }
     }
 
-    fn handle_canceled(&mut self, message: Message) {
+    fn handle_canceled(self: Pin<&mut Self>, message: Message) {
         self.send_client_call_response(&message.id, Err(Error::Canceled));
     }
 
-    fn handle_client_request(&mut self, request: ClientRequest) -> Option<Message> {
+    fn handle_client_request(self: Pin<&mut Self>, request: client::Request) -> Option<Message> {
         let id = self.new_id();
+        let this = self.project();
         match request {
-            ClientRequest::Call {
+            client::Request::Call {
                 call,
                 response_sender,
                 cancel_token,
             } => {
-                self.client_call_responses
+                this.client_call_responses
                     .insert(id, (response_sender, cancel_token.clone().drop_guard()));
                 let address = call.address;
-                self.client_call_cancellations.push(
+                this.client_call_cancellations.push(
                     async move {
                         cancel_token.cancelled_owned().await;
                         (id, address)
@@ -239,11 +243,11 @@ where
                 let message = Message::call(id, address).set_body(call.value).build();
                 Some(message)
             }
-            ClientRequest::Post(post) => {
+            client::Request::Post(post) => {
                 let message = Message::post(id, post.address).set_body(post.value).build();
                 Some(message)
             }
-            ClientRequest::Event(event) => {
+            client::Request::Event(event) => {
                 let message = Message::event(id, event.address)
                     .set_body(event.value)
                     .build();
@@ -252,8 +256,8 @@ where
         }
     }
 
-    fn send_client_call_response(&mut self, id: &Id, response: Result<Bytes, Error>) {
-        if let Some((sender, _cancel)) = self.client_call_responses.remove(id) {
+    fn send_client_call_response(self: Pin<&mut Self>, id: &Id, response: Result<Bytes, Error>) {
+        if let Some((sender, _cancel)) = self.project().client_call_responses.remove(id) {
             let _res = sender.send(response);
         }
     }
@@ -307,7 +311,7 @@ impl std::future::Future for ServiceCallFuture<'_> {
 mod tests {
     use super::*;
     use futures::future;
-    use std::sync::Arc;
+    use std::{convert::Infallible, sync::Arc};
     use tokio::sync::Barrier;
     use tokio_test::{assert_pending, assert_ready, assert_ready_eq, task};
 
@@ -339,10 +343,9 @@ mod tests {
         let service_wait_barrier = Arc::new(Barrier::new(SERVICE_CONCURRENT_CALLS + 1));
 
         // Send N call messages to the endpoint.
-        let messages = stream::iter(
-            (0..SERVICE_CONCURRENT_CALLS)
-                .map(|_id| Message::call(Id::default(), Address::default()).build()),
-        )
+        let messages = stream::iter((0..SERVICE_CONCURRENT_CALLS).map(|_id| {
+            Ok::<Message, Infallible>(Message::call(Id::default(), Address::default()).build())
+        }))
         .fuse();
 
         let (endpoint, _) = endpoint(messages, BlockingService(Arc::clone(&service_wait_barrier)));
@@ -360,7 +363,7 @@ mod tests {
         for _ in 0..SERVICE_CONCURRENT_CALLS {
             assert_ready_eq!(
                 messages.poll_next(),
-                Some(Message::reply(Id::default(), Address::default()).build())
+                Some(Ok(Message::reply(Id::default(), Address::default()).build()))
             );
         }
         // And then the stream is over.
@@ -384,8 +387,8 @@ mod tests {
         }
 
         let messages = stream::iter([
-            Message::call(Id(1), Address::default()).build(),
-            Message::cancel(Id(2), Address::default(), Id(1)).build(),
+            Ok::<Message, Infallible>(Message::call(Id(1), Address::default()).build()),
+            Ok::<Message, Infallible>(Message::cancel(Id(2), Address::default(), Id(1)).build()),
         ])
         .fuse();
 
@@ -395,7 +398,7 @@ mod tests {
         // One cancelled message is produced.
         assert_ready_eq!(
             messages.poll_next(),
-            Some(Message::canceled(Id(1), Address::default()).build())
+            Some(Ok(Message::canceled(Id(1), Address::default()).build()))
         );
         assert_ready_eq!(messages.poll_next(), None);
     }

@@ -19,6 +19,7 @@ tracing = "0.1.37"
 tokio-util = { version = "0.7.7", features = ["codec"] }
 qi-value = { path = "../qi-value" }
 qi-format = { path = "../qi-format" }
+pin-project-lite = "0.2.13"
 
 [dev-dependencies]
 assert_matches = "1.5.0"

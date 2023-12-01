@@ -27,8 +27,8 @@ impl Error {
     }
 }
 
-impl<T> From<tokio_util::sync::PollSendError<T>> for Error {
-    fn from(_err: tokio_util::sync::PollSendError<T>) -> Self {
+impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error {
+    fn from(_err: tokio::sync::mpsc::error::SendError<T>) -> Self {
         Self::Disconnected
     }
 }

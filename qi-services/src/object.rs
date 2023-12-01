@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::{error::Error, session};
 use async_trait::async_trait;
-use qi_format::de::BufExt;
 use qi_messaging::message;
 use qi_value::{
     object::{MemberAddress, MetaObject},
@@ -84,16 +83,20 @@ pub struct Client {
     service_id: ServiceId,
     object_id: ObjectId,
     meta_object: Arc<Mutex<Option<MetaObject>>>,
-    client: session::Client,
+    session: session::Client,
 }
 
 impl Client {
-    pub(crate) fn new(service_id: ServiceId, object_id: ObjectId, client: session::Client) -> Self {
+    pub(crate) fn new(
+        service_id: ServiceId,
+        object_id: ObjectId,
+        session: session::Client,
+    ) -> Self {
         Self {
             service_id,
             object_id,
             meta_object: Arc::new(Mutex::new(None)),
-            client,
+            session,
         }
     }
 }
@@ -106,16 +109,18 @@ impl Object for Client {
             Some(m) => Ok(m),
             None => {
                 let meta_object: MetaObject = self
-                    .client
-                    .call_into_value(
+                    .session
+                    .call(
                         message::Address::new(
                             self.service_id,
                             self.object_id,
                             ACTION_ID_METAOBJECT,
                         ),
-                        0, // unused
+                        0.into_value(), // unused
+                        MetaObject::signature().into_type(),
                     )
-                    .await?;
+                    .await?
+                    .cast()?;
                 *self.meta_object.lock().await = Some(meta_object.clone());
                 Ok(meta_object)
             }
@@ -131,15 +136,14 @@ impl Object for Client {
         let (&id, meta_method) = meta_object
             .method(&address)
             .ok_or_else(|| Error::MethodNotFound(address))?;
-        let return_value_type = meta_method.return_signature.to_type();
         Ok(self
-            .client
+            .session
             .call(
                 message::Address::new(self.service_id, self.object_id, id),
                 args,
+                meta_method.return_signature.to_type().cloned(),
             )
-            .await?
-            .deserialize_value_of_type(return_value_type)?)
+            .await?)
     }
 
     async fn meta_property(&self, address: MemberAddress) -> Result<Value<'static>, Error> {

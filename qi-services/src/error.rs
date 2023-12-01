@@ -11,16 +11,13 @@ pub enum Error {
     #[error("invalid URI port")]
     InvalidUriPort(#[source] std::num::ParseIntError),
 
-    #[error("cannot open channel on relative address without context")]
-    CannotOpenChannelOnRelativeAddress,
-
     #[error(transparent)]
     ValidateUri(#[from] iri_string::validate::Error),
 
     #[error("authentication error")]
     Authentication(#[from] authentication::Error),
 
-    #[error("the client is disconnected")]
+    #[error("disconnected")]
     Disconnected,
 
     #[error("no reachable endpoint")]
@@ -66,6 +63,12 @@ impl From<messaging::Error> for Error {
             messaging::Error::Other(err) => Self::Other(err),
             messaging::Error::Format(err) => Self::Format(err),
         }
+    }
+}
+
+impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error {
+    fn from(_err: tokio::sync::mpsc::error::SendError<T>) -> Self {
+        Self::Disconnected
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{node::MachineId, Address};
+use crate::{Address, MachineId};
 use qi_value::{self as value, ObjectId};
 use std::borrow::Cow;
 use value::ServiceId;
@@ -117,7 +117,7 @@ mod tests {
                 machine_id: MachineId::new("9a65b56e-c3d3-4485-8924-661b036202b3".to_owned()),
                 process_id: 3420486,
                 endpoints: vec![
-                    Address::Qi {
+                    Address::Relative {
                         service: "Calculator".to_owned()
                     },
                     Address::Tcp {
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(
             endpoints,
             [
-                Address::Qi {
+                Address::Relative {
                     service: "Calculator".to_owned()
                 },
                 Address::Tcp {

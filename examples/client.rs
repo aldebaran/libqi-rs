@@ -1,6 +1,6 @@
 use clap::Parser;
 use eyre::Result;
-use qi::services::{Address, ObjectExt};
+use qi::{Address, ObjectExt};
 use tracing::{debug_span, info, Instrument};
 use tracing_subscriber::fmt;
 
@@ -8,7 +8,7 @@ use tracing_subscriber::fmt;
 #[clap()]
 struct Args {
     #[clap(short, long, default_value = "tcp://localhost:9559")]
-    url: Address,
+    address: Address,
 
     #[clap(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
@@ -33,19 +33,22 @@ async fn main() -> Result<()> {
         .with_thread_names(true)
         .init();
 
-    // Open a node and spawn its task inside the runtime's executor.
-    info!("opening node");
-    let (node, task) = qi::Node::open();
-    tokio::spawn(task.instrument(debug_span!("node task")));
+    // Create a node and spawn its task inside the runtime's executor.
+    let (node, task) = qi::node::open();
+    tokio::spawn(task.instrument(debug_span!("node task", address = %args.address)));
 
-    // You can register services and make them accessible to other nodes.
+    // Connect the node to a space at the given address.
+    info!(address = %args.address, "connecting node to space");
+    let node = node
+        .connect_to_space(qi::session::Config::default().add_addresses([args.address.clone()]))
+        .await?;
+
+    // You can add services to the node and make them accessible to other nodes of joined spaces.
     // TODO
-    info!(url = %args.url, "connecting to space");
-    let space = node.connect_to_space([args.url], None).await?;
 
     // You can access remote services and call methods on them.
     info!("getting \"Calculator\" service");
-    let calculator = space.service("Calculator").await?;
+    let calculator = node.service("Calculator").await?;
     calculator.call("reset", 3).await?; // => 3
     calculator.call("add", 9).await?; // => 12
     calculator.call("mul", 4).await?; // => 48

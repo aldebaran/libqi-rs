@@ -49,4 +49,4 @@ pub use qi_messaging as messaging;
 pub use qi_services as services;
 pub use qi_value as value;
 
-pub use services::Node;
+pub use services::{error, node, object, sd, session, Address, Object, ObjectExt};

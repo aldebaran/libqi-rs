@@ -1,5 +1,5 @@
 use crate::{
-    object,
+    object::{self, Object},
     service::{self, ServiceInfo},
     session, Error,
 };
@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use once_cell::sync::OnceCell;
 use qi_messaging::message;
 use qi_value::{
-    object::{MetaMethod, MetaObject},
-    ActionId, ServiceId, Type,
+    object::{MemberAddress, MetaMethod, MetaObject},
+    ActionId, IntoValue, ServiceId, Type,
 };
 
 pub(crate) const SERVICE_NAME: &str = "ServiceDirectory";
@@ -18,15 +18,34 @@ pub trait ServiceDirectory {
     async fn service_info(&self, name: &str) -> Result<ServiceInfo, Error>;
 }
 
+#[derive(Clone, Debug)]
+pub struct Client {
+    object: object::Client,
+}
+
+impl Client {
+    pub fn new(session: session::Client) -> Self {
+        let object = object::Client::new(SERVICE_ID, service::MAIN_OBJECT_ID, session);
+        Self { object }
+    }
+}
+
 #[async_trait]
-impl ServiceDirectory for session::Client {
+impl ServiceDirectory for Client {
     async fn service_info(&self, name: &str) -> Result<ServiceInfo, Error> {
         let address = message::Address::new(
             SERVICE_ID,
             service::MAIN_OBJECT_ID,
             Meta::get().methods.service_info,
         );
-        Ok(self.call_into_value(address, name).await?)
+        Ok(self
+            .object
+            .meta_call(
+                MemberAddress::Id(Meta::get().methods.service_info),
+                name.into_value(),
+            )
+            .await?
+            .cast()?)
     }
 }
 

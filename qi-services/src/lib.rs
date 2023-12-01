@@ -42,20 +42,21 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
+mod address;
 mod channel;
 pub mod error;
-mod node;
+mod machine_id;
+pub mod node;
 pub mod object;
-mod sd;
+pub mod sd;
 pub mod service;
 pub mod session;
 pub mod signal;
-pub mod space;
 
 pub use {
-    channel::Address,
+    address::Address,
     error::{ConnectionError, Error},
-    node::Node,
+    machine_id::MachineId,
     object::{BoxObject, Object, ObjectExt},
     sd::ServiceDirectory,
 };

@@ -3,148 +3,131 @@ pub(crate) mod capabilities;
 mod control;
 
 use self::{authentication::Authenticator, control::ControlService};
-use crate::{channel, error::ConnectionError, Address, Error};
+use crate::{Address, Error};
 use bytes::Bytes;
 use format::{de::BufExt, ser::IntoValueExt};
-use futures::{future::BoxFuture, stream::FusedStream, Future, FutureExt, SinkExt, StreamExt};
+use futures::{future::BoxFuture, Future, FutureExt};
 use messaging::{message, CapabilitiesMap};
 use qi_format as format;
 use qi_messaging as messaging;
-use qi_value::{FromValue, IntoValue, Reflect, Value};
-use std::{collections::HashMap, future::ready, sync::Arc};
-use tokio::{select, sync::RwLock};
-use tracing::{debug_span, instrument, Instrument};
+use qi_value::{Type, Value};
+use std::{
+    future::ready,
+    sync::{Arc, Weak},
+};
+use tokio::sync::RwLock;
+use tracing::{debug_span, Instrument};
 
-pub(crate) async fn connect<'service, 'value, Svc>(
-    address: Address,
-    service: Svc,
-    authentication_parameters: Option<HashMap<String, Value<'value>>>,
-) -> Result<
-    (
-        impl Future<Output = Result<Client, Error>> + Send + 'value,
-        impl Future<Output = Result<(), ConnectionError>> + Send + 'service,
-    ),
-    Error,
->
-where
-    Svc: messaging::Service + Send + 'service,
-{
-    let (messages_read, mut messages_write) = channel::open(address.clone()).await?;
-    let (mut messages_in_sender, messages_in_receiver) = futures::channel::mpsc::channel(1);
-    let capabilities = Arc::new(RwLock::new(None));
-    let service = Service::new(
-        authentication::PermissiveAuthenticator,
-        Arc::clone(&capabilities),
-        service,
-    );
-    let (mut endpoint, client) = messaging::endpoint(messages_in_receiver, service);
+#[derive(Default, Clone, Debug)]
+pub struct Config {
+    pub addresses: Vec<Address>,
+    pub credentials: authentication::Parameters,
+}
 
-    let session = async move {
-        let control_client = control::Client::new(client.clone());
-        let resolved_capabilities = control_client
-            .authenticate(authentication_parameters.unwrap_or_default())
-            .instrument(debug_span!("authenticate"))
-            .await?;
-        capabilities::check_required(&resolved_capabilities)?;
-        *capabilities.write().await = Some(resolved_capabilities);
-        Ok(Client {
-            address,
-            client,
-            capabilities,
-        })
-    };
+impl Config {
+    pub fn add_addresses<A>(mut self, address: A) -> Self
+    where
+        A: IntoIterator,
+        A::Item: Into<Address>,
+    {
+        self.addresses.extend(address.into_iter().map(Into::into));
+        self
+    }
 
-    let mut messages_read = messages_read.fuse();
-    let connection = async move {
-        loop {
-            select! {
-                Some(msg) = messages_read.next(), if !messages_read.is_terminated() => {
-                    let _res = messages_in_sender.send(msg?).await;
-                    debug_assert!(_res.is_ok());
-                }
-                Some(msg) = endpoint.next_message() => {
-                    messages_write.send(msg).await?;
-                }
-            }
-        }
-    };
+    pub fn add_credentials_parameter(mut self, key: String, value: Value<'static>) -> Self {
+        self.credentials.insert(key, value);
+        self
+    }
+}
 
-    Ok((session, connection))
+pub(crate) async fn connect(
+    client: messaging::Client,
+    credentials: authentication::Parameters,
+    capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
+) -> Result<Client, Error> {
+    let control_client = control::Client::new(client.clone());
+    let resolved_capabilities = control_client
+        .authenticate(credentials)
+        .instrument(debug_span!("authenticate"))
+        .await?;
+    capabilities::check_required(&resolved_capabilities)?;
+    *capabilities.write().await = Some(resolved_capabilities);
+    Ok(Client {
+        client,
+        capabilities,
+    })
 }
 
 #[derive(Clone, Debug)]
 pub struct Client {
-    address: Address,
     client: messaging::Client,
     capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
 }
 
 impl Client {
-    pub(crate) fn call_into_value<'t, T, R>(
+    pub(crate) fn call(
         &self,
         address: message::Address,
-        args: T,
-    ) -> impl Future<Output = Result<R, Error>>
-    where
-        T: IntoValue<'t> + std::fmt::Debug,
-        R: Reflect + FromValue<'static>,
-    {
-        let call = self.call(address, args);
-        async { Ok(call.await?.deserialize_value()?) }
-    }
-
-    pub(crate) fn call<'t, T>(
-        &self,
-        address: message::Address,
-        args: T,
-    ) -> impl Future<Output = Result<Bytes, Error>>
-    where
-        T: IntoValue<'t>,
-    {
+        args: Value<'_>,
+        return_type: Option<Type>,
+    ) -> impl Future<Output = Result<Value<'static>, Error>> {
         use messaging::Service;
-        let call = args
-            .serialize_value()
+        let call = format::to_bytes(&args)
             .map(|value| self.client.call(messaging::Call::new(address, value)));
-        async move { Ok(call?.await?) }
-            .instrument(debug_span!("call", url = %self.address, %address))
+        async move {
+            Ok(call?
+                .await?
+                .deserialize_value_of_type(return_type.as_ref())?)
+        }
     }
 
-    pub(crate) fn post<'t, T>(
+    pub(crate) fn post(
         &self,
         address: message::Address,
-        args: T,
-    ) -> impl Future<Output = Result<(), Error>>
-    where
-        T: IntoValue<'t>,
-    {
+        args: Value<'_>,
+    ) -> impl Future<Output = Result<(), Error>> {
         use messaging::Service;
-        let post = args
-            .serialize_value()
+        let post = format::to_bytes(&args)
             .map(|value| self.client.post(messaging::Post::new(address, value)));
         async move { Ok(post?.await?) }
-            .instrument(debug_span!("post", url = %self.address, %address))
     }
 
-    #[instrument(level = "debug", skip(self, args))]
-    pub(crate) fn event<'t, T>(
+    pub(crate) fn event(
         &self,
         address: message::Address,
-        args: T,
-    ) -> impl Future<Output = Result<(), Error>>
-    where
-        T: IntoValue<'t>,
-    {
+        args: Value<'_>,
+    ) -> impl Future<Output = Result<(), Error>> {
         use messaging::Service;
-        let event = args
-            .serialize_value()
+        let event = format::to_bytes(&args)
             .map(|value| self.client.event(messaging::Event::new(address, value)));
         async move { Ok(event?.await?) }
-            .instrument(debug_span!("event", url = %self.address, %address))
+    }
+
+    pub(crate) fn downgrade(&self) -> WeakClient {
+        WeakClient {
+            client: self.client.downgrade(),
+            capabilities: Arc::downgrade(&self.capabilities),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct WeakClient {
+    client: messaging::WeakClient,
+    capabilities: Weak<RwLock<Option<CapabilitiesMap>>>,
+}
+
+impl WeakClient {
+    pub(crate) fn upgrade(&self) -> Option<Client> {
+        Some(Client {
+            client: self.client.upgrade()?,
+            capabilities: self.capabilities.upgrade()?,
+        })
     }
 }
 
 #[derive(Debug)]
-struct Service<S> {
+pub(crate) struct Service<S> {
     control: control::Control,
     inner: InnerService<S>,
 }
