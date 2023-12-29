@@ -58,5 +58,6 @@ pub use {
     error::{ConnectionError, Error},
     machine_id::MachineId,
     object::{BoxObject, Object, ObjectExt},
+    qi_value as value,
     sd::ServiceDirectory,
 };

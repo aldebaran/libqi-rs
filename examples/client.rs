@@ -4,6 +4,8 @@ use qi::{Address, ObjectExt};
 use tracing::{debug_span, info, Instrument};
 use tracing_subscriber::fmt;
 
+mod audio;
+
 #[derive(Debug, clap::Parser)]
 #[clap()]
 struct Args {

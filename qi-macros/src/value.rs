@@ -48,6 +48,19 @@ impl Derive {
 
     fn derive_impl(&self) -> TokenStream {
         match self.derive_trait {
+            Trait::Valuable => {
+                let reflect = self.impl_reflect();
+                let from_value = self.impl_from_value();
+                let to_value = self.impl_to_value();
+                let into_value = self.impl_into_value();
+                quote! {
+                    #reflect
+                    #from_value
+                    #to_value
+                    #into_value
+                }
+            }
+
             Trait::Reflect => self.impl_reflect(),
             Trait::ToValue => self.impl_to_value(),
             Trait::FromValue => self.impl_from_value(),
@@ -339,6 +352,7 @@ impl Derive {
 
 #[derive(Debug)]
 pub(crate) enum Trait {
+    Valuable,
     Reflect,
     ToValue,
     IntoValue,
@@ -348,6 +362,7 @@ pub(crate) enum Trait {
 impl std::fmt::Display for Trait {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Trait::Valuable => f.write_str("Value"),
             Trait::Reflect => f.write_str("Reflect"),
             Trait::ToValue => f.write_str("ToValue"),
             Trait::FromValue => f.write_str("FromValue"),
@@ -404,7 +419,7 @@ impl DeriveAttributes {
     /// Parses attributes with syntax:
     /// #[qi(value = "...", transparent, rename_all = "...")].
     fn new(attrs: &[Attribute]) -> syn::Result<Self> {
-        let mut crate_path = parse_quote!(::qi_value);
+        let mut crate_path = parse_quote!(::qi::value);
         let mut transparent = false;
         let mut rename_all = None;
         for attr in attrs {

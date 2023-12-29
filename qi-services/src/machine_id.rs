@@ -1,20 +1,8 @@
 use once_cell::sync::Lazy;
 use uuid::Uuid;
 
-#[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    qi_macros::Reflect,
-    qi_macros::FromValue,
-    qi_macros::IntoValue,
-    qi_macros::ToValue,
-)]
-#[qi(transparent)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, qi_macros::Valuable)]
+#[qi(value = "qi_value", transparent)]
 pub struct MachineId(String);
 
 impl MachineId {

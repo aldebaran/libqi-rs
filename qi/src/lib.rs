@@ -49,4 +49,5 @@ pub use qi_messaging as messaging;
 pub use qi_services as services;
 pub use qi_value as value;
 
+pub use qi_macros::{object, FromValue, IntoValue, Reflect, ToValue, Valuable};
 pub use services::{error, node, object, sd, session, Address, Object, ObjectExt};

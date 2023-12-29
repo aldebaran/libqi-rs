@@ -1,9 +1,18 @@
-#[allow(clippy::wrong_self_convention)]
+#![allow(clippy::wrong_self_convention)]
+mod object;
 mod value;
 
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, DeriveInput, Error};
 use value::{derive_impl, Trait};
+
+#[proc_macro_derive(Valuable, attributes(qi))]
+pub fn proc_macro_derive_valuable(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    derive_impl(Trait::Valuable, input)
+        .unwrap_or_else(Error::into_compile_error)
+        .into()
+}
 
 #[proc_macro_derive(Reflect, attributes(qi))]
 pub fn proc_macro_derive_reflect(input: TokenStream) -> TokenStream {
@@ -35,4 +44,10 @@ pub fn proc_macro_derive_from_value(input: TokenStream) -> TokenStream {
     derive_impl(Trait::FromValue, input)
         .unwrap_or_else(Error::into_compile_error)
         .into()
+}
+
+#[proc_macro]
+pub fn object(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as object::Object);
+    input.derive().into()
 }

@@ -18,7 +18,7 @@ use tokio::{
     sync::{mpsc, RwLock},
 };
 
-use super::MessagingService;
+use super::Server;
 
 #[derive(Clone, Debug)]
 pub(super) struct Sessions {
@@ -58,7 +58,7 @@ impl Sessions {
         &self,
         config: Config,
         service_name: &str,
-        messaging_service: Arc<MessagingService>,
+        messaging_service: Arc<Server>,
     ) -> Result<session::Client, Error> {
         for address in config.addresses {
             match address {
@@ -97,7 +97,7 @@ impl Sessions {
         read: R,
         write: W,
         service_name: &str,
-        messaging_service: Arc<MessagingService>,
+        messaging_service: Arc<Server>,
         credentials: authentication::Parameters,
     ) -> impl Future<Output = Result<session::Client, Error>>
     where

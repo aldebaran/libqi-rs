@@ -5,7 +5,6 @@ use crate::{
 };
 use async_trait::async_trait;
 use once_cell::sync::OnceCell;
-use qi_messaging::message;
 use qi_value::{
     object::{MemberAddress, MetaMethod, MetaObject},
     ActionId, IntoValue, ServiceId, Type,
@@ -33,15 +32,10 @@ impl Client {
 #[async_trait]
 impl ServiceDirectory for Client {
     async fn service_info(&self, name: &str) -> Result<ServiceInfo, Error> {
-        let address = message::Address::new(
-            SERVICE_ID,
-            service::MAIN_OBJECT_ID,
-            Meta::get().methods.service_info,
-        );
         Ok(self
             .object
             .meta_call(
-                MemberAddress::Id(Meta::get().methods.service_info),
+                MemberAddress::Id(Meta::get().method_ids.service_info),
                 name.into_value(),
             )
             .await?
@@ -52,14 +46,14 @@ impl ServiceDirectory for Client {
 #[derive(Debug)]
 struct Meta {
     object: MetaObject,
-    methods: Methods,
+    method_ids: MethodIds,
 }
 
 impl Meta {
     fn get() -> &'static Self {
         static META: OnceCell<Meta> = OnceCell::new();
         META.get_or_init(|| {
-            let mut methods = Methods::default();
+            let mut methods = MethodIds::default();
             let mut method_id = object::ACTION_START_ID;
             let mut builder = MetaObject::builder();
             builder.add_method({
@@ -71,7 +65,10 @@ impl Meta {
                 builder.build()
             });
             let object = builder.build();
-            Meta { object, methods }
+            Meta {
+                object,
+                method_ids: methods,
+            }
             // service = { id = 100, text = "get a service (method: service)" },
             // services = { id = 101, text = "get all services (method: services)" },
             // register_service = { id = 102, text = "register a service (method: registerService)" },
@@ -86,7 +83,7 @@ impl Meta {
 }
 
 #[derive(Default, Debug)]
-struct Methods {
+struct MethodIds {
     service_info: ActionId,
 }
 

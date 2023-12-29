@@ -5,20 +5,8 @@ use value::ServiceId;
 
 pub const MAIN_OBJECT_ID: ObjectId = ObjectId(1);
 
-#[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    qi_macros::Reflect,
-    qi_macros::FromValue,
-    qi_macros::IntoValue,
-    qi_macros::ToValue,
-)]
-#[qi(rename_all = "camelCase")]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, qi_macros::Valuable)]
+#[qi(value = "qi_value", rename_all = "camelCase")]
 pub struct ServiceInfo {
     pub name: String,
     pub service_id: ServiceId,
@@ -29,20 +17,8 @@ pub struct ServiceInfo {
     pub object_uid: ObjectUid,
 }
 
-#[derive(
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Debug,
-    qi_macros::Reflect,
-    qi_macros::FromValue,
-    qi_macros::IntoValue,
-    qi_macros::ToValue,
-)]
-#[qi(transparent)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, qi_macros::Valuable)]
+#[qi(value = "qi_value", transparent)]
 pub struct SessionId(String);
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
