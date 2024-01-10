@@ -14,6 +14,7 @@ use qi_value::{
     qi_macros::IntoValue,
     qi_macros::FromValue,
 )]
+#[qi(value = "qi_value")]
 #[allow(dead_code)]
 struct Basic {
     s: String,
@@ -160,6 +161,7 @@ fn test_basic_derive_from_value() {
     qi_macros::IntoValue,
     qi_macros::FromValue,
 )]
+#[qi(value = "qi_value")]
 #[allow(dead_code)]
 struct Borrows<'a, 'b> {
     s: &'a str,
@@ -253,7 +255,7 @@ fn test_borrows_derive_from_value() {
     qi_macros::IntoValue,
     qi_macros::FromValue,
 )]
-#[qi(transparent)]
+#[qi(value = "qi_value", transparent)]
 #[allow(dead_code)]
 struct Transparent {
     s: String,
@@ -310,7 +312,7 @@ fn test_transparent_derive_from_value() {
     qi_macros::IntoValue,
     qi_macros::FromValue,
 )]
-#[qi(transparent)]
+#[qi(value = "qi_value", transparent)]
 struct Empty;
 
 #[test]
@@ -356,7 +358,7 @@ fn test_empty_derive_from_value() {
 }
 
 #[derive(qi_macros::Reflect, qi_macros::ToValue, qi_macros::IntoValue, qi_macros::FromValue)]
-#[qi(rename_all = "camelCase")]
+#[qi(value = "qi_value", rename_all = "camelCase")]
 struct RenameAll {
     my_field_has_a_name_with_underscores: i32,
 }
