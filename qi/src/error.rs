@@ -1,6 +1,4 @@
-use crate::session::{authentication, capabilities};
-use qi_format as format;
-use qi_messaging::{self as messaging, message};
+use crate::session::authentication;
 use qi_value::{object, FromValueError};
 
 #[derive(Debug, thiserror::Error)]
@@ -23,14 +21,8 @@ pub enum Error {
     #[error("no reachable endpoint")]
     NoReachableEndpoint,
 
-    #[error("missing required capability")]
-    MissingRequiredCapability(#[from] capabilities::ExpectedKeyValueError<bool>),
-
     #[error("the call request has been canceled")]
     Canceled,
-
-    #[error("format error")]
-    Format(#[from] format::Error),
 
     #[error("method not found {0}")]
     MethodNotFound(object::MemberAddress),
@@ -44,9 +36,6 @@ pub enum Error {
     #[error("value conversion error")]
     FromValue(#[from] FromValueError),
 
-    #[error("no available handler for message address {0}")]
-    NoHandler(message::Address),
-
     #[error("IO error")]
     Io(#[from] std::io::Error),
 
@@ -54,15 +43,33 @@ pub enum Error {
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl From<messaging::Error> for Error {
-    fn from(err: messaging::Error) -> Self {
+impl From<&str> for Error {
+    fn from(err: &str) -> Self {
+        Self::Other(err.into())
+    }
+}
+
+impl From<String> for Error {
+    fn from(err: String) -> Self {
+        Self::Other(err.into())
+    }
+}
+
+impl From<qi_messaging::Error> for Error {
+    fn from(err: qi_messaging::Error) -> Self {
         match err {
-            messaging::Error::Canceled => Self::Canceled,
-            messaging::Error::Disconnected => Self::Disconnected,
-            messaging::Error::Message(err) => Self::Other(err.into()),
-            messaging::Error::Other(err) => Self::Other(err),
-            messaging::Error::Format(err) => Self::Format(err),
+            qi_messaging::Error::Canceled => Self::Canceled,
+            qi_messaging::Error::Disconnected => Self::Disconnected,
+            qi_messaging::Error::Message(err) => Self::Other(err.into()),
+            qi_messaging::Error::Other(err) => Self::Other(err),
+            qi_messaging::Error::Format(err) => Self::Other(err.into()),
         }
+    }
+}
+
+impl From<qi_format::Error> for Error {
+    fn from(err: qi_format::Error) -> Self {
+        Self::Other(err.into())
     }
 }
 
@@ -72,26 +79,23 @@ impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error {
     }
 }
 
-impl From<Error> for messaging::Error {
+impl From<Error> for qi_messaging::Error {
     fn from(err: Error) -> Self {
         match err {
             Error::Canceled => Self::Canceled,
             Error::Disconnected => Self::Disconnected,
             Error::Other(err) => Self::Other(err),
-            Error::Format(err) => Self::Format(err),
             _ => Self::Other(err.into()),
         }
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ConnectionError {
-    #[error("message decoding error")]
-    Decode(#[from] messaging::codec::DecodeError),
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
+#[error("no available handler for message address {0}")]
+pub(crate) struct NoMessageHandlerError(pub(crate) qi_messaging::message::Address);
 
-    #[error("message encoding error")]
-    Encode(#[from] messaging::codec::EncodeError),
-
-    #[error("IO error")]
-    Io(#[from] std::io::Error),
+impl From<NoMessageHandlerError> for qi_messaging::Error {
+    fn from(err: NoMessageHandlerError) -> Self {
+        Self::Other(err.into())
+    }
 }

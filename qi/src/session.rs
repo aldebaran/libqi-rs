@@ -1,15 +1,17 @@
-pub mod authentication;
-pub(crate) mod capabilities;
+pub mod address;
+pub(crate) mod authentication;
+mod cache;
+mod capabilities;
 mod control;
+mod error;
 
-use self::{authentication::Authenticator, control::ControlService};
-use crate::{Address, Error};
+pub(crate) use self::{authentication::Authenticator, cache::Cache};
+use crate::{error::NoMessageHandlerError, Error};
+pub use address::Address;
 use bytes::Bytes;
-use format::{de::BufExt, ser::IntoValueExt};
 use futures::{future::BoxFuture, Future, FutureExt};
-use messaging::{message, CapabilitiesMap};
-use qi_format as format;
-use qi_messaging as messaging;
+use qi_format::{de::BufExt, ser::IntoValueExt};
+use qi_messaging::{message, CapabilitiesMap};
 use qi_value::{Type, Value};
 use std::{
     future::ready,
@@ -18,30 +20,8 @@ use std::{
 use tokio::sync::RwLock;
 use tracing::{debug_span, Instrument};
 
-#[derive(Default, Clone, Debug)]
-pub struct Config {
-    pub addresses: Vec<Address>,
-    pub credentials: authentication::Parameters,
-}
-
-impl Config {
-    pub fn add_addresses<A>(mut self, address: A) -> Self
-    where
-        A: IntoIterator,
-        A::Item: Into<Address>,
-    {
-        self.addresses.extend(address.into_iter().map(Into::into));
-        self
-    }
-
-    pub fn add_credentials_parameter(mut self, key: String, value: Value<'static>) -> Self {
-        self.credentials.insert(key, value);
-        self
-    }
-}
-
 pub(crate) async fn connect(
-    client: messaging::Client,
+    client: qi_messaging::Client,
     credentials: authentication::Parameters,
     capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
 ) -> Result<Client, Error> {
@@ -60,7 +40,7 @@ pub(crate) async fn connect(
 
 #[derive(Clone, Debug)]
 pub struct Client {
-    client: messaging::Client,
+    client: qi_messaging::Client,
     capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
 }
 
@@ -71,9 +51,9 @@ impl Client {
         args: Value<'_>,
         return_type: Option<Type>,
     ) -> impl Future<Output = Result<Value<'static>, Error>> {
-        use messaging::Service;
-        let call = format::to_bytes(&args)
-            .map(|value| self.client.call(messaging::Call::new(address, value)));
+        use qi_messaging::Service;
+        let call = qi_format::to_bytes(&args)
+            .map(|value| self.client.call(qi_messaging::Call::new(address, value)));
         async move {
             Ok(call?
                 .await?
@@ -86,9 +66,9 @@ impl Client {
         address: message::Address,
         args: Value<'_>,
     ) -> impl Future<Output = Result<(), Error>> {
-        use messaging::Service;
-        let post = format::to_bytes(&args)
-            .map(|value| self.client.post(messaging::Post::new(address, value)));
+        use qi_messaging::Service;
+        let post = qi_format::to_bytes(&args)
+            .map(|value| self.client.post(qi_messaging::Post::new(address, value)));
         async move { Ok(post?.await?) }
     }
 
@@ -97,9 +77,9 @@ impl Client {
         address: message::Address,
         args: Value<'_>,
     ) -> impl Future<Output = Result<(), Error>> {
-        use messaging::Service;
-        let event = format::to_bytes(&args)
-            .map(|value| self.client.event(messaging::Event::new(address, value)));
+        use qi_messaging::Service;
+        let event = qi_format::to_bytes(&args)
+            .map(|value| self.client.event(qi_messaging::Event::new(address, value)));
         async move { Ok(event?.await?) }
     }
 
@@ -113,7 +93,7 @@ impl Client {
 
 #[derive(Clone, Debug)]
 pub(crate) struct WeakClient {
-    client: messaging::WeakClient,
+    client: qi_messaging::WeakClient,
     capabilities: Weak<RwLock<Option<CapabilitiesMap>>>,
 }
 
@@ -152,14 +132,15 @@ impl<T> Service<T> {
     }
 }
 
-impl<S> messaging::Service for Service<S>
+impl<T> qi_messaging::Service for Service<T>
 where
-    S: messaging::Service + Send,
+    T: qi_messaging::Service,
 {
     fn call(
         &self,
-        mut call: messaging::Call,
-    ) -> BoxFuture<'static, Result<Bytes, messaging::Error>> {
+        mut call: qi_messaging::Call,
+    ) -> BoxFuture<'static, Result<Bytes, qi_messaging::Error>> {
+        use self::control::ControlService;
         let address = call.address();
         if control::is_addressed_by(address) {
             let authenticate = call
@@ -170,23 +151,29 @@ where
         } else if let Some(svc) = self.inner.get() {
             svc.call(call)
         } else {
-            ready(Err(Error::NoHandler(address).into())).boxed()
+            ready(Err(NoMessageHandlerError(address).into())).boxed()
         }
     }
 
-    fn post(&self, post: messaging::Post) -> BoxFuture<'static, Result<(), messaging::Error>> {
+    fn post(
+        &self,
+        post: qi_messaging::Post,
+    ) -> BoxFuture<'static, Result<(), qi_messaging::Error>> {
         if let Some(svc) = self.inner.get() {
             svc.post(post)
         } else {
-            ready(Err(Error::NoHandler(post.address()).into())).boxed()
+            ready(Err(NoMessageHandlerError(post.address()).into())).boxed()
         }
     }
 
-    fn event(&self, event: messaging::Event) -> BoxFuture<'static, Result<(), messaging::Error>> {
+    fn event(
+        &self,
+        event: qi_messaging::Event,
+    ) -> BoxFuture<'static, Result<(), qi_messaging::Error>> {
         if let Some(svc) = self.inner.get() {
             svc.event(event)
         } else {
-            ready(Err(Error::NoHandler(event.address()).into())).boxed()
+            ready(Err(NoMessageHandlerError(event.address()).into())).boxed()
         }
     }
 }

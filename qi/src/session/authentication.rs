@@ -3,13 +3,13 @@ use qi_value::{Dynamic, Value};
 use sealed::sealed;
 use std::collections::HashMap;
 
-pub type Parameters = HashMap<String, Value<'static>>;
+pub(crate) type Parameters = HashMap<String, Value<'static>>;
 
-pub trait Authenticator {
+pub(crate) trait Authenticator {
     fn verify(&self, parameters: Parameters) -> Result<(), Error>;
 }
 
-pub struct PermissiveAuthenticator;
+pub(crate) struct PermissiveAuthenticator;
 
 impl Authenticator for PermissiveAuthenticator {
     fn verify(&self, _parameters: Parameters) -> Result<(), Error> {
@@ -17,13 +17,13 @@ impl Authenticator for PermissiveAuthenticator {
     }
 }
 
-pub struct UserTokenAuthenticator {
+pub(crate) struct UserTokenAuthenticator {
     user: String,
     token: String,
 }
 
 impl UserTokenAuthenticator {
-    pub fn new(user: String, token: String) -> Self {
+    pub(crate) fn new(user: String, token: String) -> Self {
         Self { user, token }
     }
 }

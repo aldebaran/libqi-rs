@@ -42,7 +42,6 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-mod address;
 mod channel;
 pub mod error;
 mod machine_id;
@@ -53,11 +52,7 @@ pub mod service;
 pub mod session;
 pub mod signal;
 
-pub use self::{
-    address::Address,
-    error::{ConnectionError, Error},
-    machine_id::MachineId,
-};
+pub use self::{error::Error, machine_id::MachineId};
 pub use qi_format as format;
 pub use qi_macros::{object, FromValue, IntoValue, Reflect, ToValue, Valuable};
 pub use qi_messaging as messaging;

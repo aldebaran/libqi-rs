@@ -1,4 +1,4 @@
-use crate::{Address, MachineId};
+use crate::{session, MachineId};
 use qi_value::{self as value, ObjectId};
 use std::borrow::Cow;
 use value::ServiceId;
@@ -12,7 +12,7 @@ pub struct ServiceInfo {
     pub service_id: ServiceId,
     pub machine_id: MachineId,
     pub process_id: u32,
-    pub endpoints: Vec<Address>,
+    pub endpoints: Vec<session::Address>,
     pub session_id: SessionId,
     pub object_uid: ObjectUid,
 }
@@ -65,6 +65,7 @@ impl<'a> value::FromValue<'a> for ObjectUid {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node;
     use qi_format::de::BufExt;
 
     #[test]
@@ -93,14 +94,14 @@ mod tests {
                 machine_id: MachineId::new("9a65b56e-c3d3-4485-8924-661b036202b3".to_owned()),
                 process_id: 3420486,
                 endpoints: vec![
-                    Address::Relative {
+                    session::Address::Relative {
                         service: "Calculator".to_owned()
                     },
-                    Address::Tcp {
+                    session::Address::Node(node::Address::Tcp {
                         host: "127.0.0.1".to_owned(),
                         port: 41681,
                         ssl: None
-                    }
+                    })
                 ],
                 session_id: SessionId("361ecec4-00f7-4c94-a6e2-d91e28c5a06c".to_owned()),
                 object_uid: ObjectUid(value::object::ObjectUid::from_bytes([
@@ -109,44 +110,6 @@ mod tests {
                 ]))
             }
         )
-    }
-
-    #[test]
-    fn test_machine_id_deserialize() {
-        let mut input = &[
-            0x24, 0x00, 0x00, 0x00, 0x39, 0x61, 0x36, 0x35, 0x62, 0x35, 0x36, 0x65, 0x2d, 0x63,
-            0x33, 0x64, 0x33, 0x2d, 0x34, 0x34, 0x38, 0x35, 0x2d, 0x38, 0x39, 0x32, 0x34, 0x2d,
-            0x36, 0x36, 0x31, 0x62, 0x30, 0x33, 0x36, 0x32, 0x30, 0x32, 0x62, 0x33,
-        ][..];
-        let machine_id: MachineId = input.deserialize_value().unwrap();
-        assert_eq!(
-            machine_id,
-            MachineId::new("9a65b56e-c3d3-4485-8924-661b036202b3".to_owned()),
-        )
-    }
-
-    #[test]
-    fn test_endpoints_deserialize() {
-        let mut input = &[
-            0x02, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x71, 0x69, 0x3a, 0x43, 0x61, 0x6c,
-            0x63, 0x75, 0x6c, 0x61, 0x74, 0x6f, 0x72, 0x15, 0x00, 0x00, 0x00, 0x74, 0x63, 0x70,
-            0x3a, 0x2f, 0x2f, 0x31, 0x32, 0x37, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x31, 0x3a, 0x34,
-            0x31, 0x36, 0x38, 0x31,
-        ][..];
-        let endpoints: Vec<Address> = input.deserialize_value().unwrap();
-        assert_eq!(
-            endpoints,
-            [
-                Address::Relative {
-                    service: "Calculator".to_owned()
-                },
-                Address::Tcp {
-                    host: "127.0.0.1".to_owned(),
-                    port: 41681,
-                    ssl: None
-                }
-            ]
-        );
     }
 
     #[test]

@@ -1,68 +1,24 @@
-use crate::error::Error;
+use crate::{node, Error};
 use iri_string::types::{UriStr, UriString};
 use qi_value as value;
-use std::{net::IpAddr, str::FromStr};
+use std::str::FromStr;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Address {
+    /// An address relative to an existing service session.
     Relative {
         service: String,
     },
-    Tcp {
-        host: String,
-        port: u16,
-        ssl: Option<SslKind>,
-    },
+    Node(node::Address),
 }
 
 impl Address {
     pub fn from_uri(uri: &UriStr) -> Result<Self, Error> {
-        fn tcp_host_and_port(uri: &UriStr) -> Result<(String, u16), Error> {
-            const DEFAULT_HOST: &str = "localhost";
-            const DEFAULT_PORT: u16 = 9559;
-            let authority = uri.authority_components();
-            Ok(match authority {
-                Some(authority) => {
-                    let host = authority.host();
-                    let port = authority
-                        .port()
-                        .map(std::str::FromStr::from_str)
-                        .transpose()
-                        .map_err(Error::InvalidUriPort)?;
-                    (host.to_owned(), port.unwrap_or(DEFAULT_PORT))
-                }
-                None => (DEFAULT_HOST.to_owned(), DEFAULT_PORT),
-            })
-        }
         match uri.scheme_str() {
             "qi" => Ok(Self::Relative {
                 service: uri.path_str().to_owned(),
             }),
-            "tcp" => {
-                let (host, port) = tcp_host_and_port(uri)?;
-                Ok(Self::Tcp {
-                    host,
-                    port,
-                    ssl: None,
-                })
-            }
-            "tcps" => {
-                let (host, port) = tcp_host_and_port(uri)?;
-                Ok(Self::Tcp {
-                    host,
-                    port,
-                    ssl: Some(SslKind::Simple),
-                })
-            }
-            "tcpsm" => {
-                let (host, port) = tcp_host_and_port(uri)?;
-                Ok(Self::Tcp {
-                    host,
-                    port,
-                    ssl: Some(SslKind::Mutual),
-                })
-            }
-            scheme => Err(Error::UnsupportedUriScheme(scheme.to_owned())),
+            _ => Ok(Self::Node(node::Address::from_uri(uri)?)),
         }
     }
 
@@ -70,11 +26,9 @@ impl Address {
         matches!(self, Address::Relative { .. })
     }
 
-    pub fn is_loopback(&self) -> bool {
+    pub fn is_machine_local(&self) -> bool {
         match self {
-            Address::Tcp { host, .. } => IpAddr::from_str(host)
-                .ok()
-                .map_or(false, |addr| addr.is_loopback()),
+            Self::Node(addr) => addr.is_machine_local(),
             _ => false,
         }
     }
@@ -99,16 +53,15 @@ impl FromStr for Address {
 impl std::fmt::Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Address::Relative { service } => write!(f, "qi:{service}"),
-            Address::Tcp { host, port, ssl } => {
-                let protocol = match ssl {
-                    None => "tcp",
-                    Some(SslKind::Simple) => "tcps",
-                    Some(SslKind::Mutual) => "tcpsm",
-                };
-                write!(f, "{protocol}://{host}:{port}")
-            }
+            Self::Relative { service } => write!(f, "qi:{service}"),
+            Self::Node(addr) => addr.fmt(f),
         }
+    }
+}
+
+impl From<node::Address> for Address {
+    fn from(addr: node::Address) -> Self {
+        Self::Node(addr)
     }
 }
 
@@ -170,4 +123,34 @@ pub enum SslKind {
     #[default]
     Simple,
     Mutual,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qi_format::de::BufExt;
+
+    #[test]
+    fn test_addresses_deserialize() {
+        let mut input = &[
+            0x02, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x71, 0x69, 0x3a, 0x43, 0x61, 0x6c,
+            0x63, 0x75, 0x6c, 0x61, 0x74, 0x6f, 0x72, 0x15, 0x00, 0x00, 0x00, 0x74, 0x63, 0x70,
+            0x3a, 0x2f, 0x2f, 0x31, 0x32, 0x37, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x31, 0x3a, 0x34,
+            0x31, 0x36, 0x38, 0x31,
+        ][..];
+        let endpoints: Vec<Address> = input.deserialize_value().unwrap();
+        assert_eq!(
+            endpoints,
+            [
+                Address::Relative {
+                    service: "Calculator".to_owned()
+                },
+                Address::Node(node::Address::Tcp {
+                    host: "127.0.0.1".to_owned(),
+                    port: 41681,
+                    ssl: None
+                })
+            ]
+        );
+    }
 }

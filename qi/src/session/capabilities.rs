@@ -80,7 +80,16 @@ impl Default for Capabilities {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
 #[error("expected key \"{0}\" to have value \"{1}\"")]
-pub struct ExpectedKeyValueError<T>(String, T);
+pub(crate) struct ExpectedKeyValueError<T>(String, T);
+
+impl<T> From<ExpectedKeyValueError<T>> for crate::Error
+where
+    T: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
+{
+    fn from(err: ExpectedKeyValueError<T>) -> Self {
+        Self::Other(err.into())
+    }
+}
 
 /// Checks that the capabilities have the required values that are only supported by this implementation.
 ///

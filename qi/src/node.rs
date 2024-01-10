@@ -1,6 +1,6 @@
-mod sessions;
+mod address;
 
-use self::sessions::Sessions;
+pub use self::address::Address;
 use crate::{
     machine_id::MachineId,
     object::{self, BoxObject, Object},
@@ -9,94 +9,88 @@ use crate::{
     session, Error,
 };
 use bytes::Bytes;
-use futures::{future::BoxFuture, FutureExt};
+use futures::future::BoxFuture;
 use qi_messaging as messaging;
-use qi_value::{ObjectId, ServiceId};
-use std::{collections::HashMap, future::Future, sync::Arc};
-use tokio::sync::{mpsc, watch};
+use qi_value::{ObjectId, ServiceId, Value};
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::watch;
 
-pub fn open() -> (Node, impl Future<Output = ()>) {
-    use futures::stream::{FusedStream, FuturesUnordered, StreamExt};
-    let (task_sender, mut task_receiver) = mpsc::channel(1);
+pub trait Node {
+    fn add_service<O>(name: String, object: O)
+    where
+        O: Object;
+
+    fn remove_service(name: &str);
+}
+
+/// Creates a new isolated node.
+pub fn create() -> IsolatedNode {
     let (services_sender, services_receiver) = watch::channel(HashMap::new());
     let server = Arc::new(Server {
         services: services_receiver,
     });
-    let node = Node {
+    let node = IsolatedNode {
         server,
         services: services_sender,
-        task_sender,
     };
-    let task = async move {
-        let mut tasks = FuturesUnordered::new();
-        loop {
-            tokio::select! {
-                Some(task) = task_receiver.recv() => {
-                    tasks.push(task);
-                }
-                Some(()) = tasks.next(), if !tasks.is_terminated() => {
-                    // nothing
-                }
-            }
-        }
-    };
-    (node, task)
+    node
 }
 
-pub struct Node {
+pub struct IsolatedNode {
     server: Arc<Server>,
     services: watch::Sender<ServicesMap>,
-    task_sender: mpsc::Sender<BoxFuture<'static, ()>>,
 }
 
-impl Node {
-    pub async fn connect_to_space(self, config: session::Config) -> Result<ClientNode, Error> {
-        let (sessions, task) = Sessions::new();
-        self.task_sender.send(task.boxed()).await?;
+impl IsolatedNode {
+    /// Attaches to an existing space hosted by a node with the given configuration.
+    pub async fn attach_space(self, config: Config) -> Result<AttachedNode, Error> {
+        let sessions = session::Cache::new();
         let session = sessions
             .get(config, sd::SERVICE_NAME, Arc::clone(&self.server))
             .await?;
         let service_directory = sd::Client::new(session);
-        Ok(ClientNode {
+        Ok(AttachedNode {
             service: self.server,
             sessions,
             service_directory,
         })
     }
 
+    /// Hosts a new space on this node.
     fn host_space(self) -> Result<HostNode, Error> {
         todo!()
     }
 }
 
-type ServicesMap = HashMap<ServiceId, HashMap<ObjectId, BoxObject<'static>>>;
-
-impl std::fmt::Debug for Node {
+impl std::fmt::Debug for IsolatedNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Node").finish_non_exhaustive()
     }
 }
 
 #[derive(Debug)]
-pub struct ClientNode {
+pub struct AttachedNode {
     service: Arc<Server>,
-    sessions: sessions::Sessions,
+    sessions: session::Cache,
     service_directory: sd::Client,
 }
 
-impl ClientNode {
+impl AttachedNode {
     pub fn service_directory(&self) -> &sd::Client {
         &self.service_directory
     }
 
     pub async fn service(&self, name: &str) -> Result<Box<dyn Object + Send + Sync>, Error> {
         use crate::sd::ServiceDirectory;
-        let mut service = self.service_directory.service_info(name).await?;
-        sort_service_endpoints(&mut service);
+        let service = self.service_directory.service_info(name).await?;
         let session = self
             .sessions
             .get(
-                session::Config::default().add_addresses(service.endpoints),
+                Config {
+                    addresses: sort_endpoints(&service),
+                    // Connecting to service nodes of a space should not require credentials.
+                    credentials: Default::default(),
+                },
                 name,
                 Arc::clone(&self.service),
             )
@@ -108,6 +102,35 @@ impl ClientNode {
 
 #[derive(Debug)]
 pub struct HostNode;
+
+#[derive(Default, Clone, Debug)]
+pub struct Config {
+    /// Session addresses that may be used to connect to the node.
+    pub(crate) addresses: Vec<session::Address>,
+    /// Credentials required to authenticate to the node control server.
+    pub(crate) credentials: session::authentication::Parameters,
+}
+
+impl Config {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_address<A>(mut self, address: A) -> Self
+    where
+        A: Into<Address>,
+    {
+        self.addresses.push(session::Address::Node(address.into()));
+        self
+    }
+
+    pub fn add_credentials_parameter(mut self, key: String, value: Value<'static>) -> Self {
+        self.credentials.insert(key, value);
+        self
+    }
+}
+
+type ServicesMap = HashMap<ServiceId, HashMap<ObjectId, BoxObject<'static>>>;
 
 pub(crate) struct Server {
     services: watch::Receiver<ServicesMap>,
@@ -133,12 +156,14 @@ impl messaging::Service for Server {
     }
 }
 
-fn sort_service_endpoints(service: &mut ServiceInfo) {
+fn sort_endpoints(service: &ServiceInfo) -> Vec<session::Address> {
     let service_is_local = &service.machine_id == MachineId::local();
-    service.endpoints.sort_by_cached_key(|endpoint| {
+    let mut endpoints = service.endpoints.clone();
+    endpoints.sort_by_cached_key(|endpoint| {
         (
             endpoint.is_relative(),
-            service_is_local && endpoint.is_loopback(),
+            service_is_local && endpoint.is_machine_local(),
         )
     });
+    endpoints
 }
