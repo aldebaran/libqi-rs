@@ -1,5 +1,4 @@
 #![deny(unreachable_pub, unsafe_code)]
-// TODO: #![deny(missing_docs)]
 #![warn(unused_crate_dependencies)]
 #![warn(
     clippy::all,
@@ -22,7 +21,6 @@
     clippy::mixed_read_write_in_expression,
     clippy::multiple_inherent_impl,
     clippy::mutex_atomic,
-    clippy::panic,
     clippy::print_stderr,
     clippy::print_stdout,
     clippy::rc_buffer,
@@ -44,10 +42,23 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-pub use qi_format as format;
-pub use qi_messaging as messaging;
-pub use qi_services as services;
-pub use qi_value as value;
+mod address;
+mod channel;
+pub mod error;
+mod machine_id;
+pub mod node;
+pub mod object;
+pub mod sd;
+pub mod service;
+pub mod session;
+pub mod signal;
 
+pub use self::{
+    address::Address,
+    error::{ConnectionError, Error},
+    machine_id::MachineId,
+};
+pub use qi_format as format;
 pub use qi_macros::{object, FromValue, IntoValue, Reflect, ToValue, Valuable};
-pub use services::{error, node, object, sd, session, Address, Object, ObjectExt};
+pub use qi_messaging as messaging;
+pub use qi_value as value;

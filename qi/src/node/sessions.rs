@@ -1,10 +1,6 @@
 use crate::{
     channel,
-    session::{
-        self,
-        authentication::{self},
-        Config,
-    },
+    session::{self, authentication, Config},
     Address, ConnectionError, Error,
 };
 use futures::{

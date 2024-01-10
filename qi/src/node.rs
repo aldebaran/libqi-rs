@@ -2,9 +2,11 @@ mod sessions;
 
 use self::sessions::Sessions;
 use crate::{
-    object, sd,
+    machine_id::MachineId,
+    object::{self, BoxObject, Object},
+    sd,
     service::{self, ServiceInfo},
-    session, BoxObject, Error, MachineId, Object,
+    session, Error,
 };
 use bytes::Bytes;
 use futures::{future::BoxFuture, FutureExt};
@@ -88,7 +90,7 @@ impl ClientNode {
     }
 
     pub async fn service(&self, name: &str) -> Result<Box<dyn Object + Send + Sync>, Error> {
-        use crate::ServiceDirectory;
+        use crate::sd::ServiceDirectory;
         let mut service = self.service_directory.service_info(name).await?;
         sort_service_endpoints(&mut service);
         let session = self

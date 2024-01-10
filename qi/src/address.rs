@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::error::Error;
 use iri_string::types::{UriStr, UriString};
 use qi_value as value;
 use std::{net::IpAddr, str::FromStr};

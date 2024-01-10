@@ -2,7 +2,7 @@ use super::{
     authentication::{Authenticator, CapabilitiesMapExt},
     capabilities,
 };
-use crate::error::Error;
+use crate::Error;
 use futures::{future::BoxFuture, FutureExt};
 use messaging::{message, Service};
 use qi_format::{de::BufExt, ser::IntoValueExt};
