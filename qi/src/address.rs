@@ -1,6 +1,8 @@
-use crate::error::Error;
-use iri_string::types::{UriStr, UriString};
 use std::{net::IpAddr, str::FromStr};
+
+use iri_string::types::{UriStr, UriString};
+
+use crate::Error;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Address {

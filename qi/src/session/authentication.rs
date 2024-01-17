@@ -22,12 +22,6 @@ pub(crate) struct UserTokenAuthenticator {
     token: String,
 }
 
-impl UserTokenAuthenticator {
-    pub(crate) fn new(user: String, token: String) -> Self {
-        Self { user, token }
-    }
-}
-
 impl Authenticator for UserTokenAuthenticator {
     fn verify(&self, mut parameters: Parameters) -> Result<(), Error> {
         let user: &str = parameters

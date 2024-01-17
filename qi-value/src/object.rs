@@ -132,29 +132,25 @@ impl MetaObject {
         MetaObjectBuilder::new()
     }
 
-    pub fn signal(&self, address: &MemberAddress) -> Option<(&ActionId, &MetaSignal)> {
-        self.signals.iter().find(|(sig_id, sig)| match address {
-            MemberAddress::Id(id) => *sig_id == id,
-            MemberAddress::Name(name) => &sig.name == name,
-        })
+    pub fn signal(&self, address: &MemberAddress) -> Option<&MetaSignal> {
+        match address {
+            MemberAddress::Id(id) => self.signals.get(id),
+            MemberAddress::Name(name) => self.signals.values().find(|sig| &sig.name == name),
+        }
     }
 
-    pub fn property(&self, address: &MemberAddress) -> Option<(&ActionId, &MetaProperty)> {
-        self.properties
-            .iter()
-            .find(|(prop_id, prop)| match address {
-                MemberAddress::Id(id) => *prop_id == id,
-                MemberAddress::Name(name) => &prop.name == name,
-            })
+    pub fn property(&self, address: &MemberAddress) -> Option<&MetaProperty> {
+        match address {
+            MemberAddress::Id(id) => self.properties.get(id),
+            MemberAddress::Name(name) => self.properties.values().find(|prop| &prop.name == name),
+        }
     }
 
-    pub fn method(&self, address: &MemberAddress) -> Option<(&ActionId, &MetaMethod)> {
-        self.methods
-            .iter()
-            .find(|(method_id, method)| match address {
-                MemberAddress::Id(id) => *method_id == id,
-                MemberAddress::Name(name) => &method.name == name,
-            })
+    pub fn method(&self, address: &MemberAddress) -> Option<&MetaMethod> {
+        match address {
+            MemberAddress::Id(id) => self.methods.get(id),
+            MemberAddress::Name(name) => self.methods.values().find(|method| &method.name == name),
+        }
     }
 }
 
@@ -295,7 +291,7 @@ impl MetaMethodBuilder {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct MetaMethodBuilderReturnValue {
     signature: Signature,
     description: String,
@@ -317,7 +313,16 @@ impl MetaMethodBuilderReturnValue {
     }
 }
 
-#[derive(Default, Debug)]
+impl Default for MetaMethodBuilderReturnValue {
+    fn default() -> Self {
+        Self {
+            signature: Signature(Some(Type::Unit)),
+            description: String::new(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct MetaMethodBuilderParameter {
     parameter: MetaMethodParameter,
     ty: Option<Type>,
@@ -337,6 +342,15 @@ impl MetaMethodBuilderParameter {
     pub fn set_type<T: Into<Option<Type>>>(&mut self, ty: T) -> &mut Self {
         self.ty = ty.into();
         self
+    }
+}
+
+impl Default for MetaMethodBuilderParameter {
+    fn default() -> Self {
+        Self {
+            parameter: MetaMethodParameter::default(),
+            ty: Some(Type::Unit),
+        }
     }
 }
 

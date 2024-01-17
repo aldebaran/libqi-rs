@@ -1,22 +1,19 @@
-pub mod address;
 pub(crate) mod authentication;
-mod cache;
 mod capabilities;
 mod control;
 mod error;
+pub mod reference;
+mod registry;
 
-pub(crate) use self::{authentication::Authenticator, cache::Cache};
+pub(crate) use self::{authentication::Authenticator, registry::Registry};
 use crate::{error::NoMessageHandlerError, Error};
-pub use address::Address;
 use bytes::Bytes;
 use futures::{future::BoxFuture, Future, FutureExt};
 use qi_format::{de::BufExt, ser::IntoValueExt};
 use qi_messaging::{message, CapabilitiesMap};
 use qi_value::{Type, Value};
-use std::{
-    future::ready,
-    sync::{Arc, Weak},
-};
+pub use reference::Reference;
+use std::{future::ready, sync::Arc};
 use tokio::sync::RwLock;
 use tracing::{debug_span, Instrument};
 
@@ -33,15 +30,37 @@ pub(crate) async fn connect(
     capabilities::check_required(&resolved_capabilities)?;
     *capabilities.write().await = Some(resolved_capabilities);
     Ok(Client {
+        uid: Uid::new(),
         client,
-        capabilities,
+        // capabilities,
     })
+}
+
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, qi_macros::Valuable)]
+#[qi(value = "qi_value", transparent)]
+pub struct Uid(String);
+
+impl Uid {
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+
+    pub fn from_string(id: String) -> Self {
+        Self(id)
+    }
+}
+
+impl std::fmt::Display for Uid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Client {
+    uid: Uid,
     client: qi_messaging::Client,
-    capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
+    // capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
 }
 
 impl Client {
@@ -61,47 +80,53 @@ impl Client {
         }
     }
 
-    pub(crate) fn post(
-        &self,
-        address: message::Address,
-        args: Value<'_>,
-    ) -> impl Future<Output = Result<(), Error>> {
-        use qi_messaging::Service;
-        let post = qi_format::to_bytes(&args)
-            .map(|value| self.client.post(qi_messaging::Post::new(address, value)));
-        async move { Ok(post?.await?) }
+    // pub(crate) fn post(
+    //     &self,
+    //     address: message::Address,
+    //     args: Value<'_>,
+    // ) -> impl Future<Output = Result<(), Error>> {
+    //     use qi_messaging::Service;
+    //     let post = qi_format::to_bytes(&args)
+    //         .map(|value| self.client.post(qi_messaging::Post::new(address, value)));
+    //     async move { Ok(post?.await?) }
+    // }
+
+    // pub(crate) fn event(
+    //     &self,
+    //     address: message::Address,
+    //     args: Value<'_>,
+    // ) -> impl Future<Output = Result<(), Error>> {
+    //     use qi_messaging::Service;
+    //     let event = qi_format::to_bytes(&args)
+    //         .map(|value| self.client.event(qi_messaging::Event::new(address, value)));
+    //     async move { Ok(event?.await?) }
+    // }
+
+    pub fn uid(&self) -> Uid {
+        self.uid.clone()
     }
 
-    pub(crate) fn event(
-        &self,
-        address: message::Address,
-        args: Value<'_>,
-    ) -> impl Future<Output = Result<(), Error>> {
-        use qi_messaging::Service;
-        let event = qi_format::to_bytes(&args)
-            .map(|value| self.client.event(qi_messaging::Event::new(address, value)));
-        async move { Ok(event?.await?) }
-    }
-
-    pub(crate) fn downgrade(&self) -> WeakClient {
-        WeakClient {
-            client: self.client.downgrade(),
-            capabilities: Arc::downgrade(&self.capabilities),
-        }
-    }
+    // pub(crate) fn downgrade(&self) -> WeakClient {
+    //     WeakClient {
+    //         client: self.client.downgrade(),
+    //         capabilities: Arc::downgrade(&self.capabilities),
+    //     }
+    // }
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct WeakClient {
+    id: Uid,
     client: qi_messaging::WeakClient,
-    capabilities: Weak<RwLock<Option<CapabilitiesMap>>>,
+    // capabilities: Weak<RwLock<Option<CapabilitiesMap>>>,
 }
 
 impl WeakClient {
     pub(crate) fn upgrade(&self) -> Option<Client> {
         Some(Client {
+            uid: self.id.clone(),
             client: self.client.upgrade()?,
-            capabilities: self.capabilities.upgrade()?,
+            // capabilities: self.capabilities.upgrade()?,
         })
     }
 }
@@ -127,9 +152,9 @@ impl<T> Service<T> {
         }
     }
 
-    fn unlock_inner(&mut self) {
-        self.inner.unlock()
-    }
+    // fn unlock_inner(&mut self) {
+    //     self.inner.unlock()
+    // }
 }
 
 impl<T> qi_messaging::Service for Service<T>
@@ -193,7 +218,7 @@ impl<T> InnerService<T> {
         self.unlocked.then_some(&self.service)
     }
 
-    fn unlock(&mut self) {
-        self.unlocked = true;
-    }
+    // fn unlock(&mut self) {
+    //     self.unlocked = true;
+    // }
 }

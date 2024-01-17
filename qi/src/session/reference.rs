@@ -1,47 +1,46 @@
-use crate::{node, Error};
+use crate::{Address, Error};
 use iri_string::types::{UriStr, UriString};
 use qi_value as value;
 use std::str::FromStr;
 
+/// A session reference is a mean to identify and/or reuse sessions to services or endpoints.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum Address {
-    /// An address relative to an existing service session.
-    Relative {
-        service: String,
-    },
-    Node(node::Address),
+pub enum Reference {
+    /// A reference to an existing service session.
+    Service(String),
+    /// A reference to the address of an endpoint, that potentially requires opening a new channel
+    /// to that endpoint and establishing the session over it.
+    Endpoint(Address),
 }
 
-impl Address {
+impl Reference {
     pub fn from_uri(uri: &UriStr) -> Result<Self, Error> {
         match uri.scheme_str() {
-            "qi" => Ok(Self::Relative {
-                service: uri.path_str().to_owned(),
-            }),
-            _ => Ok(Self::Node(node::Address::from_uri(uri)?)),
+            "qi" => Ok(Self::Service(uri.path_str().to_owned())),
+            _ => Ok(Self::Endpoint(Address::from_uri(uri)?)),
         }
     }
 
-    pub fn is_relative(&self) -> bool {
-        matches!(self, Address::Relative { .. })
+    pub fn is_service_relative(&self) -> bool {
+        matches!(self, Reference::Service { .. })
+    }
+
+    pub fn as_service_relative(&self) -> Option<&String> {
+        match self {
+            Self::Service(service) => Some(service),
+            _ => None,
+        }
     }
 
     pub fn is_machine_local(&self) -> bool {
         match self {
-            Self::Node(addr) => addr.is_machine_local(),
+            Self::Endpoint(addr) => addr.is_machine_local(),
             _ => false,
-        }
-    }
-
-    pub fn as_relative(&self) -> Option<&String> {
-        match self {
-            Address::Relative { service } => Some(service),
-            _ => None,
         }
     }
 }
 
-impl FromStr for Address {
+impl FromStr for Reference {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -50,48 +49,48 @@ impl FromStr for Address {
     }
 }
 
-impl std::fmt::Display for Address {
+impl std::fmt::Display for Reference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Relative { service } => write!(f, "qi:{service}"),
-            Self::Node(addr) => addr.fmt(f),
+            Self::Service(service) => write!(f, "qi:{service}"),
+            Self::Endpoint(addr) => addr.fmt(f),
         }
     }
 }
 
-impl From<node::Address> for Address {
-    fn from(addr: node::Address) -> Self {
-        Self::Node(addr)
+impl From<Address> for Reference {
+    fn from(addr: Address) -> Self {
+        Self::Endpoint(addr)
     }
 }
 
-impl TryFrom<&str> for Address {
+impl TryFrom<&str> for Reference {
     type Error = Error;
     fn try_from(str: &str) -> Result<Self, Self::Error> {
         Self::from_str(str)
     }
 }
 
-impl TryFrom<String> for Address {
+impl TryFrom<String> for Reference {
     type Error = Error;
     fn try_from(str: String) -> Result<Self, Self::Error> {
         Self::from_str(&str)
     }
 }
 
-impl value::Reflect for Address {
+impl value::Reflect for Reference {
     fn ty() -> Option<value::Type> {
         Some(value::Type::String)
     }
 }
 
-impl value::RuntimeReflect for Address {
+impl value::RuntimeReflect for Reference {
     fn ty(&self) -> value::Type {
         value::Type::String
     }
 }
 
-impl<'a> value::FromValue<'a> for Address {
+impl<'a> value::FromValue<'a> for Reference {
     fn from_value(value: value::Value<'a>) -> Result<Self, value::FromValueError> {
         let str: String = value.cast()?;
         str.parse()
@@ -99,34 +98,29 @@ impl<'a> value::FromValue<'a> for Address {
     }
 }
 
-impl<'a> value::IntoValue<'a> for Address {
+impl<'a> value::IntoValue<'a> for Reference {
     fn into_value(self) -> value::Value<'a> {
         value::Value::String(self.to_string().into())
     }
 }
 
-impl value::ToValue for Address {
+impl value::ToValue for Reference {
     fn to_value(&self) -> value::Value<'_> {
         value::Value::String(self.to_string().into())
     }
 }
 
-impl<'a> TryFrom<value::Value<'a>> for Address {
+impl<'a> TryFrom<value::Value<'a>> for Reference {
     type Error = value::FromValueError;
     fn try_from(value: value::Value<'a>) -> Result<Self, Self::Error> {
         value::FromValue::from_value(value)
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum SslKind {
-    #[default]
-    Simple,
-    Mutual,
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::Address;
+
     use super::*;
     use qi_format::de::BufExt;
 
@@ -138,14 +132,12 @@ mod tests {
             0x3a, 0x2f, 0x2f, 0x31, 0x32, 0x37, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x31, 0x3a, 0x34,
             0x31, 0x36, 0x38, 0x31,
         ][..];
-        let endpoints: Vec<Address> = input.deserialize_value().unwrap();
+        let endpoints: Vec<Reference> = input.deserialize_value().unwrap();
         assert_eq!(
             endpoints,
             [
-                Address::Relative {
-                    service: "Calculator".to_owned()
-                },
-                Address::Node(node::Address::Tcp {
+                Reference::Service("Calculator".to_owned()),
+                Reference::Endpoint(Address::Tcp {
                     host: "127.0.0.1".to_owned(),
                     port: 41681,
                     ssl: None

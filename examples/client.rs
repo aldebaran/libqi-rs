@@ -1,7 +1,7 @@
 use clap::Parser;
 use eyre::Result;
-use qi::{Address, ObjectExt};
-use tracing::{debug_span, info, Instrument};
+use qi::{node::Node, Address, ObjectExt, Space};
+use tracing::info;
 use tracing_subscriber::fmt;
 
 mod audio;
@@ -18,6 +18,17 @@ struct Args {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    // Wait for interruption
+    let interrupt = tokio::spawn(async {
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {}
+            Err(err) => {
+                eprintln!("Unable to listen for shutdown signal: {}", err);
+                // we also shut down in case of error
+            }
+        }
+    });
+
     let args = Args::parse();
 
     // Activate traces to the console.
@@ -35,18 +46,21 @@ async fn main() -> Result<()> {
         .with_thread_names(true)
         .init();
 
-    // Create a node and spawn its task inside the runtime's executor.
-    let (node, task) = qi::node::open();
-    tokio::spawn(task.instrument(debug_span!("node task", address = %args.address)));
+    let node = qi::node::create();
+
+    // You can add services to the node and make them accessible to other nodes of joined spaces.
+    node.add_service("AudioPlayer".to_owned(), audio::Player::new())
+        .await?;
 
     // Connect the node to a space at the given address.
     info!(address = %args.address, "connecting node to space");
     let node = node
-        .connect_to_space(qi::session::Config::default().add_addresses([args.address.clone()]))
+        .attach_space(
+            qi::space::Parameters::builder()
+                .add_address(args.address)
+                .build(),
+        )
         .await?;
-
-    // You can add services to the node and make them accessible to other nodes of joined spaces.
-    // TODO
 
     // You can access remote services and call methods on them.
     info!("getting \"Calculator\" service");
@@ -61,6 +75,8 @@ async fn main() -> Result<()> {
 
     // You can send local objects to remote nodes for them to call methods on.
     // TODO
+
+    let _res = interrupt.await;
 
     Ok(())
 }

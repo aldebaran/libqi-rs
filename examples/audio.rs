@@ -1,58 +1,40 @@
-#[derive(Debug)]
-pub(crate) struct AudioPlayer;
+use async_trait::async_trait;
 
-qi::object! {
-    impl AudioPlayer {
+#[derive(Default, Debug)]
+pub(crate) struct Player;
 
-        fn play_sound(info: SoundInfo) -> Sound {
-            Sound {
-                info: SoundInfo,
-            }
-        }
+impl Player {
+    pub(crate) fn new() -> Self {
+        Self
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct Buffer {
-    data: bytes::Bytes,
-}
-
-qi::object! {
-    impl Buffer {
-        fn seek(&mut self, position: usize) {
-        }
-
-        fn position(&self) -> usize {
-
-        }
-
-        fn read_bytes(&mut self, size: usize) -> Bytes {
-        }
+#[async_trait]
+impl qi::Object for Player {
+    fn meta_object(&self) -> qi::object::MetaObject {
+        todo!()
     }
-}
 
-#[derive(Debug)]
-pub(crate) struct Sound {
-    buffer: Buffer,
-}
-
-qi::object! {
-    impl Sound {
-        fn pause(&mut self) {
-        }
-
-        fn resume(&mut self) {}
-
-        fn is_playing(&self) -> bool {
-        }
-
-        fn info() {
-        }
+    async fn meta_call(
+        &self,
+        address: qi::object::MemberAddress,
+        args: qi::Value<'_>,
+    ) -> Result<qi::Value<'static>, qi::Error> {
+        todo!()
     }
-}
 
-#[derive(Debug, qi::Valuable)]
-pub(crate) struct SoundInfo {
-    name: String,
-    data: Buffer,
+    async fn meta_property(
+        &self,
+        address: qi::object::MemberAddress,
+    ) -> Result<qi::Value<'static>, qi::Error> {
+        todo!()
+    }
+
+    async fn meta_set_property(
+        &self,
+        address: qi::object::MemberAddress,
+        value: qi::Value<'_>,
+    ) -> Result<(), qi::Error> {
+        todo!()
+    }
 }

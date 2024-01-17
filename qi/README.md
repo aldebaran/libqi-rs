@@ -1,4 +1,4 @@
-# qi-services
+# qi
 
 ## Minimum Rust Required Version (MSRV)
 

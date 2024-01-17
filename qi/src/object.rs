@@ -1,17 +1,18 @@
-use crate::{error::Error, session};
+use crate::{error::Error, os, session};
 use async_trait::async_trait;
 use qi_messaging::message;
-use qi_value::{
+pub use qi_value::{
     object::{MemberAddress, MetaObject},
-    ActionId, Dynamic, FromValue, IntoValue, ObjectId, Reflect, ServiceId, Value,
+    ObjectId as Id,
 };
+use qi_value::{ActionId, Dynamic, FromValue, IntoValue, Reflect, ServiceId, Value};
 use sealed::sealed;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use sha1::{Digest, Sha1};
+use std::borrow::Cow;
 
 #[async_trait]
 pub trait Object {
-    async fn meta_object(&self) -> Result<MetaObject, Error>;
+    fn meta_object(&self) -> MetaObject;
 
     async fn meta_call(
         &self,
@@ -26,6 +27,10 @@ pub trait Object {
         address: MemberAddress,
         value: Value<'_>,
     ) -> Result<(), Error>;
+
+    fn uid(&self) -> Uid {
+        Uid::from_ptr(self)
+    }
 }
 
 pub type BoxObject<'a> = Box<dyn Object + Send + Sync + 'a>;
@@ -54,7 +59,6 @@ pub trait ObjectExt: Object + Sync {
     async fn properties(&self) -> Result<Vec<String>, Error> {
         Ok(self
             .meta_object()
-            .await?
             .properties
             .into_iter()
             .map(|(_uid, prop)| prop.name)
@@ -77,53 +81,122 @@ pub trait ObjectExt: Object + Sync {
 #[sealed]
 impl<O> ObjectExt for O where O: Object + Sync + ?Sized {}
 
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct Uid(qi_value::object::ObjectUid);
+
+impl Uid {
+    pub fn from_bytes(bytes: [u8; 20]) -> Self {
+        Self(qi_value::object::ObjectUid::from_bytes(bytes))
+    }
+
+    pub fn from_ptr<T: ?Sized>(ptr: *const T) -> Self {
+        let machine_id = os::MachineId::default();
+        let process_uuid = os::process_uuid();
+        let ptr_addr = ptr.cast::<()>() as usize;
+        let digest = <Sha1 as Digest>::new()
+            .chain_update(machine_id.as_bytes())
+            .chain_update(process_uuid.as_bytes())
+            .chain_update(ptr_addr.to_ne_bytes())
+            .finalize();
+        Self::from_bytes(digest.into())
+    }
+}
+
+impl std::fmt::Display for Uid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl qi_value::Reflect for Uid {
+    fn ty() -> Option<qi_value::Type> {
+        Some(qi_value::Type::String)
+    }
+}
+
+impl qi_value::RuntimeReflect for Uid {
+    fn ty(&self) -> qi_value::Type {
+        qi_value::Type::String
+    }
+}
+
+impl qi_value::ToValue for Uid {
+    fn to_value(&self) -> qi_value::Value<'_> {
+        qi_value::Value::ByteString(Cow::Borrowed(self.0.bytes()))
+    }
+}
+
+impl<'a> qi_value::IntoValue<'a> for Uid {
+    fn into_value(self) -> qi_value::Value<'a> {
+        qi_value::Value::ByteString(Cow::Owned(self.0.bytes().to_vec()))
+    }
+}
+
+impl<'a> qi_value::FromValue<'a> for Uid {
+    fn from_value(value: qi_value::Value<'a>) -> Result<Self, qi_value::FromValueError> {
+        let bytes =
+            value
+                .as_string_bytes()
+                .ok_or_else(|| qi_value::FromValueError::TypeMismatch {
+                    expected: "an Object UID".to_owned(),
+                    actual: value.to_string(),
+                })?;
+        let bytes = <[u8; 20]>::try_from(bytes)
+            .map_err(|err| qi_value::FromValueError::Other(err.into()))?;
+        Ok(Self(qi_value::object::ObjectUid::from_bytes(bytes)))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Client {
     service_id: ServiceId,
-    object_id: ObjectId,
-    meta_object: Arc<Mutex<Option<MetaObject>>>,
+    id: Id,
+    uid: Uid,
+    meta: MetaObject,
     session: session::Client,
 }
 
 impl Client {
     pub(crate) fn new(
         service_id: ServiceId,
-        object_id: ObjectId,
+        id: Id,
+        uid: Uid,
+        meta: MetaObject,
         session: session::Client,
     ) -> Self {
         Self {
             service_id,
-            object_id,
-            meta_object: Arc::new(Mutex::new(None)),
+            id,
+            uid,
             session,
+            meta,
         }
     }
+
+    pub fn id(&self) -> session::Uid {
+        self.session.uid()
+    }
+}
+
+pub(crate) async fn fetch_meta(
+    session: &session::Client,
+    service_id: ServiceId,
+    id: Id,
+) -> Result<MetaObject, Error> {
+    Ok(session
+        .call(
+            message::Address::new(service_id, id, ACTION_ID_METAOBJECT),
+            0.into_value(), // unused
+            MetaObject::signature().into_type(),
+        )
+        .await?
+        .cast()?)
 }
 
 #[async_trait]
 impl Object for Client {
-    async fn meta_object(&self) -> Result<MetaObject, Error> {
-        let meta_object = self.meta_object.lock().await.clone();
-        match meta_object {
-            Some(m) => Ok(m),
-            None => {
-                let meta_object: MetaObject = self
-                    .session
-                    .call(
-                        message::Address::new(
-                            self.service_id,
-                            self.object_id,
-                            ACTION_ID_METAOBJECT,
-                        ),
-                        0.into_value(), // unused
-                        MetaObject::signature().into_type(),
-                    )
-                    .await?
-                    .cast()?;
-                *self.meta_object.lock().await = Some(meta_object.clone());
-                Ok(meta_object)
-            }
-        }
+    fn meta_object(&self) -> MetaObject {
+        self.meta.clone()
     }
 
     async fn meta_call(
@@ -131,16 +204,16 @@ impl Object for Client {
         address: MemberAddress,
         args: Value<'_>,
     ) -> Result<Value<'static>, Error> {
-        let meta_object = self.meta_object().await?;
-        let (&id, meta_method) = meta_object
+        let method = self
+            .meta
             .method(&address)
             .ok_or_else(|| Error::MethodNotFound(address))?;
         Ok(self
             .session
             .call(
-                message::Address::new(self.service_id, self.object_id, id),
+                message::Address::new(self.service_id, self.id, method.uid),
                 args,
-                meta_method.return_signature.to_type().cloned(),
+                method.return_signature.to_type().cloned(),
             )
             .await?)
     }
@@ -156,6 +229,10 @@ impl Object for Client {
     ) -> Result<(), Error> {
         self.call(ACTION_ID_SET_PROPERTY, (Dynamic(address), Dynamic(value)))
             .await
+    }
+
+    fn uid(&self) -> Uid {
+        self.uid
     }
 }
 
@@ -175,7 +252,7 @@ mod tests {
     use crate::Error;
     use assert_matches::assert_matches;
     use async_trait::async_trait;
-    use once_cell::sync::OnceCell;
+    use once_cell::sync::Lazy;
     use qi_value::{
         object::{MetaMethod, MetaObject},
         ActionId, Type, Value,
@@ -238,8 +315,7 @@ mod tests {
 
     impl Meta {
         fn get() -> &'static Self {
-            static META: OnceCell<Meta> = OnceCell::new();
-            META.get_or_init(|| {
+            static META: Lazy<Meta> = Lazy::new(|| {
                 let mut method_id = ActionId(0);
                 let mut builder = MetaObject::builder();
                 let add;
@@ -302,7 +378,8 @@ mod tests {
                     ans,
                 };
                 Meta { object, methods }
-            })
+            });
+            &META
         }
     }
 
@@ -329,18 +406,19 @@ mod tests {
     impl Method {
         fn from_address(address: &MemberAddress) -> Option<Self> {
             let Meta { object, methods } = Meta::get();
-            object.method(address).and_then(|(id, _)| {
-                if id == &methods.add {
+            object.method(address).and_then(|method| {
+                let id = method.uid;
+                if id == methods.add {
                     Some(Method::Add)
-                } else if id == &methods.sub {
+                } else if id == methods.sub {
                     Some(Method::Sub)
-                } else if id == &methods.mul {
+                } else if id == methods.mul {
                     Some(Method::Mul)
-                } else if id == &methods.div {
+                } else if id == methods.div {
                     Some(Method::Div)
-                } else if id == &methods.clamp {
+                } else if id == methods.clamp {
                     Some(Method::Clamp)
-                } else if id == &methods.ans {
+                } else if id == methods.ans {
                     Some(Method::Ans)
                 } else {
                     None
@@ -382,8 +460,8 @@ mod tests {
 
     #[async_trait]
     impl Object for Mutex<Calculator> {
-        async fn meta_object(&self) -> Result<MetaObject, Error> {
-            Ok(Meta::get().object.clone())
+        fn meta_object(&self) -> MetaObject {
+            Meta::get().object.clone()
         }
 
         async fn meta_call(

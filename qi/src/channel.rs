@@ -1,16 +1,35 @@
+use crate::{Address, Error};
 use qi_messaging as messaging;
-use tokio::io::{AsyncRead, AsyncWrite};
+use std::pin::Pin;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
+};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-type MessagesDecode<R> = FramedRead<R, messaging::codec::Decoder>;
-type MessagesEncode<W> = FramedWrite<W, messaging::codec::Encoder>;
+type MessagesDecode = FramedRead<Pin<Box<dyn AsyncRead + Send>>, messaging::codec::Decoder>;
+type MessagesEncode = FramedWrite<Pin<Box<dyn AsyncWrite + Send>>, messaging::codec::Encoder>;
 
-pub(crate) fn open_on_rw<R, W>(read: R, write: W) -> (MessagesDecode<R>, MessagesEncode<W>)
+fn decode_encode_messages<R, W>(read: R, write: W) -> (MessagesDecode, MessagesEncode)
 where
-    R: AsyncRead,
-    W: AsyncWrite,
+    R: AsyncRead + Send + 'static,
+    W: AsyncWrite + Send + 'static,
 {
-    let incoming = MessagesDecode::new(read, messaging::codec::Decoder::new());
-    let outgoing = MessagesEncode::new(write, messaging::codec::Encoder);
+    let incoming = MessagesDecode::new(Box::pin(read), messaging::codec::Decoder::new());
+    let outgoing = MessagesEncode::new(Box::pin(write), messaging::codec::Encoder);
     (incoming, outgoing)
+}
+
+pub(crate) async fn open(address: Address) -> Result<(MessagesDecode, MessagesEncode), Error> {
+    match address {
+        Address::Tcp {
+            host,
+            port,
+            ssl: None,
+        } => {
+            let (read, write) = TcpStream::connect((host, port)).await?.into_split();
+            Ok(decode_encode_messages(read, write))
+        }
+        _ => unimplemented!(),
+    }
 }

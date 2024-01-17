@@ -33,6 +33,9 @@ pub enum Error {
     #[error("signal not found {0}")]
     SignalNotFound(object::MemberAddress),
 
+    #[error("a service with the name \"{0}\" already exists on this node")]
+    ServiceExists(String),
+
     #[error("value conversion error")]
     FromValue(#[from] FromValueError),
 

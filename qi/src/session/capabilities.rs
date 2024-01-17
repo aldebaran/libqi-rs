@@ -1,4 +1,4 @@
-use once_cell::sync::OnceCell;
+use once_cell::sync::Lazy;
 use qi_messaging::CapabilitiesMap;
 use qi_value::{Dynamic, IntoValue};
 
@@ -128,9 +128,9 @@ pub(crate) fn check_required(
     Ok(capabilities)
 }
 
-const LOCAL_CAPABILITIES: Capabilities = Capabilities::new();
-static LOCAL_CAPABILITIES_MAP: OnceCell<CapabilitiesMap> = OnceCell::new();
-
 pub(crate) fn local_map() -> &'static CapabilitiesMap {
-    LOCAL_CAPABILITIES_MAP.get_or_init(|| LOCAL_CAPABILITIES.to_map())
+    const LOCAL_CAPABILITIES: Capabilities = Capabilities::new();
+    static LOCAL_CAPABILITIES_MAP: Lazy<CapabilitiesMap> =
+        Lazy::new(|| LOCAL_CAPABILITIES.to_map());
+    &LOCAL_CAPABILITIES_MAP
 }
