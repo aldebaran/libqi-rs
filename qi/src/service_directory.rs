@@ -52,7 +52,7 @@ impl ServiceDirectory for Client {
             .object
             .meta_call(MemberAddress::Id(Meta::get().services), ().into_value())
             .await?
-            .cast()?)
+            .cast_into()?)
     }
 
     async fn service(&self, name: &str) -> Result<Info, Error> {
@@ -60,7 +60,7 @@ impl ServiceDirectory for Client {
             .object
             .meta_call(MemberAddress::Id(Meta::get().service), name.into_value())
             .await?
-            .cast()?)
+            .cast_into()?)
     }
 
     async fn register_service(&self, info: &Info) -> Result<ServiceId, Error> {
@@ -71,7 +71,7 @@ impl ServiceDirectory for Client {
                 info.into_value(),
             )
             .await?
-            .cast()?)
+            .cast_into()?)
     }
 
     async fn unregister_service(&self, id: ServiceId) -> Result<(), Error> {
@@ -82,7 +82,7 @@ impl ServiceDirectory for Client {
                 id.into_value(),
             )
             .await?
-            .cast()?)
+            .cast_into()?)
     }
 
     async fn service_ready(&self, id: ServiceId) -> Result<(), Error> {
@@ -93,7 +93,7 @@ impl ServiceDirectory for Client {
                 id.into_value(),
             )
             .await?
-            .cast()?)
+            .cast_into()?)
     }
 
     async fn update_service_info(&self, info: &Info) -> Result<(), Error> {
@@ -104,7 +104,7 @@ impl ServiceDirectory for Client {
                 info.into_value(),
             )
             .await?
-            .cast()?)
+            .cast_into()?)
     }
 }
 

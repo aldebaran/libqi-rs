@@ -46,7 +46,7 @@ impl TryFrom<Value<'_>> for () {
     type Error = FromValueError;
 
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
-        value.cast()
+        value.cast_into()
     }
 }
 
@@ -346,7 +346,7 @@ where
 {
     fn from_value(value: Value<'a>) -> Result<Self, FromValueError> {
         match value {
-            Value::Option(o) => o.map(|v| (*v).cast()).transpose(),
+            Value::Option(o) => o.map(|v| (*v).cast_into()).transpose(),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "an optional value".to_owned(),
                 actual: value.ty().to_string(),
@@ -430,7 +430,7 @@ macro_rules! impl_list_value {
         {
             fn from_value(value: Value<'a>) -> Result<Self, FromValueError> {
                 match value {
-                    Value::List(list) => list.into_iter().map(Value::cast).collect(),
+                    Value::List(list) => list.into_iter().map(Value::cast_into).collect(),
                     _ => Err(FromValueError::TypeMismatch {
                         expected: "a list".to_owned(),
                         actual: value.ty().to_string(),
@@ -555,7 +555,9 @@ macro_rules! from_value_map_expr {
         match $value {
             Value::Map(m) => m
                 .into_iter()
-                .map(|(k, v)| -> Result<(K, V), FromValueError> { Ok((k.cast()?, v.cast()?)) })
+                .map(|(k, v)| -> Result<(K, V), FromValueError> {
+                    Ok((k.cast_into()?, v.cast_into()?))
+                })
                 .collect(),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a map".to_owned(),
@@ -692,7 +694,7 @@ macro_rules! impl_array_value {
                                 seq!(I in 0..N {
                                     Ok([
                                         #(
-                                            iter.next().unwrap().cast()?,
+                                            iter.next().unwrap().cast_into()?,
                                         )*
                                     ])
                                 })
@@ -796,7 +798,7 @@ macro_rules! impl_tuple_value {
                             let mut iter = elements.into_iter();
                             Ok((
                                 #(
-                                    iter.next().unwrap().cast()?,
+                                    iter.next().unwrap().cast_into()?,
                                 )*
                             ))
                         }
@@ -939,7 +941,7 @@ where
     T: FromValue<'a>,
 {
     fn from_value(value: Value<'a>) -> Result<Self, FromValueError> {
-        Ok(Box::new(value.cast()?))
+        Ok(Box::new(value.cast_into()?))
     }
 }
 
@@ -983,7 +985,7 @@ where
     &'short T: FromValue<'long>,
 {
     fn from_value(value: Value<'long>) -> Result<Self, FromValueError> {
-        Ok(Cow::Borrowed(value.cast()?))
+        Ok(Cow::Borrowed(value.cast_into()?))
     }
 }
 
@@ -1031,7 +1033,7 @@ where
     T: FromValue<'a>,
 {
     fn from_value(value: Value<'a>) -> Result<Self, FromValueError> {
-        Ok(Rc::new(value.cast()?))
+        Ok(Rc::new(value.cast_into()?))
     }
 }
 
@@ -1070,7 +1072,7 @@ where
     T: FromValue<'a>,
 {
     fn from_value(value: Value<'a>) -> Result<Self, FromValueError> {
-        Ok(Arc::new(value.cast()?))
+        Ok(Arc::new(value.cast_into()?))
     }
 }
 

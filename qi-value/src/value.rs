@@ -33,7 +33,7 @@ pub enum Value<'a> {
 }
 
 impl<'a> Value<'a> {
-    pub fn cast<T>(self) -> Result<T, FromValueError>
+    pub fn cast_into<T>(self) -> Result<T, FromValueError>
     where
         T: FromValue<'a>,
     {

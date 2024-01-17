@@ -27,12 +27,12 @@ impl Authenticator for UserTokenAuthenticator {
         let user: &str = parameters
             .remove(USER_KEY)
             .ok_or_else(|| Error::UserValue("missing".to_owned()))?
-            .cast()
+            .cast_into()
             .map_err(|err| Error::UserValue(err.to_string()))?;
         let token: &str = parameters
             .remove(TOKEN_KEY)
             .ok_or_else(|| Error::TokenValue("missing".to_owned()))?
-            .cast()
+            .cast_into()
             .map_err(|err| Error::TokenValue(err.to_string()))?;
         (user == self.user && token == self.token)
             .then_some(())

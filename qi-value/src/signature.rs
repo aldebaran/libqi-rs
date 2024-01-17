@@ -82,7 +82,7 @@ impl TryFrom<Value<'_>> for Signature {
     type Error = FromValueError;
 
     fn try_from(value: Value<'_>) -> Result<Self, Self::Error> {
-        value.cast()
+        value.cast_into()
     }
 }
 

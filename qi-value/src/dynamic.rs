@@ -125,7 +125,7 @@ where
         de::DynamicVisitor::new(),
     )?;
     value
-        .cast()
+        .cast_into()
         .map_err(|err| D::Error::custom(err.to_string()))
 }
 

@@ -43,7 +43,7 @@ pub trait ObjectExt: Object + Sync {
         A: Into<MemberAddress> + Send,
         R: Reflect + FromValue<'r>,
     {
-        Ok(self.meta_property(address.into()).await?.cast()?)
+        Ok(self.meta_property(address.into()).await?.cast_into()?)
     }
 
     async fn set_property<'t, A, T>(&self, address: A, value: T) -> Result<(), Error>
@@ -74,7 +74,7 @@ pub trait ObjectExt: Object + Sync {
         Ok(self
             .meta_call(address.into(), args.into_value())
             .await?
-            .cast()?)
+            .cast_into()?)
     }
 }
 
@@ -190,7 +190,7 @@ pub(crate) async fn fetch_meta(
             MetaObject::signature().into_type(),
         )
         .await?
-        .cast()?)
+        .cast_into()?)
 }
 
 #[async_trait]
@@ -429,29 +429,29 @@ mod tests {
         fn call(self, calc: &mut Calculator, args: Value<'_>) -> Result<Value<'static>, Error> {
             Ok(match &self {
                 Self::Add => {
-                    let arg = args.cast()?;
+                    let arg = args.cast_into()?;
                     calc.add(arg).into_value()
                 }
                 Self::Sub => {
-                    let arg = args.cast()?;
+                    let arg = args.cast_into()?;
                     calc.sub(arg).into_value()
                 }
                 Self::Mul => {
-                    let arg = args.cast()?;
+                    let arg = args.cast_into()?;
                     calc.mul(arg).into_value()
                 }
                 Self::Div => {
-                    let arg = args.cast()?;
+                    let arg = args.cast_into()?;
                     calc.div(arg)
                         .map_err(|err| Error::Other(err.into()))?
                         .into_value()
                 }
                 Self::Clamp => {
-                    let (arg1, arg2) = args.cast()?;
+                    let (arg1, arg2) = args.cast_into()?;
                     calc.clamp(arg1, arg2).into_value()
                 }
                 Self::Ans => {
-                    args.cast()?;
+                    args.cast_into()?;
                     calc.ans().into_value()
                 }
             })

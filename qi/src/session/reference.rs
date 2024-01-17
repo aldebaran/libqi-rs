@@ -92,7 +92,7 @@ impl value::RuntimeReflect for Reference {
 
 impl<'a> value::FromValue<'a> for Reference {
     fn from_value(value: value::Value<'a>) -> Result<Self, value::FromValueError> {
-        let str: String = value.cast()?;
+        let str: String = value.cast_into()?;
         str.parse()
             .map_err(|err: Error| value::FromValueError::Other(err.into()))
     }

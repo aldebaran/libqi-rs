@@ -30,22 +30,22 @@ impl Capabilities {
             client_server_socket: map
                 .get(Self::CLIENT_SERVER_SOCKET)
                 .cloned()
-                .and_then(|Dynamic(v)| v.cast().ok())
+                .and_then(|Dynamic(v)| v.cast_into().ok())
                 .unwrap_or(false),
             remote_cancelable_calls: map
                 .get(Self::REMOTE_CANCELABLE_CALLS)
                 .cloned()
-                .and_then(|Dynamic(v)| v.cast().ok())
+                .and_then(|Dynamic(v)| v.cast_into().ok())
                 .unwrap_or(false),
             object_ptr_uid: map
                 .get(Self::OBJECT_PTR_UID)
                 .cloned()
-                .and_then(|Dynamic(v)| v.cast().ok())
+                .and_then(|Dynamic(v)| v.cast_into().ok())
                 .unwrap_or(false),
             relative_endpoint_uri: map
                 .get(Self::RELATIVE_ENDPOINT_URI)
                 .cloned()
-                .and_then(|Dynamic(v)| v.cast().ok())
+                .and_then(|Dynamic(v)| v.cast_into().ok())
                 .unwrap_or(false),
         }
     }

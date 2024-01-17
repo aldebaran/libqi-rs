@@ -51,7 +51,7 @@ where
         T: value::Reflect + value::FromValue<'static>,
     {
         let value = self.deserialize_value_of_type(T::ty().as_ref())?;
-        Ok(value.cast()?)
+        Ok(value.cast_into()?)
     }
 }
 
