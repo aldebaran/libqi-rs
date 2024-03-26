@@ -1,5 +1,3 @@
-use qi_format as format;
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("client is disconnected")]
@@ -7,12 +5,6 @@ pub enum Error {
 
     #[error("canceled")]
     Canceled,
-
-    #[error("{0}")]
-    Message(String),
-
-    #[error("format error")]
-    Format(#[from] format::Error),
 
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
@@ -33,8 +25,22 @@ impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error {
     }
 }
 
+impl<T> From<tokio_util::sync::PollSendError<T>> for Error {
+    fn from(_err: tokio_util::sync::PollSendError<T>) -> Self {
+        Self::Disconnected
+    }
+}
+
 impl From<tokio::sync::oneshot::error::RecvError> for Error {
     fn from(_err: tokio::sync::oneshot::error::RecvError) -> Self {
         Self::Disconnected
+    }
+}
+
+impl std::str::FromStr for Error {
+    type Err = std::convert::Infallible;
+
+    fn from_str(error: &str) -> Result<Self, Self::Err> {
+        Ok(Self::Other(error.into()))
     }
 }

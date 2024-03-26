@@ -4,7 +4,7 @@ use proc_macro2::TokenStream;
 pub(crate) struct Object;
 
 impl syn::parse::Parse for Object {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+    fn parse(_input: syn::parse::ParseStream) -> syn::Result<Self> {
         todo!()
     }
 }

@@ -1,5 +1,4 @@
-use bytes::Bytes;
-use qi_format as format;
+use crate::{body::BodyBuf, CapabilitiesMap};
 use qi_value::Dynamic;
 pub use qi_value::{ActionId as Action, ObjectId as Object, ServiceId as Service};
 
@@ -20,12 +19,10 @@ pub use qi_value::{ActionId as Action, ObjectId as Object, ServiceId as Service}
     serde::Deserialize,
 )]
 #[serde(transparent)]
-pub struct Id(pub(crate) u32);
+pub struct Id(pub u32);
 
 impl Id {
-    pub const fn new(value: u32) -> Self {
-        Self(value)
-    }
+    pub const DEFAULT: Self = Self(0);
 }
 
 #[derive(
@@ -41,23 +38,20 @@ impl Id {
     serde::Serialize,
     serde::Deserialize,
 )]
-pub struct Version(pub(crate) u16);
+pub struct Version(pub u16);
 
 impl Version {
-    const CURRENT: Self = Self(0);
-
-    pub const fn current() -> Self {
-        Self::CURRENT
-    }
+    pub const ZERO: Self = Self(0);
 }
 
 impl Default for Version {
     fn default() -> Self {
-        Self::CURRENT
+        Self::ZERO
     }
 }
 
 #[derive(
+    Default,
     Clone,
     Copy,
     PartialEq,
@@ -71,6 +65,7 @@ impl Default for Version {
     serde::Deserialize,
 )]
 pub enum Type {
+    #[default]
     #[display(fmt = "call")]
     Call,
     #[display(fmt = "reply")]
@@ -89,10 +84,8 @@ pub enum Type {
     Canceled,
 }
 
-impl Default for Type {
-    fn default() -> Self {
-        Self::Call
-    }
+impl Type {
+    pub const DEFAULT: Self = Self::Call;
 }
 
 #[derive(
@@ -109,260 +102,250 @@ impl Default for Type {
     serde::Serialize,
     serde::Deserialize,
 )]
-#[display(fmt = "({service}, {object}, {action})")]
-pub struct Address {
-    pub(crate) service: Service,
-    pub(crate) object: Object,
-    pub(crate) action: Action,
-}
+#[display(fmt = "{{{_0}.{_1}.{_2}}}")]
+pub struct Address(pub Service, pub Object, pub Action);
 
 impl Address {
-    pub const fn new(service: Service, object: Object, action: Action) -> Self {
-        Self {
-            service,
-            object,
-            action,
-        }
-    }
+    pub const DEFAULT: Self = Self(Service::DEFAULT, Object::DEFAULT, Action::DEFAULT);
 
     pub const fn service(&self) -> Service {
-        self.service
+        self.0
+    }
+
+    pub const fn with_service(&self, service: Service) -> Self {
+        Self(service, self.1, self.2)
     }
 
     pub const fn object(&self) -> Object {
-        self.object
+        self.1
+    }
+
+    pub const fn with_object(&self, object: Object) -> Self {
+        Self(self.0, object, self.2)
     }
 
     pub const fn action(&self) -> Action {
-        self.action
+        self.2
+    }
+
+    pub const fn with_action(&self, action: Action) -> Self {
+        Self(self.0, self.1, action)
     }
 }
 
-#[derive(
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Debug,
-    Hash,
-    derive_more::Display,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[display(fmt = "header(id={id}, {ty}, version={version}, address={address})")]
-pub struct Header {
-    pub(crate) id: Id,
-    pub(crate) ty: Type,
-    pub(crate) body_size: usize,
-    pub(crate) version: Version,
-    pub(crate) address: Address,
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
+pub enum Message<T> {
+    Call {
+        id: Id,
+        address: Address,
+        value: T,
+    },
+    Reply {
+        id: Id,
+        address: Address,
+        value: T,
+    },
+    Error {
+        id: Id,
+        address: Address,
+        error: Dynamic<String>,
+    },
+    Post {
+        id: Id,
+        address: Address,
+        value: T,
+    },
+    Event {
+        id: Id,
+        address: Address,
+        value: T,
+    },
+    Capabilities {
+        id: Id,
+        address: Address,
+        capabilities: CapabilitiesMap,
+    },
+    Cancel {
+        id: Id,
+        address: Address,
+        call_id: Id,
+    },
+    Canceled {
+        id: Id,
+        address: Address,
+    },
 }
 
-#[derive(
-    Default,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Debug,
-    Hash,
-    derive_more::Display,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[display(
-    fmt = "message({ty}, id={id}, address={address}, body=[len={}])",
-    "body.len()"
-)]
-pub struct Message {
-    pub(crate) id: Id,
-    pub(crate) ty: Type,
-    pub(crate) version: Version,
-    pub(crate) address: Address,
-    pub(crate) body: Bytes,
-}
-
-impl Message {
-    pub fn new(header: Header, body: Bytes) -> Self {
-        Self {
-            id: header.id,
-            ty: header.ty,
-            version: header.version,
-            address: header.address,
-            body,
-        }
-    }
-
-    /// Builds a "call" message.
-    ///
-    /// This sets the ty, the id and the address of the message.
-    pub fn call(id: Id, address: Address) -> Builder {
-        Builder::new()
-            .set_id(id)
-            .set_ty(Type::Call)
-            .set_address(address)
-    }
-
-    /// Builds a "reply" message.
-    ///
-    /// This sets the ty, the id and the address of the message.
-    pub fn reply(id: Id, address: Address) -> Builder {
-        Builder::new()
-            .set_id(id)
-            .set_ty(Type::Reply)
-            .set_address(address)
-    }
-
-    /// Builds a "error" message.
-    ///
-    /// This sets the ty, the id, the address and the body of the message.
-    pub fn error(id: Id, address: Address, description: &str) -> Result<Builder, format::Error> {
-        Builder::new()
-            .set_id(id)
-            .set_ty(Type::Error)
-            .set_address(address)
-            .set_error_description(description)
-    }
-
-    /// Builds a "post" message.
-    ///
-    /// This sets the ty, the id and the address of the message.
-    pub fn post(id: Id, address: Address) -> Builder {
-        Builder::new()
-            .set_id(id)
-            .set_ty(Type::Post)
-            .set_address(address)
-    }
-
-    /// Builds a "event" message.
-    ///
-    /// This sets the ty, the id and the address of the message.
-    pub fn event(id: Id, address: Address) -> Builder {
-        Builder::new()
-            .set_id(id)
-            .set_ty(Type::Event)
-            .set_address(address)
-    }
-
-    /// Builds a "cancel" message.
-    ///
-    /// This sets the ty, the id, the address and the body of the message.
-    pub fn cancel(id: Id, address: Address, call_id: Id) -> Builder {
-        Builder::new()
-            .set_id(id)
-            .set_ty(Type::Cancel)
-            .set_address(address)
-            .set_value(&call_id)
-            .expect("failed to serialize a message ID in the format")
-    }
-
-    /// Builds a "canceled" message.
-    ///
-    /// This sets the ty, the id and the address of the message.
-    pub fn canceled(id: Id, address: Address) -> Builder {
-        Builder::new()
-            .set_id(id)
-            .set_address(address)
-            .set_ty(Type::Canceled)
-    }
-
-    pub fn id(&self) -> Id {
-        self.id
-    }
-
-    pub fn ty(&self) -> Type {
-        self.ty
-    }
-
-    pub fn body_size(&self) -> usize {
-        self.body.len()
-    }
-
-    pub fn address(&self) -> Address {
-        self.address
-    }
-
-    pub fn header(&self) -> Header {
-        Header {
-            id: self.id,
-            ty: self.ty,
-            version: self.version,
-            body_size: self.body_size(),
-            address: self.address,
-        }
-    }
-
-    pub fn body(&self) -> &Bytes {
-        &self.body
-    }
-
-    pub fn deserialize_body<'s: 'de, 'de, T>(&'s self) -> Result<T, format::Error>
-    where
-        T: serde::de::Deserialize<'de>,
-    {
-        format::from_buf(&*self.body)
-    }
-
-    pub fn deserialize_error_description(&self) -> Result<String, format::Error> {
-        let Dynamic(description) = self.deserialize_body()?;
-        Ok(description)
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct Builder(Message);
-
-impl Default for Builder {
+impl<T> Default for Message<T>
+where
+    T: Default,
+{
     fn default() -> Self {
-        Self::new()
+        Self::Call {
+            id: Id::DEFAULT,
+            address: Address::DEFAULT,
+            value: T::default(),
+        }
     }
 }
 
-impl Builder {
-    pub(crate) fn new() -> Self {
-        Self(Message::default())
+impl<T: BodyBuf> Message<T> {
+    pub(crate) fn into_parts(self) -> Result<(MetaData, T), T::Error> {
+        match self {
+            Message::Call { id, address, value } => Ok((
+                MetaData {
+                    id,
+                    address,
+                    ty: Type::Call,
+                },
+                value,
+            )),
+            Message::Reply { id, address, value } => Ok((
+                MetaData {
+                    id,
+                    address,
+                    ty: Type::Reply,
+                },
+                value,
+            )),
+            Message::Error { id, address, error } => Ok((
+                MetaData {
+                    id,
+                    address,
+                    ty: Type::Error,
+                },
+                T::serialize(&error)?,
+            )),
+            Message::Post { id, address, value } => Ok((
+                MetaData {
+                    id,
+                    address,
+                    ty: Type::Post,
+                },
+                value,
+            )),
+            Message::Event { id, address, value } => Ok((
+                MetaData {
+                    id,
+                    address,
+                    ty: Type::Event,
+                },
+                value,
+            )),
+            Message::Capabilities {
+                id,
+                address,
+                capabilities,
+            } => Ok((
+                MetaData {
+                    id,
+                    address,
+                    ty: Type::Capabilities,
+                },
+                T::serialize(&capabilities)?,
+            )),
+            Message::Cancel {
+                id,
+                address,
+                call_id,
+            } => Ok((
+                MetaData {
+                    id,
+                    address,
+                    ty: Type::Cancel,
+                },
+                T::serialize(&call_id)?,
+            )),
+            Message::Canceled { id, address } => Ok((
+                MetaData {
+                    id,
+                    address,
+                    ty: Type::Canceled,
+                },
+                T::serialize(&())?,
+            )),
+        }
     }
 
-    fn set_id(mut self, value: Id) -> Self {
-        self.0.id = value;
-        self
+    pub(crate) fn from_parts(meta: MetaData, body: T) -> Result<Self, T::Error> {
+        let MetaData { id, address, ty } = meta;
+        let msg = match ty {
+            Type::Call => Self::Call {
+                id,
+                address,
+                value: body,
+            },
+            Type::Reply => Self::Reply {
+                id,
+                address,
+                value: body,
+            },
+            Type::Error => Self::Error {
+                id,
+                address,
+                error: body.deserialize()?,
+            },
+            Type::Post => Self::Post {
+                id,
+                address,
+                value: body,
+            },
+            Type::Event => Self::Event {
+                id,
+                address,
+                value: body,
+            },
+            Type::Capabilities => Self::Capabilities {
+                id,
+                address,
+                capabilities: body.deserialize()?,
+            },
+            Type::Cancel => Self::Cancel {
+                id,
+                address,
+                call_id: body.deserialize()?,
+            },
+            Type::Canceled => Self::Canceled { id, address },
+        };
+        Ok(msg)
     }
+}
 
-    fn set_ty(mut self, value: Type) -> Self {
-        self.0.ty = value;
-        self
-    }
+#[derive(
+    Default,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    Hash,
+    derive_more::Display,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[display(fmt = "{id}:{ty}@{address}")]
+pub struct MetaData {
+    pub(crate) id: Id,
+    pub(crate) address: Address,
+    pub(crate) ty: Type,
+}
 
-    fn set_address(mut self, value: Address) -> Self {
-        self.0.address = value;
-        self
-    }
+#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+pub enum OnewayRequest<T> {
+    Post(T),
+    Event(T),
+    Capabilities(CapabilitiesMap),
+    Cancel(Id),
+}
 
-    pub fn set_body(mut self, body: Bytes) -> Self {
-        self.0.body = body;
-        self
-    }
-
-    /// Sets the serialized representation of the value in the format as the body of the message.
-    /// It checks if the "dynamic payload" flag is set on the message to know how to serialize the value.
-    /// If the flag is set after calling this value, the value will not be serialized coherently with the flag.
-    pub fn set_value<T>(mut self, value: &T) -> Result<Self, format::Error>
-    where
-        T: serde::Serialize,
-    {
-        self.0.body = format::to_bytes(value)?;
-        Ok(self)
-    }
-
-    pub fn set_error_description(self, description: &str) -> Result<Self, format::Error> {
-        self.set_value(&Dynamic(description))
-    }
-
-    pub fn build(self) -> Message {
-        self.0
-    }
+#[derive(
+    Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub(crate) enum Response<T> {
+    Reply(T),
+    Error(String),
+    Canceled,
 }

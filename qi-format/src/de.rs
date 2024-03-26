@@ -10,8 +10,6 @@
 /// Identifiers are deserialized as unit values.
 use crate::{read, Error, Result};
 use bytes::Buf;
-use qi_value as value;
-use sealed::sealed;
 use serde::de::IntoDeserializer;
 
 pub fn from_buf<'de, B, T>(mut buf: B) -> Result<T>
@@ -20,39 +18,6 @@ where
     B: Buf,
 {
     T::deserialize(Deserializer::from_buf(&mut buf))
-}
-
-#[sealed]
-pub trait BufExt: Buf {
-    fn deserialize_value_of_type(
-        &mut self,
-        value_type: Option<&value::Type>,
-    ) -> Result<value::Value<'static>>;
-
-    fn deserialize_value<T>(&mut self) -> Result<T>
-    where
-        T: value::Reflect + value::FromValue<'static>;
-}
-
-#[sealed]
-impl<B> BufExt for B
-where
-    B: Buf,
-{
-    fn deserialize_value_of_type(
-        &mut self,
-        value_type: Option<&value::Type>,
-    ) -> Result<value::Value<'static>> {
-        value::deserialize_value_of_type(Deserializer::from_buf(self), value_type)
-    }
-
-    fn deserialize_value<T>(&mut self) -> Result<T>
-    where
-        T: value::Reflect + value::FromValue<'static>,
-    {
-        let value = self.deserialize_value_of_type(T::ty().as_ref())?;
-        Ok(value.cast_into()?)
-    }
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]

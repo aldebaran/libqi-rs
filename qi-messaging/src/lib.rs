@@ -1,6 +1,5 @@
 #![deny(unreachable_pub, unsafe_code)]
 // TODO: #![deny(missing_docs)]
-#![warn(unused_crate_dependencies)]
 #![warn(
     clippy::all,
     clippy::clone_on_ref_ptr,
@@ -42,19 +41,21 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-mod capabilities;
+pub mod binary_codec;
+pub mod body;
+pub mod capabilities;
 mod client;
-pub mod codec;
-mod endpoint;
+pub mod endpoint;
 mod error;
+mod id_factory;
 pub mod message;
-mod service;
+mod server;
 
-pub use {
-    capabilities::{CapabilitiesMap, CapabilitiesMapExt},
-    client::{Call, Client, Event, Post, WeakClient},
+pub use self::{
+    body::BodyBuf,
+    capabilities::CapabilitiesMap,
+    client::{CallFuture, Client, WeakClient},
     endpoint::endpoint,
     error::Error,
     message::Message,
-    service::Service,
 };

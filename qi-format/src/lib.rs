@@ -18,9 +18,6 @@ pub mod de;
 #[doc(inline)]
 pub use de::{from_buf, Deserializer};
 
-#[cfg(test)]
-mod tests;
-
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("short read")]
@@ -43,9 +40,6 @@ pub enum Error {
 
     #[error("string data is not valid UTF-8")]
     InvalidStringUtf8(#[from] std::str::Utf8Error),
-
-    #[error("value conversion error")]
-    FromValue(#[from] qi_value::FromValueError),
 
     #[error("{0}")]
     Custom(std::string::String),

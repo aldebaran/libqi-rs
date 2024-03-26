@@ -6,7 +6,6 @@
 /// - `u128`
 use crate::{write::*, Error, Result};
 use bytes::{Bytes, BytesMut};
-use sealed::sealed;
 
 pub fn to_bytes<T>(value: &T) -> Result<Bytes>
 where
@@ -18,36 +17,17 @@ where
     Ok(bytes.freeze())
 }
 
-#[sealed]
-pub trait IntoValueExt {
-    fn serialize_value(self) -> Result<Bytes>;
-    fn serialize_dynamic_value(self) -> Result<Bytes>;
-}
-
-#[sealed]
-impl<'a, T> IntoValueExt for T
-where
-    T: qi_value::IntoValue<'a>,
-{
-    fn serialize_value(self) -> Result<Bytes> {
-        to_bytes(&self.into_value())
-    }
-    fn serialize_dynamic_value(self) -> Result<Bytes> {
-        to_bytes(&self.into_value().into_dynamic())
-    }
-}
-
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Serializer<'a, B> {
-    bytes: &'a mut B,
+    buf: &'a mut B,
 }
 
 impl<'a, B> Serializer<'a, B>
 where
     B: bytes::BufMut,
 {
-    pub fn to_buf(bytes: &'a mut B) -> Self {
-        Self { bytes }
+    pub fn to_buf(buf: &'a mut B) -> Self {
+        Self { buf }
     }
 }
 
@@ -67,69 +47,69 @@ where
     type SerializeStructVariant = SeqSerializer<'a, B>;
 
     fn serialize_bool(self, v: bool) -> Result<Self::Ok> {
-        write_bool(self.bytes, v);
-        Ok(self.bytes)
+        write_bool(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_i8(self, v: i8) -> Result<Self::Ok> {
-        write_i8(self.bytes, v);
-        Ok(self.bytes)
+        write_i8(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_u8(self, v: u8) -> Result<Self::Ok> {
-        write_u8(self.bytes, v);
-        Ok(self.bytes)
+        write_u8(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_i16(self, v: i16) -> Result<Self::Ok> {
-        write_i16(self.bytes, v);
-        Ok(self.bytes)
+        write_i16(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_u16(self, v: u16) -> Result<Self::Ok> {
-        write_u16(self.bytes, v);
-        Ok(self.bytes)
+        write_u16(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_i32(self, v: i32) -> Result<Self::Ok> {
-        write_i32(self.bytes, v);
-        Ok(self.bytes)
+        write_i32(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_u32(self, v: u32) -> Result<Self::Ok> {
-        write_u32(self.bytes, v);
-        Ok(self.bytes)
+        write_u32(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_i64(self, v: i64) -> Result<Self::Ok> {
-        write_i64(self.bytes, v);
-        Ok(self.bytes)
+        write_i64(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok> {
-        write_u64(self.bytes, v);
-        Ok(self.bytes)
+        write_u64(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_f32(self, v: f32) -> Result<Self::Ok> {
-        write_f32(self.bytes, v);
-        Ok(self.bytes)
+        write_f32(self.buf, v);
+        Ok(self.buf)
     }
 
     fn serialize_f64(self, v: f64) -> Result<Self::Ok> {
-        write_f64(self.bytes, v);
-        Ok(self.bytes)
+        write_f64(self.buf, v);
+        Ok(self.buf)
     }
 
     // bytes -> raw
     fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok> {
-        write_raw(self.bytes, v)?;
-        Ok(self.bytes)
+        write_raw(self.buf, v)?;
+        Ok(self.buf)
     }
 
     fn serialize_str(self, v: &str) -> Result<Self::Ok> {
-        write_str(self.bytes, v)?;
-        Ok(self.bytes)
+        write_str(self.buf, v)?;
+        Ok(self.buf)
     }
 
     // equivalence: char -> str
@@ -139,8 +119,8 @@ where
 
     // option -> optional
     fn serialize_none(self) -> Result<Self::Ok> {
-        write_bool(self.bytes, false);
-        Ok(self.bytes)
+        write_bool(self.buf, false);
+        Ok(self.buf)
     }
 
     // option -> optional
@@ -148,21 +128,21 @@ where
     where
         T: serde::Serialize,
     {
-        write_bool(self.bytes, true);
+        write_bool(self.buf, true);
         value.serialize(self)
     }
 
     // sequence -> list
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
         let size = len.ok_or(Error::UnspecifiedListMapSize)?;
-        write_size(self.bytes, size)?;
-        Ok(SeqSerializer::new(self.bytes, size))
+        write_size(self.buf, size)?;
+        Ok(SeqSerializer::new(self.buf, size))
     }
 
     // unit -> unit
     fn serialize_unit(self) -> Result<Self::Ok> {
         // nothing
-        Ok(self.bytes)
+        Ok(self.buf)
     }
 
     // equivalence: unit_struct -> unit
@@ -172,7 +152,7 @@ where
 
     // tuple -> tuple
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple> {
-        Ok(SeqSerializer::new(self.bytes, len))
+        Ok(SeqSerializer::new(self.buf, len))
     }
 
     // equivalence: tuple_struct(T...) -> tuple(T...)
@@ -213,7 +193,7 @@ where
         _variant: &'static str,
         len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        write_u32(self.bytes, variant_index);
+        write_u32(self.buf, variant_index);
         self.serialize_tuple(len)
     }
 
