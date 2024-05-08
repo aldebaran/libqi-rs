@@ -1,4 +1,8 @@
-use crate::{error::Error, os, session};
+use crate::{
+    error::Error,
+    os,
+    session::{self, Session},
+};
 use async_trait::async_trait;
 use qi_messaging::message;
 pub use qi_value::{
@@ -8,25 +12,27 @@ pub use qi_value::{
 use qi_value::{ActionId, Dynamic, FromValue, IntoValue, Reflect, ServiceId, Value};
 use sealed::sealed;
 use sha1::{Digest, Sha1};
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
+
+// const ACTION_ID_REGISTER_EVENT: ActionId = ActionId(0);
+// const ACTION_ID_UNREGISTER_EVENT: ActionId = ActionId(1);
+const ACTION_ID_METAOBJECT: ActionId = ActionId(2);
+// const ACTION_ID_TERMINATE: ActionId = ActionId(3);
+const ACTION_ID_PROPERTY: ActionId = ActionId(5); // not a typo, there is no action 4
+const ACTION_ID_SET_PROPERTY: ActionId = ActionId(6);
+// const ACTION_ID_PROPERTIES: ActionId = ActionId(7);
+// const ACTION_ID_REGISTER_EVENT_WITH_SIGNATURE: ActionId = ActionId(8);
+pub const ACTION_START_ID: ActionId = ActionId(100);
 
 #[async_trait]
 pub trait Object {
-    fn meta_object(&self) -> MetaObject;
+    fn meta(&self) -> MetaObject;
 
     async fn meta_call(
         &self,
         address: MemberAddress,
         args: Value<'_>,
     ) -> Result<Value<'static>, Error>;
-
-    async fn meta_property(&self, address: MemberAddress) -> Result<Value<'static>, Error>;
-
-    async fn meta_set_property(
-        &self,
-        address: MemberAddress,
-        value: Value<'_>,
-    ) -> Result<(), Error>;
 
     fn uid(&self) -> Uid {
         Uid::from_ptr(self)
@@ -38,33 +44,6 @@ pub type BoxObject<'a> = Box<dyn Object + Send + Sync + 'a>;
 #[sealed]
 #[async_trait]
 pub trait ObjectExt: Object + Sync {
-    async fn property<'r, A, R>(&self, address: A) -> Result<R, Error>
-    where
-        A: Into<MemberAddress> + Send,
-        R: Reflect + FromValue<'r>,
-    {
-        Ok(self.meta_property(address.into()).await?.cast_into()?)
-    }
-
-    async fn set_property<'t, A, T>(&self, address: A, value: T) -> Result<(), Error>
-    where
-        A: Into<MemberAddress> + Send,
-        T: IntoValue<'t> + Send,
-    {
-        Ok(self
-            .meta_set_property(address.into(), value.into_value())
-            .await?)
-    }
-
-    async fn properties(&self) -> Result<Vec<String>, Error> {
-        Ok(self
-            .meta_object()
-            .properties
-            .into_iter()
-            .map(|(_uid, prop)| prop.name)
-            .collect())
-    }
-
     async fn call<'t, 'r, R, A, T>(&self, address: A, args: T) -> Result<R, Error>
     where
         A: Into<MemberAddress> + Send,
@@ -75,6 +54,35 @@ pub trait ObjectExt: Object + Sync {
             .meta_call(address.into(), args.into_value())
             .await?
             .cast_into()?)
+    }
+
+    async fn property<'r, A, R>(&self, address: A) -> Result<R, Error>
+    where
+        A: Into<MemberAddress> + Send,
+        R: Reflect + FromValue<'r>,
+    {
+        self.call(ACTION_ID_PROPERTY, Dynamic(address.into())).await
+    }
+
+    async fn set_property<'t, A, T>(&self, address: A, value: T) -> Result<(), Error>
+    where
+        A: Into<MemberAddress> + Send,
+        T: IntoValue<'t> + Send,
+    {
+        self.call(
+            ACTION_ID_SET_PROPERTY,
+            (Dynamic(address.into()), Dynamic(value)),
+        )
+        .await
+    }
+
+    async fn properties(&self) -> Result<Vec<String>, Error> {
+        Ok(self
+            .meta()
+            .properties
+            .into_iter()
+            .map(|(_uid, prop)| prop.name)
+            .collect())
     }
 }
 
@@ -153,7 +161,7 @@ pub struct Client {
     id: Id,
     uid: Uid,
     meta: MetaObject,
-    session: session::Client,
+    session: Arc<Session>,
 }
 
 impl Client {
@@ -162,7 +170,7 @@ impl Client {
         id: Id,
         uid: Uid,
         meta: MetaObject,
-        session: session::Client,
+        session: Arc<Session>,
     ) -> Self {
         Self {
             service_id,
@@ -179,7 +187,7 @@ impl Client {
 }
 
 pub(crate) async fn fetch_meta(
-    session: &session::Client,
+    session: &Session,
     service_id: ServiceId,
     id: Id,
 ) -> Result<MetaObject, Error> {
@@ -195,7 +203,7 @@ pub(crate) async fn fetch_meta(
 
 #[async_trait]
 impl Object for Client {
-    fn meta_object(&self) -> MetaObject {
+    fn meta(&self) -> MetaObject {
         self.meta.clone()
     }
 
@@ -218,34 +226,10 @@ impl Object for Client {
             .await?)
     }
 
-    async fn meta_property(&self, address: MemberAddress) -> Result<Value<'static>, Error> {
-        self.call(ACTION_ID_PROPERTY, Dynamic(address)).await
-    }
-
-    async fn meta_set_property(
-        &self,
-        address: MemberAddress,
-        value: Value<'_>,
-    ) -> Result<(), Error> {
-        self.call(ACTION_ID_SET_PROPERTY, (Dynamic(address), Dynamic(value)))
-            .await
-    }
-
     fn uid(&self) -> Uid {
         self.uid
     }
 }
-
-// const ACTION_ID_REGISTER_EVENT: ActionId = ActionId(0);
-// const ACTION_ID_UNREGISTER_EVENT: ActionId = ActionId(1);
-const ACTION_ID_METAOBJECT: ActionId = ActionId(2);
-// const ACTION_ID_TERMINATE: ActionId = ActionId(3);
-const ACTION_ID_PROPERTY: ActionId = ActionId(5); // not a typo, there is no action 4
-const ACTION_ID_SET_PROPERTY: ActionId = ActionId(6);
-// const ACTION_ID_PROPERTIES: ActionId = ActionId(7);
-// const ACTION_ID_REGISTER_EVENT_WITH_SIGNATURE: ActionId = ActionId(8);
-pub const ACTION_START_ID: ActionId = ActionId(100);
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,7 +444,7 @@ mod tests {
 
     #[async_trait]
     impl Object for Mutex<Calculator> {
-        fn meta_object(&self) -> MetaObject {
+        fn meta(&self) -> MetaObject {
             Meta::get().object.clone()
         }
 
@@ -472,18 +456,6 @@ mod tests {
             Method::from_address(&address)
                 .ok_or_else(|| Error::MethodNotFound(address))?
                 .call(&mut *self.lock().await, args)
-        }
-
-        async fn meta_property(&self, address: MemberAddress) -> Result<Value<'static>, Error> {
-            Err(Error::PropertyNotFound(address))
-        }
-
-        async fn meta_set_property(
-            &self,
-            address: MemberAddress,
-            _value: Value<'_>,
-        ) -> Result<(), Error> {
-            Err(Error::PropertyNotFound(address))
         }
     }
 

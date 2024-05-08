@@ -1,16 +1,19 @@
-use crate::session::authentication;
+use crate::authentication;
 use qi_value::{object, FromValueError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("unsupported URI scheme \"{0}\"")]
-    UnsupportedUriScheme(String),
+    #[error("unsupported URL scheme \"{0}\"")]
+    UnsupportedUrlScheme(String),
 
-    #[error("invalid URI port")]
-    InvalidUriPort(#[source] std::num::ParseIntError),
+    #[error("invalid URL host: {0}")]
+    InvalidUrlHost(String),
+
+    #[error("invalid URL port: {0}")]
+    InvalidUrlPort(String),
 
     #[error(transparent)]
-    ValidateUri(#[from] iri_string::validate::Error),
+    ParseUrl(#[from] url::ParseError),
 
     #[error("authentication error")]
     Authentication(#[from] authentication::Error),
@@ -63,9 +66,7 @@ impl From<qi_messaging::Error> for Error {
         match err {
             qi_messaging::Error::Canceled => Self::Canceled,
             qi_messaging::Error::Disconnected => Self::Disconnected,
-            qi_messaging::Error::Message(err) => Self::Other(err.into()),
             qi_messaging::Error::Other(err) => Self::Other(err),
-            qi_messaging::Error::Format(err) => Self::Other(err.into()),
         }
     }
 }
@@ -102,3 +103,7 @@ impl From<NoMessageHandlerError> for qi_messaging::Error {
         Self::Other(err.into())
     }
 }
+
+pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+pub type Result<T> = std::result::Result<T, Error>;

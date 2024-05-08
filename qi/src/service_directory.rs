@@ -1,11 +1,13 @@
+use std::sync::Arc;
+
 use crate::{
     error::Error,
     object::{self, Object},
     service::{self, Info},
-    session,
+    session::{self, Session},
 };
 use async_trait::async_trait;
-use once_cell::sync::OnceCell;
+use once_cell::sync::Lazy;
 use qi_value::{
     object::{MemberAddress, MetaMethod, MetaObject},
     ActionId, IntoValue, Reflect, ServiceId,
@@ -29,7 +31,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(session: session::Client) -> Self {
+    pub fn new(session: Arc<Session>) -> Self {
         let object = object::Client::new(
             SERVICE_ID,
             service::MAIN_OBJECT_ID,
@@ -121,8 +123,7 @@ struct Meta {
 
 impl Meta {
     fn get() -> &'static Self {
-        static META: OnceCell<Meta> = OnceCell::new();
-        META.get_or_init(|| {
+        static META: Lazy<Meta> = Lazy::new(|| {
             let service;
             let services;
             let register_service;
@@ -200,7 +201,8 @@ impl Meta {
             // service_added = { id = 106, text = "a service has been added (signal: serviceAdded)" },
             // service_removed = { id = 107, text = "a service has been removed (signal: serviceRemoved)" },
             // machine_id = { id = 108, text = "get the machine id (method: machineId)" },
-        })
+        });
+        &META
     }
 }
 

@@ -88,12 +88,12 @@ pub enum EncodeError<E> {
 }
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-pub struct Decoder<'a, T> {
+pub struct Decoder<T> {
     state: DecoderState,
-    phantom: PhantomData<fn() -> &'a T>,
+    phantom: PhantomData<fn() -> T>,
 }
 
-impl<'a, T> Decoder<'a, T>
+impl<T> Decoder<T>
 where
     T: BodyBuf,
 {
@@ -122,7 +122,7 @@ where
     }
 }
 
-impl<'a, T> tokio_util::codec::Decoder for Decoder<'a, T>
+impl<T> tokio_util::codec::Decoder for Decoder<T>
 where
     T: BodyBuf,
 {

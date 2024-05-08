@@ -1,43 +1,139 @@
+mod address;
 pub(crate) mod authentication;
+mod cache;
 mod capabilities;
+mod channel;
 mod control;
-mod error;
-pub mod reference;
-mod registry;
+mod message_format;
+mod reference;
 
-pub(crate) use self::{authentication::Authenticator, registry::Registry};
-use crate::{error::NoMessageHandlerError, Error};
+pub(crate) use self::cache::Cache;
+pub use self::{address::Address, reference::Reference};
+use self::{channel::Connection, control::AuthenticateService};
+use crate::{
+    error::NoMessageHandlerError,
+    messaging::{self, message, CapabilitiesMap},
+    value::{Type, Value},
+    Authenticator, Error, PermissiveAuthenticator,
+};
 use bytes::Bytes;
-use futures::{future::BoxFuture, Future, FutureExt};
-use qi_format::{de::BufExt, ser::IntoValueExt};
-use qi_messaging::{message, CapabilitiesMap};
-use qi_value::{Type, Value};
-pub use reference::Reference;
-use std::{future::ready, sync::Arc};
-use tokio::sync::RwLock;
-use tracing::{debug_span, Instrument};
+use futures::{stream::FuturesUnordered, Future, FutureExt, StreamExt};
+use std::{future::ready, pin::pin, sync::Arc};
+use tokio::{select, sync::Mutex};
 
-pub(crate) async fn connect(
-    client: qi_messaging::Client,
-    credentials: authentication::Parameters,
-    capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
-) -> Result<Client, Error> {
-    let control_client = control::Client::new(client.clone());
-    let resolved_capabilities = control_client
-        .authenticate(credentials)
-        .instrument(debug_span!("authenticate"))
-        .await?;
-    capabilities::check_required(&resolved_capabilities)?;
-    *capabilities.write().await = Some(resolved_capabilities);
-    Ok(Client {
-        uid: Uid::new(),
-        client,
-        // capabilities,
-    })
+#[derive(Clone, Debug)]
+pub(crate) struct Session {
+    uid: Uid,
+    capabilities: Arc<Mutex<Option<CapabilitiesMap>>>,
+    client: messaging::Client<Bytes, Bytes>,
+}
+
+impl Session {
+    pub(crate) async fn connect<'a, Svc>(
+        address: Address,
+        credentials: authentication::Parameters,
+        service: Svc,
+    ) -> Result<(Self, Connection<'a>), Error>
+    where
+        Svc: tower::Service<(message::Address, Bytes)> + 'a,
+    {
+        let capabilities = Arc::default();
+        let service = Service::client(service, Arc::clone(&capabilities));
+        let (client, connection) = channel::connect(address, service).await?;
+        let shared_capabilities = client.authenticate(credentials).await?;
+        capabilities::check_required(&shared_capabilities)?;
+        Ok((
+            Session {
+                uid: Uid::new(),
+                capabilities,
+                client,
+            },
+            connection,
+        ))
+    }
+
+    pub(crate) fn call(
+        &self,
+        address: message::Address,
+        args: Value<'_>,
+        return_type: Option<Type>,
+    ) -> impl Future<Output = Result<Value<'static>, Error>> {
+        let call = qi_format::to_bytes(&args)
+            .map(|value| self.client.call(messaging::Call::new(address, value)));
+        async move {
+            Ok(call?
+                .await?
+                .deserialize_value_of_type(return_type.as_ref())?)
+        }
+    }
+
+    // pub(crate) fn post(
+    //     &self,
+    //     address: message::Address,
+    //     args: Value<'_>,
+    // ) -> impl Future<Output = Result<(), Error>> {
+    //     use messaging::Service;
+    //     let post = qi_format::to_bytes(&args)
+    //         .map(|value| self.client.post(messaging::Post::new(address, value)));
+    //     async move { Ok(post?.await?) }
+    // }
+
+    // pub(crate) fn event(
+    //     &self,
+    //     address: message::Address,
+    //     args: Value<'_>,
+    // ) -> impl Future<Output = Result<(), Error>> {
+    //     use messaging::Service;
+    //     let event = qi_format::to_bytes(&args)
+    //         .map(|value| self.client.event(messaging::Event::new(address, value)));
+    //     async move { Ok(event?.await?) }
+    // }
+
+    pub fn uid(&self) -> Uid {
+        self.uid.clone()
+    }
+}
+
+pub(crate) async fn serve<Svc, A>(
+    address: Address,
+    service: Svc,
+    authenticator: A,
+) -> Result<(impl Future<Output = ()> + Send, Vec<Address>), std::io::Error>
+where
+    Svc: tower::Service<(message::Address, Bytes)> + Clone,
+    A: Authenticator,
+{
+    let make_service = move || {
+        let capabilities = Arc::default();
+        Service::server(service, authenticator, capabilities)
+    };
+    let (clients, endpoints) = channel::serve(address, make_service).await?;
+    let server = async move {
+        let mut connections = FuturesUnordered::new();
+        pin!(clients);
+        loop {
+            select! {
+                Some((client, connection)) = clients.next(), if !clients.is_terminated() => {
+                    connections.push(async move {
+                        connection.await?;
+                        drop(client);
+                    });
+                }
+                _res = connections.next(), if !connections.is_terminated() => {
+                    // nothing
+                }
+                else => {
+                    break
+                }
+            }
+        }
+    };
+    Ok((server, endpoints))
 }
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, qi_macros::Valuable)]
-#[qi(value = "qi_value", transparent)]
+#[qi(value = "crate::value", transparent)]
+// TODO: value(`as = "DisplayFromStr"`)
 pub struct Uid(String);
 
 impl Uid {
@@ -56,169 +152,98 @@ impl std::fmt::Display for Uid {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Client {
-    uid: Uid,
-    client: qi_messaging::Client,
-    // capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
-}
+impl std::str::FromStr for Uid {
+    type Err = std::convert::Infallible;
 
-impl Client {
-    pub(crate) fn call(
-        &self,
-        address: message::Address,
-        args: Value<'_>,
-        return_type: Option<Type>,
-    ) -> impl Future<Output = Result<Value<'static>, Error>> {
-        use qi_messaging::Service;
-        let call = qi_format::to_bytes(&args)
-            .map(|value| self.client.call(qi_messaging::Call::new(address, value)));
-        async move {
-            Ok(call?
-                .await?
-                .deserialize_value_of_type(return_type.as_ref())?)
-        }
-    }
-
-    // pub(crate) fn post(
-    //     &self,
-    //     address: message::Address,
-    //     args: Value<'_>,
-    // ) -> impl Future<Output = Result<(), Error>> {
-    //     use qi_messaging::Service;
-    //     let post = qi_format::to_bytes(&args)
-    //         .map(|value| self.client.post(qi_messaging::Post::new(address, value)));
-    //     async move { Ok(post?.await?) }
-    // }
-
-    // pub(crate) fn event(
-    //     &self,
-    //     address: message::Address,
-    //     args: Value<'_>,
-    // ) -> impl Future<Output = Result<(), Error>> {
-    //     use qi_messaging::Service;
-    //     let event = qi_format::to_bytes(&args)
-    //         .map(|value| self.client.event(qi_messaging::Event::new(address, value)));
-    //     async move { Ok(event?.await?) }
-    // }
-
-    pub fn uid(&self) -> Uid {
-        self.uid.clone()
-    }
-
-    // pub(crate) fn downgrade(&self) -> WeakClient {
-    //     WeakClient {
-    //         client: self.client.downgrade(),
-    //         capabilities: Arc::downgrade(&self.capabilities),
-    //     }
-    // }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct WeakClient {
-    id: Uid,
-    client: qi_messaging::WeakClient,
-    // capabilities: Weak<RwLock<Option<CapabilitiesMap>>>,
-}
-
-impl WeakClient {
-    pub(crate) fn upgrade(&self) -> Option<Client> {
-        Some(Client {
-            uid: self.id.clone(),
-            client: self.client.upgrade()?,
-            // capabilities: self.capabilities.upgrade()?,
-        })
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_string(s.to_owned()))
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct Service<S> {
-    control: control::Control,
-    inner: InnerService<S>,
+struct Service<S, A> {
+    inner: S,
+    control: control::Control<A>,
 }
 
-impl<T> Service<T> {
-    pub(crate) fn new<A>(
+impl<S, A> Service<S, A> {
+    fn server(
+        inner: S,
         authenticator: A,
-        capabilities: Arc<RwLock<Option<CapabilitiesMap>>>,
-        underlying: T,
-    ) -> Self
-    where
-        A: Authenticator + Send + Sync + 'static,
-    {
+        capabilities: Arc<Mutex<Option<CapabilitiesMap>>>,
+    ) -> Self {
+        Self::new(inner, authenticator, capabilities, false)
+    }
+
+    fn new(
+        inner: S,
+        authenticator: A,
+        capabilities: Arc<Mutex<Option<CapabilitiesMap>>>,
+        remote_authorized: bool,
+    ) -> Self {
         Self {
-            control: control::Control::new(authenticator, capabilities),
-            inner: InnerService::new(true, underlying),
+            inner,
+            control: control::Control::new(authenticator, capabilities, remote_authorized),
         }
     }
 
-    // fn unlock_inner(&mut self) {
-    //     self.inner.unlock()
-    // }
+    fn inner_if_unlocked(&self) -> Option<&S> {
+        self.control.remote_authorized().then_some(&self.inner)
+    }
 }
 
-impl<T> qi_messaging::Service for Service<T>
+impl<S> Service<S, PermissiveAuthenticator> {
+    fn client(inner: S, capabilities: Arc<Mutex<Option<CapabilitiesMap>>>) -> Self {
+        Self::new(inner, PermissiveAuthenticator, capabilities, true)
+    }
+}
+
+impl<S, A> tower::Service<(message::Address, Bytes)> for Service<S, A>
 where
-    T: qi_messaging::Service,
+    S: tower::Service<(message::Address, Bytes)>,
+    A: Authenticator,
 {
-    fn call(
-        &self,
-        mut call: qi_messaging::Call,
-    ) -> BoxFuture<'static, Result<Bytes, qi_messaging::Error>> {
-        use self::control::ControlService;
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = ServiceCallFuture;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        todo!()
+    }
+
+    fn call(&self, (address, value): (message::Address, Bytes)) -> Self::Future {
         let address = call.address();
         if control::is_addressed_by(address) {
             let authenticate = call
                 .value_mut()
                 .deserialize_value()
-                .map(|request| self.control.call_authenticate(request));
+                .map(|request| self.control.authenticate(request));
             async move { Ok(authenticate?.await?.serialize_value()?) }.boxed()
-        } else if let Some(svc) = self.inner.get() {
-            svc.call(call)
+        } else if let Some(inner) = self.inner_if_unlocked() {
+            inner.call(call)
         } else {
             ready(Err(NoMessageHandlerError(address).into())).boxed()
         }
     }
-
-    fn post(
-        &self,
-        post: qi_messaging::Post,
-    ) -> BoxFuture<'static, Result<(), qi_messaging::Error>> {
-        if let Some(svc) = self.inner.get() {
-            svc.post(post)
-        } else {
-            ready(Err(NoMessageHandlerError(post.address()).into())).boxed()
-        }
-    }
-
-    fn event(
-        &self,
-        event: qi_messaging::Event,
-    ) -> BoxFuture<'static, Result<(), qi_messaging::Error>> {
-        if let Some(svc) = self.inner.get() {
-            svc.event(event)
-        } else {
-            ready(Err(NoMessageHandlerError(event.address()).into())).boxed()
-        }
-    }
 }
 
-#[derive(Debug)]
-struct InnerService<T> {
-    unlocked: bool,
-    service: T,
-}
+struct ServiceCallFuture;
 
-impl<T> InnerService<T> {
-    fn new(unlocked: bool, service: T) -> Self {
-        Self { unlocked, service }
-    }
+// fn post(&self, post: messaging::Post) -> BoxFuture<'static, Result<(), messaging::Error>> {
+//     if let Some(inner) = self.inner_if_unlocked() {
+//         inner.post(post)
+//     } else {
+//         ready(Err(NoMessageHandlerError(post.address()).into())).boxed()
+//     }
+// }
 
-    fn get(&self) -> Option<&T> {
-        self.unlocked.then_some(&self.service)
-    }
-
-    // fn unlock(&mut self) {
-    //     self.unlocked = true;
-    // }
-}
+// fn event(&self, event: messaging::Event) -> BoxFuture<'static, Result<(), messaging::Error>> {
+//     if let Some(inner) = self.inner_if_unlocked() {
+//         inner.event(event)
+//     } else {
+//         ready(Err(NoMessageHandlerError(event.address()).into())).boxed()
+//     }
+// }

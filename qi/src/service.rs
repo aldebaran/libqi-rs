@@ -4,7 +4,7 @@ pub use qi_value::ServiceId as Id;
 pub(crate) const MAIN_OBJECT_ID: object::Id = object::Id(1);
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, qi_macros::Valuable)]
-#[qi(value = "qi_value", rename_all = "camelCase")]
+#[qi(value = "crate::value", rename_all = "camelCase")]
 pub struct Info {
     name: String,
     service_id: Id,
@@ -89,10 +89,9 @@ impl std::fmt::Display for Info {
 
 #[cfg(test)]
 mod tests {
-    use crate::Address;
-
     use super::*;
-    use qi_format::de::BufExt;
+    use crate::Address;
+    use std::net::{Ipv4Addr, SocketAddr};
 
     #[test]
     fn test_service_info_deserialize() {
@@ -120,10 +119,9 @@ mod tests {
                 machine_id: "9a65b56e-c3d3-4485-8924-661b036202b3".parse().unwrap(),
                 process_id: 3420486,
                 endpoints: vec![
-                    session::Reference::Service("Calculator".to_owned()),
-                    session::Reference::Endpoint(Address::Tcp {
-                        host: "127.0.0.1".to_owned(),
-                        port: 41681,
+                    session::Reference::new_service("Calculator".to_owned()),
+                    session::Reference::new_endpoint(Address::Tcp {
+                        address: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 41681),
                         ssl: None
                     })
                 ],

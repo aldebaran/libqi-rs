@@ -9,7 +9,7 @@ mod audio;
 #[derive(Debug, clap::Parser)]
 #[clap()]
 struct Args {
-    #[clap(short, long, default_value = "tcp://localhost:9559")]
+    #[clap(short, long, default_value = "tcp://::1:9559")]
     address: Address,
 
     #[clap(short, long, action = clap::ArgAction::Count)]
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
         .with_thread_names(true)
         .init();
 
-    let node = qi::node::create();
+    let mut node = qi::node::create();
 
     // You can add services to the node and make them accessible to other nodes of joined spaces.
     node.add_service("AudioPlayer".to_owned(), audio::Player::new())

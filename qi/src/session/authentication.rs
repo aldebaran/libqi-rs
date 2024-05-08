@@ -1,15 +1,15 @@
 use qi_messaging::CapabilitiesMap;
 use qi_value::{Dynamic, Value};
-use sealed::sealed;
 use std::collections::HashMap;
 
-pub(crate) type Parameters = HashMap<String, Value<'static>>;
+pub type Parameters = HashMap<String, Value<'static>>;
 
-pub(crate) trait Authenticator {
+pub trait Authenticator {
     fn verify(&self, parameters: Parameters) -> Result<(), Error>;
 }
 
-pub(crate) struct PermissiveAuthenticator;
+#[derive(Debug)]
+pub struct PermissiveAuthenticator;
 
 impl Authenticator for PermissiveAuthenticator {
     fn verify(&self, _parameters: Parameters) -> Result<(), Error> {
@@ -17,6 +17,7 @@ impl Authenticator for PermissiveAuthenticator {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct UserTokenAuthenticator {
     user: String,
     token: String,
@@ -40,30 +41,22 @@ impl Authenticator for UserTokenAuthenticator {
     }
 }
 
-#[sealed]
-pub(crate) trait CapabilitiesMapExt {
-    fn insert_authentication_state_done(&mut self);
-    fn to_authentication_result(&self) -> Result<(), Error>;
+pub(super) fn state_done_map(mut capabilities: CapabilitiesMap) -> CapabilitiesMap {
+    capabilities.insert(STATE_KEY.to_owned(), Dynamic(Value::UInt32(STATE_DONE)));
+    capabilities
 }
 
-#[sealed]
-impl CapabilitiesMapExt for CapabilitiesMap {
-    fn insert_authentication_state_done(&mut self) {
-        self.insert(STATE_KEY.to_owned(), Dynamic(Value::UInt32(STATE_DONE)));
-    }
-
-    fn to_authentication_result(&self) -> Result<(), Error> {
-        let Dynamic(state) = self
-            .get(STATE_KEY)
-            .ok_or_else(|| Error::StateValue("missing".to_owned()))?
-            .clone();
-        match state {
-            Value::UInt32(STATE_DONE) => Ok(()),
-            _ => Err(Error::StateValue(format!(
-                "expected a \"Done\" state value of \"{}u32\", found \"{}\" instead",
-                STATE_DONE, state
-            ))),
-        }
+pub(super) fn to_result(capabilities: &CapabilitiesMap) -> Result<(), Error> {
+    let Dynamic(state) = capabilities
+        .get(STATE_KEY)
+        .ok_or_else(|| Error::StateValue("missing".to_owned()))?
+        .clone();
+    match state {
+        Value::UInt32(STATE_DONE) => Ok(()),
+        _ => Err(Error::StateValue(format!(
+            "expected a \"Done\" state value of \"{}u32\", found \"{}\" instead",
+            STATE_DONE, state
+        ))),
     }
 }
 

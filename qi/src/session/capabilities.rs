@@ -4,21 +4,18 @@ use qi_value::{Dynamic, IntoValue};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub(crate) struct Capabilities {
-    client_server_socket: bool,
     remote_cancelable_calls: bool,
     object_ptr_uid: bool,
     relative_endpoint_uri: bool,
 }
 
 impl Capabilities {
-    const CLIENT_SERVER_SOCKET: &'static str = "ClientServerSocket";
     const REMOTE_CANCELABLE_CALLS: &'static str = "RemoteCancelableCalls";
     const OBJECT_PTR_UID: &'static str = "ObjectPtrUID";
     const RELATIVE_ENDPOINT_URI: &'static str = "RelativeEndpointURI";
 
     const fn new() -> Self {
         Self {
-            client_server_socket: true,
             remote_cancelable_calls: true,
             object_ptr_uid: true,
             relative_endpoint_uri: true,
@@ -27,11 +24,6 @@ impl Capabilities {
 
     fn from_map(map: &CapabilitiesMap) -> Self {
         Self {
-            client_server_socket: map
-                .get(Self::CLIENT_SERVER_SOCKET)
-                .cloned()
-                .and_then(|Dynamic(v)| v.cast_into().ok())
-                .unwrap_or(false),
             remote_cancelable_calls: map
                 .get(Self::REMOTE_CANCELABLE_CALLS)
                 .cloned()
@@ -52,10 +44,6 @@ impl Capabilities {
 
     fn to_map(self) -> CapabilitiesMap {
         CapabilitiesMap::from_iter([
-            (
-                Self::CLIENT_SERVER_SOCKET.to_owned(),
-                Dynamic(self.client_server_socket.into_value()),
-            ),
             (
                 Self::REMOTE_CANCELABLE_CALLS.to_owned(),
                 Dynamic(self.remote_cancelable_calls.into_value()),

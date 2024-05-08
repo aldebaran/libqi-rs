@@ -42,22 +42,23 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-pub mod address;
-mod channel;
 pub mod error;
 pub mod node;
 pub mod object;
 pub mod os;
 pub mod service;
 pub mod service_directory;
-pub mod session;
+mod session;
 pub mod signal;
 pub mod space;
 
 pub use self::{
-    address::Address,
     error::Error,
     object::{BoxObject, Object, ObjectExt},
+    session::{
+        authentication::{Authenticator, PermissiveAuthenticator},
+        Address,
+    },
     space::Space,
     value::Value,
 };
