@@ -161,7 +161,7 @@ pub struct Client {
     id: Id,
     uid: Uid,
     meta: MetaObject,
-    session: Arc<Session>,
+    session: Session,
 }
 
 impl Client {
@@ -170,7 +170,7 @@ impl Client {
         id: Id,
         uid: Uid,
         meta: MetaObject,
-        session: Arc<Session>,
+        session: Session,
     ) -> Self {
         Self {
             service_id,

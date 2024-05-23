@@ -1,31 +1,13 @@
-use crate::authentication;
+use crate::session;
 use qi_value::{object, FromValueError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("unsupported URL scheme \"{0}\"")]
-    UnsupportedUrlScheme(String),
-
-    #[error("invalid URL host: {0}")]
-    InvalidUrlHost(String),
-
-    #[error("invalid URL port: {0}")]
-    InvalidUrlPort(String),
-
-    #[error(transparent)]
-    ParseUrl(#[from] url::ParseError),
-
     #[error("authentication error")]
-    Authentication(#[from] authentication::Error),
-
-    #[error("disconnected")]
-    Disconnected,
+    Authentication(#[from] session::authentication::Error),
 
     #[error("no reachable endpoint")]
     NoReachableEndpoint,
-
-    #[error("the call request has been canceled")]
-    Canceled,
 
     #[error("method not found {0}")]
     MethodNotFound(object::MemberAddress),
@@ -41,9 +23,6 @@ pub enum Error {
 
     #[error("value conversion error")]
     FromValue(#[from] FromValueError),
-
-    #[error("IO error")]
-    Io(#[from] std::io::Error),
 
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),

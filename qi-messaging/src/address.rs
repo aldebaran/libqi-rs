@@ -29,7 +29,7 @@ impl Address {
     /// This will try to DNS resolve the host, using `std::net::ToSocketAddrs`,
     /// blocking the current thread until the request terminates. If the request
     /// fails, the address is considered not local.
-    pub(crate) fn is_machine_local(&self) -> bool {
+    pub fn is_machine_local(&self) -> bool {
         match self {
             Address::Tcp { address, .. } => address.ip().is_loopback(),
         }

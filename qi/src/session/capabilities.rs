@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use once_cell::sync::Lazy;
 use qi_messaging::CapabilitiesMap;
 use qi_value::{Dynamic, IntoValue};
@@ -89,12 +90,6 @@ pub(crate) fn check_required(
     let capabilities = Capabilities::from_map(map);
 
     // TODO: Implement capabilities so that this function always succeeds, so that we may remove it.
-    if !capabilities.client_server_socket {
-        return Err(ExpectedKeyValueError(
-            Capabilities::CLIENT_SERVER_SOCKET.into(),
-            true,
-        ));
-    }
     if !capabilities.remote_cancelable_calls {
         return Err(ExpectedKeyValueError(
             Capabilities::REMOTE_CANCELABLE_CALLS.into(),
@@ -121,4 +116,62 @@ pub(crate) fn local_map() -> &'static CapabilitiesMap {
     static LOCAL_CAPABILITIES_MAP: Lazy<CapabilitiesMap> =
         Lazy::new(|| LOCAL_CAPABILITIES.to_map());
     &LOCAL_CAPABILITIES_MAP
+}
+
+fn intersect(this: &mut CapabilitiesMap, other: &CapabilitiesMap) {
+    for (key, other_value) in other.iter() {
+        if let Some(value) = this.get_mut(key) {
+            // Prefer values from this map when no ordering can be made. Only use the other map
+            // values if they are strictly inferior.
+            if let Some(Ordering::Less) = other_value.partial_cmp(value) {
+                *value = other_value.clone().into_owned();
+            }
+        }
+    }
+
+    // Only keep capabilities that were present in `other`.
+    this.retain(|k, _| other.get(k).is_some());
+}
+
+pub(crate) fn shared_with_local(map: &CapabilitiesMap) -> CapabilitiesMap {
+    let mut local = local_map().clone();
+    intersect(&mut local, map);
+    local
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{messaging::CapabilitiesMap, value::{Value, Dynamic}};
+    use assert_matches::assert_matches;
+
+    #[test]
+    fn intersect_map() {
+        let mut m = CapabilitiesMap::from_iter([
+            ("A".to_owned(), Dynamic(true.into_value())),
+            ("B".to_owned(), Dynamic(true.into_value())),
+            ("C".to_owned(), Dynamic(false.into_value())),
+            ("D".to_owned(), Dynamic(false.into_value())),
+            ("E".to_owned(), Dynamic(true.into_value())),
+            ("F".to_owned(), Dynamic(false.into_value())),
+        ]);
+        let m2 = CapabilitiesMap::from_iter([
+            ("A".to_owned(), Dynamic(true.into_value())),
+            ("B".to_owned(), Dynamic(false.into_value())),
+            ("C".to_owned(), Dynamic(true.into_value())),
+            ("D".to_owned(), Dynamic(false.into_value())),
+            ("G".to_owned(), Dynamic(true.into_value())),
+            ("H".to_owned(), Dynamic(false.into_value())),
+        ]);
+        intersect(&mut m, &m2);
+        assert_matches!(m.get("A"), Some(Dynamic(Value::Bool(true))));
+        assert_matches!(m.get("B"), Some(Dynamic(Value::Bool(false))));
+        assert_matches!(m.get("C"), Some(Dynamic(Value::Bool(false))));
+        assert_matches!(m.get("D"), Some(Dynamic(Value::Bool(false))));
+        assert_matches!(m.get("E"), None);
+        assert_matches!(m.get("F"), None);
+        assert_matches!(m.get("G"), None);
+        assert_matches!(m.get("H"), None);
+        assert_matches!(m.get("I"), None);
+    }
 }

@@ -3,16 +3,17 @@ use super::{
     capabilities,
 };
 use crate::{
+    format,
     messaging::{self, CapabilitiesMap},
+    value::IntoValue,
     Error,
 };
-use async_trait::async_trait;
 use bytes::Bytes;
 use messaging::message;
 use qi_value::{ActionId, Dynamic, ObjectId, ServiceId, Value};
-use sealed::sealed;
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
+use tower::{Service, ServiceExt};
 
 pub(super) const SERVICE_ID: ServiceId = ServiceId(0);
 pub(super) const OBJECT_ID: ObjectId = ObjectId(0);
@@ -23,7 +24,7 @@ pub(super) fn is_addressed_by(address: message::Address) -> bool {
 }
 
 const AUTHENTICATE_ADDRESS: message::Address =
-    message::Address::new(SERVICE_ID, OBJECT_ID, AUTHENTICATE_ACTION_ID);
+    message::Address(SERVICE_ID, OBJECT_ID, AUTHENTICATE_ACTION_ID);
 
 #[derive(Debug)]
 pub(super) struct Control<A> {
@@ -54,10 +55,10 @@ where
         &mut self,
         request: CapabilitiesMap,
     ) -> Result<CapabilitiesMap, Error> {
-        let shared_capabilities = capabilities::local_map().clone().intersected_with(&request);
+        let shared_capabilities = capabilities::shared_with_local(&request);
+        capabilities::check_required(&shared_capabilities)?;
         let parameters = request.into_iter().map(|(k, v)| (k, v.0)).collect();
         self.authenticator.verify(parameters)?;
-        capabilities::check_required(&shared_capabilities)?;
         self.capabilities
             .lock()
             .await
@@ -71,35 +72,24 @@ where
     }
 }
 
-#[sealed]
-#[async_trait]
-pub(super) trait AuthenticateService {
-    async fn authenticate(
-        &mut self,
-        parameters: HashMap<String, Value<'_>>,
-    ) -> Result<CapabilitiesMap, Error>;
-}
-
-#[sealed]
-#[async_trait]
-impl AuthenticateService for messaging::Client<Bytes, Bytes> {
-    async fn authenticate(
-        &mut self,
-        parameters: HashMap<String, Value<'_>>,
-    ) -> Result<CapabilitiesMap, Error> {
-        let mut request = capabilities::local_map().clone();
-        request.extend(
-            parameters
-                .into_iter()
-                .map(|(k, v)| (k, Dynamic(v.into_owned()))),
-        );
-        let arg = request.serialize_value()?;
-        let result = self
-            .ready()
-            .await?
-            .call((AUTHENTICATE_ADDRESS, arg))
-            .await?
-            .deserialize_value()?;
-        Ok(result)
-    }
+async fn client_send_authenticate<R>(
+    client: &mut messaging::Client<Bytes, R>,
+    parameters: HashMap<String, Value<'_>>,
+) -> Result<CapabilitiesMap, Error>
+where
+    R: bytes::Buf + Send,
+{
+    let mut request = capabilities::local_map().clone();
+    request.extend(
+        parameters
+            .into_iter()
+            .map(|(k, v)| (k, Dynamic(v.into_owned()))),
+    );
+    let arg = format::to_bytes(&request.into_value())?;
+    let result_buf = client
+        .ready()
+        .await?
+        .call((AUTHENTICATE_ADDRESS, arg))
+        .await?;
+    Ok(format::from_buf(result_buf)?)
 }

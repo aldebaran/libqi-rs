@@ -16,33 +16,32 @@ use std::{
 };
 
 pin_project! {
-    pub(crate) struct Responses<Svc, T>
-    where
-        Svc: tower_service::Service<(Address, T)>,
-    {
-        service: Svc,
+    pub(crate) struct Responses<Handler, Future, T> {
+        handler: Handler,
         #[pin]
-        call_futures: FuturesUnordered<CallResponseFuture<Svc::Future, Svc::Response>>,
+        call_futures: FuturesUnordered<CallResponseFuture<Future>>,
+        ph: PhantomData<T>,
     }
 }
 
-impl<Svc, T> Responses<Svc, T>
+impl<Handler, T> Responses<Handler, Handler::Future, T>
 where
-    Svc: tower_service::Service<(Address, T)>,
+    Handler: tower_service::Service<(Address, T)>,
 {
-    pub(crate) fn new(service: Svc) -> Self {
+    pub(crate) fn new(handler: Handler) -> Self {
         Self {
-            service,
+            handler,
             call_futures: FuturesUnordered::new(),
+            ph: PhantomData,
         }
     }
 
-    pub(crate) fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Svc::Error>> {
-        self.service.poll_ready(cx)
+    pub(crate) fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Handler::Error>> {
+        self.handler.poll_ready(cx)
     }
 
     pub(crate) fn call(&mut self, id: Id, (address, value): (Address, T)) {
-        let future = self.service.call((address, value));
+        let future = self.handler.call((address, value));
         self.call_futures
             .push(CallResponseFuture::new(id, address, future));
     }
@@ -56,7 +55,7 @@ where
     }
 }
 
-impl<Svc, T> Stream for Responses<Svc, T>
+impl<Svc, T> Stream for Responses<Svc, Svc::Future, T>
 where
     Svc: tower_service::Service<(Address, T)>,
     Svc::Error: std::string::ToString,
@@ -68,7 +67,7 @@ where
     }
 }
 
-impl<Svc, T> FusedStream for Responses<Svc, T>
+impl<Svc, T> FusedStream for Responses<Svc, Svc::Future, T>
 where
     Svc: tower_service::Service<(Address, T)>,
     Svc::Error: std::string::ToString,
@@ -80,22 +79,20 @@ where
 
 pin_project! {
     #[derive(Debug)]
-    struct CallResponseFuture<F, T> {
+    struct CallResponseFuture<F> {
         id: Id,
         address: Address,
         #[pin]
         state: CallResponseFutureState<F>,
-        phantom: PhantomData<fn () -> T>
     }
 }
 
-impl<F, T> CallResponseFuture<F, T> {
+impl<F> CallResponseFuture<F> {
     fn new(id: Id, address: Address, inner: F) -> Self {
         Self {
             id,
             address,
             state: CallResponseFutureState::Running { inner, waker: None },
-            phantom: PhantomData,
         }
     }
 
@@ -110,7 +107,7 @@ impl<F, T> CallResponseFuture<F, T> {
     }
 }
 
-impl<F, T, E> Future for CallResponseFuture<F, T>
+impl<F, T, E> Future for CallResponseFuture<F>
 where
     F: Future<Output = Result<T, E>>,
     E: std::string::ToString,

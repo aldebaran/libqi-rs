@@ -1,26 +1,26 @@
-pub use self::outgoing::OutgoingMessages;
+pub(crate) use self::outgoing::OutgoingMessages;
 use crate::{
     client,
     id_factory::SharedIdFactory,
     message::{Address, OnewayRequest},
-    server, Client, Message,
+    server, Client, Error, Message,
 };
-use futures::{Sink, TryStream};
+use futures::{stream::FusedStream, Sink, TryStream};
 
 #[allow(clippy::type_complexity)]
-pub fn endpoint<Msgs, Svc, Snk, InBody, OutBody>(
+pub fn endpoint<Msgs, Handler, Snk, InBody, OutBody>(
     messages: Msgs,
-    service: Svc,
+    handker: Handler,
     oneway_requests_sink: Snk,
 ) -> (
     Client<OutBody, InBody>,
-    OutgoingMessages<Msgs, Svc, Snk, InBody, OutBody>,
+    impl FusedStream<Item = Result<Message<OutBody>, Error>>,
 )
 where
     Msgs: TryStream<Ok = Message<InBody>>,
     Msgs::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-    Svc: tower_service::Service<(Address, InBody), Response = OutBody>,
-    Svc::Error: std::string::ToString + Into<Box<dyn std::error::Error + Send + Sync>>,
+    Handler: tower_service::Service<(Address, InBody), Response = OutBody>,
+    Handler::Error: std::string::ToString + Into<Box<dyn std::error::Error + Send + Sync>>,
     Snk: Sink<(Address, OnewayRequest<InBody>)>,
     Snk::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     InBody: Send,
@@ -28,7 +28,8 @@ where
 {
     let id_factory = SharedIdFactory::new();
     let (client, client_requests) = client::pair(id_factory, 1);
-    let server_responses = server::Responses::new(service);
+    let server_responses = server::Responses::new(handker);
+    // TODO: Use stream! instead of defining the stream ourselves
     let outgoing = OutgoingMessages::new(
         messages,
         server_responses,

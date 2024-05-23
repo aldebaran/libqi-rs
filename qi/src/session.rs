@@ -2,14 +2,13 @@ mod address;
 pub(crate) mod authentication;
 mod cache;
 mod capabilities;
-mod channel;
 mod control;
 mod message_format;
 mod reference;
 
 pub(crate) use self::cache::Cache;
 pub use self::{address::Address, reference::Reference};
-use self::{channel::Connection, control::AuthenticateService};
+use self::{channel::Connection, control::Authenticate};
 use crate::{
     error::NoMessageHandlerError,
     messaging::{self, message, CapabilitiesMap},

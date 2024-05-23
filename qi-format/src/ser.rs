@@ -124,9 +124,9 @@ where
     }
 
     // option -> optional
-    fn serialize_some<T: ?Sized>(self, value: &T) -> Result<Self::Ok>
+    fn serialize_some<T>(self, value: &T) -> Result<Self::Ok>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         write_bool(self.buf, true);
         value.serialize(self)
@@ -175,9 +175,9 @@ where
     }
 
     // equivalence: newtype_struct(T) -> tuple(T)
-    fn serialize_newtype_struct<T: ?Sized>(self, _name: &'static str, value: &T) -> Result<Self::Ok>
+    fn serialize_newtype_struct<T>(self, _name: &'static str, value: &T) -> Result<Self::Ok>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         let mut tuple_ser = self.serialize_tuple(1)?;
         use serde::ser::SerializeTuple;
@@ -211,7 +211,7 @@ where
     }
 
     // equivalence: newtype_variant(idx, T) -> tuple(idx: uint_32, tuple(T)) = tuple_variant(idx, T)
-    fn serialize_newtype_variant<T: ?Sized>(
+    fn serialize_newtype_variant<T>(
         self,
         name: &'static str,
         variant_index: u32,
@@ -219,7 +219,7 @@ where
         value: &T,
     ) -> Result<Self::Ok>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         let mut tuple = self.serialize_tuple_variant(name, variant_index, variant, 1)?;
         use serde::ser::SerializeTupleVariant;
@@ -268,7 +268,7 @@ where
 
     fn serialize<T>(&mut self, value: &T) -> Result<()>
     where
-        T: ?Sized + serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         value.serialize(Serializer::to_buf(self.buf))?;
         Ok(())
@@ -282,9 +282,9 @@ where
     type Ok = &'a mut B;
     type Error = Error;
 
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.try_decr_elements_left()?;
         self.serialize(value)
@@ -302,17 +302,17 @@ where
     type Ok = &'a mut B;
     type Error = Error;
 
-    fn serialize_key<T: ?Sized>(&mut self, key: &T) -> Result<()>
+    fn serialize_key<T>(&mut self, key: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.try_decr_elements_left()?;
         self.serialize(key)
     }
 
-    fn serialize_value<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_value<T>(&mut self, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.serialize(value)?;
         Ok(())
@@ -330,9 +330,9 @@ where
     type Ok = &'a mut B;
     type Error = Error;
 
-    fn serialize_element<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.try_decr_elements_left()?;
         self.serialize(value)
@@ -350,9 +350,9 @@ where
     type Ok = &'a mut B;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_field<T>(&mut self, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.try_decr_elements_left()?;
         self.serialize(value)
@@ -370,9 +370,9 @@ where
     type Ok = &'a mut B;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, value: &T) -> Result<()>
+    fn serialize_field<T>(&mut self, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.try_decr_elements_left()?;
         self.serialize(value)
@@ -390,9 +390,9 @@ where
     type Ok = &'a mut B;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, _key: &'static str, value: &T) -> Result<()>
+    fn serialize_field<T>(&mut self, _key: &'static str, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.try_decr_elements_left()?;
         self.serialize(value)
@@ -410,9 +410,9 @@ where
     type Ok = &'a mut B;
     type Error = Error;
 
-    fn serialize_field<T: ?Sized>(&mut self, _key: &'static str, value: &T) -> Result<()>
+    fn serialize_field<T>(&mut self, _key: &'static str, value: &T) -> Result<()>
     where
-        T: serde::Serialize,
+        T: serde::Serialize + ?Sized,
     {
         self.try_decr_elements_left()?;
         self.serialize(value)

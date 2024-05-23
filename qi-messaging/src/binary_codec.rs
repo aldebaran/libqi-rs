@@ -45,6 +45,7 @@
 use crate::{
     body::BodyBuf,
     message::{Address, Id, Message, MetaData, Type, Version},
+    Error,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::marker::PhantomData;
@@ -85,6 +86,18 @@ pub enum EncodeError<E> {
 
     #[error(transparent)]
     IO(#[from] std::io::Error),
+}
+
+impl<E> From<EncodeError<E>> for Error
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn from(err: EncodeError<E>) -> Self {
+        match err {
+            EncodeError::IO(io_err) => io_err.into(),
+            _ => Error::other(err),
+        }
+    }
 }
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
@@ -175,6 +188,18 @@ pub enum DecodeError<E> {
 
     #[error(transparent)]
     IO(#[from] std::io::Error),
+}
+
+impl<E> From<DecodeError<E>> for Error
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn from(err: DecodeError<E>) -> Self {
+        match err {
+            DecodeError::IO(io_err) => io_err.into(),
+            _ => Error::other(err),
+        }
+    }
 }
 
 fn decode_header<ErrDeserBody>(

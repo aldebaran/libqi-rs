@@ -41,9 +41,10 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
+mod address;
 pub mod binary_codec;
 pub mod body;
-pub mod capabilities;
+pub mod channel;
 mod client;
 pub mod endpoint;
 mod error;
@@ -53,9 +54,11 @@ mod server;
 
 pub use self::{
     body::BodyBuf,
-    capabilities::CapabilitiesMap,
     client::{CallFuture, Client, WeakClient},
     endpoint::endpoint,
     error::Error,
     message::Message,
 };
+pub use qi_value as value;
+
+pub type CapabilitiesMap = std::collections::HashMap<String, value::Dynamic<value::Value<'static>>>;

@@ -1,11 +1,10 @@
 mod messaging_service;
 mod server;
-mod services;
+mod objects;
 
 use self::messaging_service::MessagingService;
 pub use self::server::BindError;
 use crate::{
-    authentication,
     object::{self, BoxObject, Object},
     os::MachineId,
     service::{self, Info},
@@ -51,7 +50,7 @@ impl Builder {
             server: self.server,
             services: self.services,
             address,
-            authentication_parameters: authentication::Parameters::new(),
+            authentication_parameters: session::authentication::Parameters::new(),
         }
     }
 
@@ -69,7 +68,7 @@ pub struct AttachBuilder {
     services: Services,
     server: server::Builder<PermissiveAuthenticator>,
     address: Address,
-    authentication_parameters: authentication::Parameters,
+    authentication_parameters: session::authentication::Parameters,
 }
 
 impl AttachBuilder {

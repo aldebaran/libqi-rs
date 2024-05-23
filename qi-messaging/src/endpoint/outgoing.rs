@@ -25,7 +25,7 @@ pin_project! {
     // messages.
     //
     // Server responses are the source of outgoing messages of types Reply, Error and
-    // Canceled. They originate from a sequencing between incoming messages and service calls.
+    // Canceled. They originate from a sequencing between incoming messages and handler calls.
     //
     // Incoming messages also have side-effects on the results sent to clients.
     //
@@ -47,7 +47,7 @@ pin_project! {
     //    │     │    │     │         │        │      │       │     Call Cancel Post Event Capababilities
     //  ┌─▼─────▼─┬──▼─────▼─────────▼────┐ ┌─▼──────▼───────▼─┐     │    │     │     │         │
     //  │         │                       │ │                  │     │    │     │     │         │
-    //  │ Service │        Oneway         │ │      Client      ◄─────┴────┴─────┴─────┴─────────┘
+    //  │ Handler │        Oneway         │ │      Client      ◄─────┴────┴─────┴─────┴─────────┘
     //  │  Calls  │         Sink          │ │     Requests     │
     //  │         │                       │ │                  │
     //  └────┬────┴───────────────────────┘ └────────┬─────────┘
@@ -60,24 +60,23 @@ pin_project! {
     //               │   Outgoing Messages   │
     //               │                       │
     //               └───────────────────────┘
-    pub struct OutgoingMessages<Msg, Svc, Snk, InBody, OutBody>
-        where Svc: tower_service::Service<(Address, InBody)>,
-    {
+    pub(crate) struct OutgoingMessages<Msg, Handler, SvcFuture, Snk, InBody, OutBody> {
         poll_side: PollState,
 
         #[pin]
-        inner: Inner<Msg, Svc, Snk, InBody, OutBody>,
+        inner: Inner<Msg, Handler, SvcFuture, Snk, InBody, OutBody>,
     }
 }
 
-impl<Msgs, Svc, Snk, InBody, OutBody> OutgoingMessages<Msgs, Svc, Snk, InBody, OutBody>
+impl<Msgs, Handler, Snk, InBody, OutBody>
+    OutgoingMessages<Msgs, Handler, Handler::Future, Snk, InBody, OutBody>
 where
     Msgs: TryStream<Ok = Message<InBody>>,
-    Svc: tower_service::Service<(Address, InBody)>,
+    Handler: tower_service::Service<(Address, InBody)>,
 {
     pub(super) fn new(
         incoming_messages: Msgs,
-        server_responses: server::Responses<Svc, InBody>,
+        server_responses: server::Responses<Handler, Handler::Future, InBody>,
         server_oneway_sink: Snk,
         client_requests: client::Requests<OutBody, InBody>,
     ) -> Self {
@@ -95,12 +94,13 @@ where
     }
 }
 
-impl<Msgs, Svc, Snk, InBody, OutBody> Stream for OutgoingMessages<Msgs, Svc, Snk, InBody, OutBody>
+impl<Msgs, Handler, Snk, InBody, OutBody> Stream
+    for OutgoingMessages<Msgs, Handler, Handler::Future, Snk, InBody, OutBody>
 where
     Msgs: TryStream<Ok = Message<InBody>>,
     Msgs::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-    Svc: tower_service::Service<(Address, InBody), Response = OutBody>,
-    Svc::Error: std::string::ToString + Into<Box<dyn std::error::Error + Send + Sync>>,
+    Handler: tower_service::Service<(Address, InBody), Response = OutBody>,
+    Handler::Error: std::string::ToString + Into<Box<dyn std::error::Error + Send + Sync>>,
     Snk: Sink<(Address, OnewayRequest<InBody>)>,
     Snk::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
@@ -154,12 +154,12 @@ where
     }
 }
 
-impl<Msgs, Svc, Snk, InBody, OutBody> FusedStream
-    for OutgoingMessages<Msgs, Svc, Snk, InBody, OutBody>
+impl<Msgs, Svc, Sink, InBody, OutBody> FusedStream
+    for OutgoingMessages<Msgs, Svc, Svc::Future, Sink, InBody, OutBody>
 where
     Self: Stream,
     Svc: tower_service::Service<(Address, InBody)>,
-    server::Responses<Svc, InBody>: FusedStream,
+    server::Responses<Svc, Svc::Future, InBody>: FusedStream,
 {
     fn is_terminated(&self) -> bool {
         self.inner.dispatch_state == DispatchState::Terminated
@@ -168,24 +168,21 @@ where
     }
 }
 pin_project! {
-    struct Inner<Msgs, Svc, Snk, InBody, OutBody>
-        where
-            Svc: tower_service::Service<(Address, InBody)>,
-    {
+    struct Inner<Msgs, Svc, SvcFuture, Sink, InBody, OutBody> {
         #[pin]
         incoming_messages: Msgs,
         dispatch_state: DispatchState,
         #[pin]
-        server_responses: server::Responses<Svc, InBody>,
+        server_responses: server::Responses<Svc, SvcFuture, InBody>,
         #[pin]
-        server_oneway_sink: Snk,
+        server_oneway_sink: Sink,
         #[pin]
         client_requests: client::Requests<OutBody, InBody>,
         phantom: PhantomData<fn() -> OutBody>,
     }
 }
 
-impl<Msgs, Svc, Snk, InBody, OutBody> Inner<Msgs, Svc, Snk, InBody, OutBody>
+impl<Msgs, Svc, Snk, InBody, OutBody> Inner<Msgs, Svc, Svc::Future, Snk, InBody, OutBody>
 where
     Msgs: TryStream<Ok = Message<InBody>>,
     Msgs::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -217,7 +214,7 @@ where
                                 *this.dispatch_state = DispatchState::PendingFlushSink;
                             } else {
                                 // Revert to a state of non-readiness so that we need to poll the
-                                // service and sink for readiness again next time.
+                                // handler and sink for readiness again next time.
                                 *this.dispatch_state = DispatchState::NotReady;
                                 break Poll::Pending;
                             }
