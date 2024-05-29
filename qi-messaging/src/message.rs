@@ -164,7 +164,7 @@ pub enum Message<T> {
     Capabilities {
         id: Id,
         address: Address,
-        capabilities: CapabilitiesMap,
+        capabilities: CapabilitiesMap<'static>,
     },
     Cancel {
         id: Id,
@@ -337,7 +337,7 @@ pub struct MetaData {
 pub enum OnewayRequest<T> {
     Post(T),
     Event(T),
-    Capabilities(CapabilitiesMap),
+    Capabilities(CapabilitiesMap<'static>),
     Cancel(Id),
 }
 

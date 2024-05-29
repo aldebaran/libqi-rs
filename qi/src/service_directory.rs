@@ -4,7 +4,7 @@ use crate::{
     error::Error,
     object::{self, Object},
     service::{self, Info},
-    session::{self, Session},
+    session,
 };
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
@@ -31,7 +31,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(session: Arc<Session>) -> Self {
+    pub fn new(session: session::Session) -> Self {
         let object = object::Client::new(
             SERVICE_ID,
             service::MAIN_OBJECT_ID,

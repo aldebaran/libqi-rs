@@ -14,7 +14,7 @@ pub enum Address {
 }
 
 impl Address {
-    pub(crate) fn from_url(url: &Url) -> Result<Self, Error> {
+    pub fn from_url(url: &Url) -> Result<Self, Error> {
         match url.scheme().parse()? {
             Scheme::Tcp(ssl) => Ok(Self::Tcp {
                 address: socket_addr_from_url(url)?,
@@ -33,28 +33,6 @@ impl Address {
         match self {
             Address::Tcp { address, .. } => address.ip().is_loopback(),
         }
-    }
-}
-
-impl TryFrom<&str> for Address {
-    type Error = Error;
-    fn try_from(str: &str) -> Result<Self, Self::Error> {
-        Self::from_str(str)
-    }
-}
-
-impl TryFrom<String> for Address {
-    type Error = Error;
-    fn try_from(str: String) -> Result<Self, Self::Error> {
-        Self::from_str(&str)
-    }
-}
-
-impl FromStr for Address {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_url(&s.parse()?)
     }
 }
 

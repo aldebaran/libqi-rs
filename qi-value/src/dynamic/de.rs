@@ -1,4 +1,4 @@
-use crate::{value::de::ValueTypeSeed, Signature, Value};
+use crate::{value::de::ValueOfType, Signature, Value};
 use std::marker::PhantomData;
 
 pub(crate) struct DynamicVisitor<'v> {
@@ -34,7 +34,7 @@ impl<'de, 'v> serde::de::Visitor<'de> for DynamicVisitor<'v> {
 
         // Value
         let value = seq
-            .next_element_seed(ValueTypeSeed::new(value_type.as_ref()))?
+            .next_element_seed(ValueOfType::new(value_type.as_ref()))?
             .ok_or_else(|| Error::invalid_length(1, &self))?;
 
         Ok(value)
@@ -58,7 +58,7 @@ impl<'de, 'v> serde::de::Visitor<'de> for DynamicVisitor<'v> {
         }?;
         let value_type = signature.into_type();
         let value = match map.next_key()? {
-            Some(Field::Value) => map.next_value_seed(ValueTypeSeed::new(value_type.as_ref())),
+            Some(Field::Value) => map.next_value_seed(ValueOfType::new(value_type.as_ref())),
             _ => Err(Error::missing_field("value")),
         }?;
         Ok(value)

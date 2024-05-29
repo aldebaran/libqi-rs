@@ -151,7 +151,7 @@ impl Derive {
         let from_value = self.from_value(&value_ident);
         quote! {
             impl #impl_generics #qi ::FromValue<#value_lt> for #name #ty_generics #where_clause {
-                fn from_value(#value_ident: #qi ::Value<#value_lt>) -> Result<Self, #qi ::FromValueError> {
+                fn from_value(#value_ident: #qi ::Value<#value_lt>) -> std::result::Result<Self, #qi ::FromValueError> {
                     #from_value
                 }
             }

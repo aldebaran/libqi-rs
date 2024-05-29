@@ -566,7 +566,7 @@ fn sink_capabilities() {
 #[test]
 fn sink_error() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
-        mpsc::channel::<Result<_, &'static str>>(1);
+        mpsc::channel::<Result<_, StrError>>(1);
 
     let service = StrictService::new();
     let sink = StrictSink::new();
@@ -596,7 +596,7 @@ fn sink_error() {
 #[test]
 fn incoming_messages_error() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
-        mpsc::channel::<Result<_, &'static str>>(1);
+        mpsc::channel::<Result<_, StrError>>(1);
 
     let service = StrictService::<()>::new();
     let sink = StrictSink::new();
@@ -608,7 +608,7 @@ fn incoming_messages_error() {
     assert_pending!(outgoing.poll_next());
 
     incoming_messages_sender
-        .try_send(Err("This is a incoming error"))
+        .try_send(Err(StrError("This is a incoming error")))
         .expect("could not send capabilties message");
 
     service.set_state(ServiceState::Ready);
@@ -624,7 +624,7 @@ fn incoming_messages_error() {
 #[test]
 fn endpoint_termination() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
-        mpsc::channel::<Result<_, &'static str>>(1);
+        mpsc::channel::<Result<_, std::convert::Infallible>>(1);
 
     let service = CountedPendingService::new();
     let (client, outgoing) = endpoint(incoming_messages_receiver, &service, sink::drain());
@@ -671,6 +671,10 @@ fn endpoint_termination() {
     // messages, the stream is terminated.
     assert_matches!(assert_ready!(outgoing.poll_next()), None);
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct StrError(&'static str);
 
 // A service that returns futures that block until notified and tracks how many futures are created.
 struct CountedPendingService {
@@ -763,7 +767,7 @@ impl<T> StrictService<T> {
 
 impl<T> tower_service::Service<(Address, T)> for &StrictService<T> {
     type Response = T;
-    type Error = &'static str;
+    type Error = StrError;
     type Future = StrictServiceFuture<T>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -781,7 +785,7 @@ impl<T> tower_service::Service<(Address, T)> for &StrictService<T> {
             ServiceState::Ready => Poll::Ready(Ok(())),
             ServiceState::PendingError(err) => {
                 *state = ServiceState::Errored;
-                Poll::Ready(Err(err))
+                Poll::Ready(Err(StrError(err)))
             }
             ServiceState::Errored => panic!("poll_ready: service is errored"),
         }
@@ -803,7 +807,7 @@ impl<T> tower_service::Service<(Address, T)> for &StrictService<T> {
                 *state = ServiceState::NotReady;
                 StrictServiceFuture {
                     pending: true,
-                    value: Some(Err(err)),
+                    value: Some(Err(StrError(err))),
                 }
             }
             ServiceState::Errored => panic!("call: service is errored"),
@@ -823,15 +827,15 @@ enum ServiceState {
 
 pin_project! {
     #[project(!Unpin)]
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    #[derive(Debug)]
     struct StrictServiceFuture<T> {
         pending: bool,
-        value: Option<Result<T, &'static str>>,
+        value: Option<Result<T, StrError>>,
     }
 }
 
 impl<T> std::future::Future for StrictServiceFuture<T> {
-    type Output = Result<T, &'static str>;
+    type Output = Result<T, StrError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
@@ -893,7 +897,7 @@ enum SinkState {
 }
 
 impl<T> Sink<T> for &StrictSink<T> {
-    type Error = &'static str;
+    type Error = StrError;
 
     fn poll_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut state = self.state.borrow_mut();
@@ -910,7 +914,7 @@ impl<T> Sink<T> for &StrictSink<T> {
             SinkState::Flushing | SinkState::Closing | SinkState::Closed => Poll::Pending,
             SinkState::PendingError(err) => {
                 state.0 = SinkState::Errored;
-                Poll::Ready(Err(err))
+                Poll::Ready(Err(StrError(err)))
             }
             SinkState::Errored => panic!("poll_ready: sink is errored"),
         }
@@ -931,7 +935,7 @@ impl<T> Sink<T> for &StrictSink<T> {
             SinkState::Closed => panic!("start_send: sink is closed"),
             SinkState::PendingError(err) => {
                 state.0 = SinkState::Errored;
-                Err(err)
+                Err(StrError(err))
             }
             SinkState::Errored => panic!("start_send: sink is errored"),
         }
@@ -952,7 +956,7 @@ impl<T> Sink<T> for &StrictSink<T> {
             SinkState::Closed => panic!("poll_flush: sink is closed"),
             SinkState::PendingError(err) => {
                 state.0 = SinkState::Errored;
-                Poll::Ready(Err(err))
+                Poll::Ready(Err(StrError(err)))
             }
             SinkState::Errored => panic!("poll_flush: sink is errored"),
         }
@@ -976,7 +980,7 @@ impl<T> Sink<T> for &StrictSink<T> {
             SinkState::Closed => panic!("poll_close: sink is closed"),
             SinkState::PendingError(err) => {
                 state.0 = SinkState::Errored;
-                Poll::Ready(Err(err))
+                Poll::Ready(Err(StrError(err)))
             }
             SinkState::Errored => panic!("poll_close: sink is errored"),
         }

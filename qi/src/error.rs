@@ -1,13 +1,21 @@
 use crate::session;
+use qi_format as format;
+use qi_messaging as messaging;
 use qi_value::{object, FromValueError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error(transparent)]
+    ParseUrl(#[from] url::ParseError),
+
     #[error("authentication error")]
     Authentication(#[from] session::authentication::Error),
 
     #[error("no reachable endpoint")]
     NoReachableEndpoint,
+
+    #[error("no available message handler for address {0}")]
+    NoMessageHandler(messaging::message::Address),
 
     #[error("method not found {0}")]
     MethodNotFound(object::MemberAddress),
@@ -25,6 +33,9 @@ pub enum Error {
     FromValue(#[from] FromValueError),
 
     #[error(transparent)]
+    Messaging(#[from] messaging::Error),
+
+    #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
@@ -40,49 +51,19 @@ impl From<String> for Error {
     }
 }
 
-impl From<qi_messaging::Error> for Error {
-    fn from(err: qi_messaging::Error) -> Self {
-        match err {
-            qi_messaging::Error::Canceled => Self::Canceled,
-            qi_messaging::Error::Disconnected => Self::Disconnected,
-            qi_messaging::Error::Other(err) => Self::Other(err),
-        }
-    }
-}
-
-impl From<qi_format::Error> for Error {
-    fn from(err: qi_format::Error) -> Self {
+impl From<format::Error> for Error {
+    fn from(err: format::Error) -> Self {
         Self::Other(err.into())
     }
 }
 
-impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error {
-    fn from(_err: tokio::sync::mpsc::error::SendError<T>) -> Self {
-        Self::Disconnected
-    }
-}
-
-impl From<Error> for qi_messaging::Error {
+impl From<Error> for messaging::Error {
     fn from(err: Error) -> Self {
         match err {
-            Error::Canceled => Self::Canceled,
-            Error::Disconnected => Self::Disconnected,
-            Error::Other(err) => Self::Other(err),
-            _ => Self::Other(err.into()),
+            Error::Messaging(err) => err,
+            _ => messaging::Error::other(err),
         }
     }
 }
-
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
-#[error("no available handler for message address {0}")]
-pub(crate) struct NoMessageHandlerError(pub(crate) qi_messaging::message::Address);
-
-impl From<NoMessageHandlerError> for qi_messaging::Error {
-    fn from(err: NoMessageHandlerError) -> Self {
-        Self::Other(err.into())
-    }
-}
-
-pub(crate) type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 pub type Result<T> = std::result::Result<T, Error>;

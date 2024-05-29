@@ -53,12 +53,9 @@ pub mod signal;
 pub mod space;
 
 pub use self::{
-    error::Error,
-    object::{BoxObject, Object, ObjectExt},
-    session::{
-        authentication::{Authenticator, PermissiveAuthenticator},
-        Address,
-    },
+    error::{Error, Result},
+    object::{ArcObject, BoxObject, Object, ObjectExt},
+    session::authentication::{Authenticator, PermissiveAuthenticator},
     space::Space,
     value::Value,
 };

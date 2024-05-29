@@ -1,38 +1,34 @@
-use crate::{messaging::{self, message}, service, Error, Object};
+use crate::{messaging::message, object::ArcObject, service, Error};
 use bytes::Bytes;
 use qi_value::{ObjectId, ServiceId};
-use std::{collections::HashMap, sync::Arc};
-
-pub(super) struct RegisteredServicesMap(HashMap<ServiceId, (String, Objects)>);
+use std::collections::HashMap;
 
 #[derive(Default)]
-pub(super) struct Objects(HashMap<ObjectId, ArcObject>);
+pub(super) struct PendingServices(HashMap<String, ArcObject>);
 
-impl Objects {
-    pub(super) fn new() -> Self {
-        Self(HashMap::new())
-    }
-
-    pub(super) fn add_main_object(&mut self, object: ArcObject) {
-        self.0.insert(service::MAIN_OBJECT_ID, object);
-    }
-
-    pub(super) fn get(&self, id: &ObjectId) -> Option<&ArcObject> {
-        self.0.get(id)
+impl PendingServices {
+    pub(super) fn add(&mut self, name: String, object: ArcObject) -> Result<(), Error> {
+        use std::collections::hash_map::Entry;
+        match self.0.entry(name) {
+            Entry::Occupied(entry) => Err(Error::ServiceExists(entry.key().clone())),
+            Entry::Vacant(entry) => {
+                entry.insert(object);
+                Ok(())
+            }
+        }
     }
 }
 
-impl std::fmt::Debug for Objects {
+impl std::fmt::Debug for PendingServices {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_map()
-            .entries(self.0.keys().map(|id| (id, "Object")))
-            .finish()
+        f.debug_list().entries(self.0.keys()).finish()
     }
 }
 
+#[derive(Default, Debug)]
+pub(super) struct RegisteredServices(HashMap<ServiceId, (String, Objects)>);
 
-
-impl tower::Service<(message::Address, Bytes)> for RegisteredServicesMap {
+impl tower::Service<(message::Address, Bytes)> for RegisteredServices {
     type Response = Bytes;
     type Error = Error;
     type Future = CallFuture;
@@ -90,14 +86,40 @@ impl tower::Service<(message::Address, Bytes)> for RegisteredServicesMap {
     }
 }
 
-type ArcObject = Arc<dyn Object + Send + Sync>;
+#[derive(Default)]
+pub(super) struct Objects(HashMap<ObjectId, ArcObject>);
+
+impl Objects {
+    pub(super) fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    pub(super) fn add_main_object(&mut self, object: ArcObject) {
+        self.0.insert(service::MAIN_OBJECT_ID, object);
+    }
+
+    pub(super) fn get(&self, id: &ObjectId) -> Option<&ArcObject> {
+        self.0.get(id)
+    }
+}
+
+impl std::fmt::Debug for Objects {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entries(self.0.keys().map(|id| (id, "Object")))
+            .finish()
+    }
+}
 
 pub(super) struct CallFuture;
 
 impl std::future::Future for CallFuture {
     type Output = Result<Bytes, Error>;
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
         todo!()
     }
 }

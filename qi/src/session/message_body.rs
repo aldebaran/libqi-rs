@@ -1,11 +1,11 @@
-use crate::{format, messaging};
+use crate::{format, messaging, Error};
 use bytes::Bytes;
 
 #[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct BinaryFormattedBody(pub Bytes);
+pub struct BinaryValue(pub Bytes);
 
-impl messaging::BodyBuf for BinaryFormattedBody {
-    type Error = format::Error;
+impl messaging::BodyBuf for BinaryValue {
+    type Error = Error;
     type Data = Bytes;
 
     fn from_bytes(bytes: Bytes) -> Result<Self, Self::Error> {
@@ -20,13 +20,13 @@ impl messaging::BodyBuf for BinaryFormattedBody {
     where
         T: serde::Serialize,
     {
-        format::to_bytes(value).map(Self)
+        Ok(format::to_bytes(value).map(Self)?)
     }
 
-    fn deserialize<T>(self) -> Result<T, Self::Error>
+    fn deserialize<'de, T>(&'de self) -> Result<T, Self::Error>
     where
-        T: serde::de::DeserializeOwned,
+        T: serde::de::Deserialize<'de>,
     {
-        format::from_buf(self.0)
+        Ok(format::from_buf(self.0.as_ref())?)
     }
 }

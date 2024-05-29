@@ -1,6 +1,6 @@
 use crate::{
-    ty, ActionId, FromValue, FromValueError, IntoValue, Map, ObjectId, Reflect, ServiceId,
-    Signature, Type, Value,
+    ty, ActionId, FromValue, FromValueError, IntoValue, Map, ObjectId, ServiceId, Signature, Type,
+    Value,
 };
 
 #[derive(
@@ -20,12 +20,6 @@ pub struct Object {
     pub service_id: ServiceId,
     pub object_id: ObjectId,
     pub object_uid: ObjectUid,
-}
-
-impl Reflect for Object {
-    fn ty() -> Option<Type> {
-        Some(Type::Object)
-    }
 }
 
 impl<'a> IntoValue<'a> for Object {

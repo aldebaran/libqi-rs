@@ -7,7 +7,7 @@ use crate::{
 use serde::de::DeserializeSeed;
 use std::marker::PhantomData;
 
-impl<'de, 'v> serde::Deserialize<'de> for Value<'v> {
+impl<'de> serde::Deserialize<'de> for Value<'static> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -16,23 +16,23 @@ impl<'de, 'v> serde::Deserialize<'de> for Value<'v> {
     }
 }
 
-pub fn deserialize_value_of_type<'de, 'v, 't, D>(
+pub fn deserialize_value_of_type<'de, 't, D>(
     deserializer: D,
     value_type: Option<&'t Type>,
-) -> Result<Value<'v>, D::Error>
+) -> Result<Value<'static>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    ValueTypeSeed::new(value_type).deserialize(deserializer)
+    ValueOfType::new(value_type).deserialize(deserializer)
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct ValueTypeSeed<'v, 't> {
+pub struct ValueOfType<'v, 't> {
     value_type: Option<&'t Type>,
     phantom: PhantomData<&'v ()>,
 }
 
-impl<'v, 't> ValueTypeSeed<'v, 't> {
+impl<'v, 't> ValueOfType<'v, 't> {
     pub fn new(value_type: Option<&'t Type>) -> Self {
         Self {
             value_type,
@@ -41,7 +41,7 @@ impl<'v, 't> ValueTypeSeed<'v, 't> {
     }
 }
 
-impl<'de, 'v, 't> serde::de::DeserializeSeed<'de> for ValueTypeSeed<'v, 't> {
+impl<'de, 'v, 't> serde::de::DeserializeSeed<'de> for ValueOfType<'v, 't> {
     type Value = Value<'v>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -376,7 +376,7 @@ impl<'de, 'v, 't> serde::de::Visitor<'de> for OptionVisitor<'v, 't> {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = ValueTypeSeed::new(self.value_type).deserialize(deserializer)?;
+        let value = ValueOfType::new(self.value_type).deserialize(deserializer)?;
         Ok(Some(value))
     }
 
@@ -418,7 +418,7 @@ impl<'de, 'v, 't> serde::de::Visitor<'de> for ListVisitor<'v, 't> {
         A: serde::de::SeqAccess<'de>,
     {
         let mut values = seq.size_hint().map(Vec::with_capacity).unwrap_or_default();
-        while let Some(value) = seq.next_element_seed(ValueTypeSeed::new(self.value_type))? {
+        while let Some(value) = seq.next_element_seed(ValueOfType::new(self.value_type))? {
             values.push(value);
         }
         Ok(values)
@@ -459,8 +459,8 @@ impl<'de, 'v, 't> serde::de::Visitor<'de> for MapVisitor<'v, 't> {
     {
         let mut values = map.size_hint().map(Map::with_capacity).unwrap_or_default();
         while let Some((key, value)) = map.next_entry_seed(
-            ValueTypeSeed::new(self.key_type),
-            ValueTypeSeed::new(self.value_type),
+            ValueOfType::new(self.key_type),
+            ValueOfType::new(self.value_type),
         )? {
             values.insert(key, value);
         }
@@ -507,7 +507,7 @@ impl<'de, 'v, 't> serde::de::Visitor<'de> for TupleVisitor<'v, 't> {
                 None => break Ok(values),
             };
             let value = seq
-                .next_element_seed(ValueTypeSeed::new(*element_type))?
+                .next_element_seed(ValueOfType::new(*element_type))?
                 .ok_or_else(|| A::Error::invalid_length(index, &self))?;
             values.push(value);
         }

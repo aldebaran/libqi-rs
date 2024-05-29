@@ -1,40 +1,47 @@
-mod messaging_service;
 mod server;
-mod objects;
+mod services;
+mod session_cache;
 
-use self::messaging_service::MessagingService;
+use std::sync::Arc;
+
 pub use self::server::BindError;
+use self::{
+    server::Server,
+    services::{PendingServices, RegisteredServices},
+};
 use crate::{
     object::{self, BoxObject, Object},
     os::MachineId,
     service::{self, Info},
-    service_directory::{self, ServiceDirectory},
-    session, value, Address, Error, PermissiveAuthenticator, Space,
+    service_directory::ServiceDirectory,
+    session, value, Error, Space,
 };
 use async_trait::async_trait;
-use std::collections::HashMap;
+use qi_messaging::Address;
+use tower::Service;
 
-#[derive(Debug)]
-pub struct Builder {
-    server: server::Builder<PermissiveAuthenticator>,
-    services: Services,
+#[async_trait]
+pub trait Node {
+    async fn add_service<S, O>(&mut self, name: S, object: O) -> Result<(), Error>
+    where
+        S: ToString,
+        O: Object + Sync + Send + 'static;
+
+    async fn remove_service(&mut self, name: &str) -> Result<BoxObject, Error>;
 }
 
-impl Builder {
+#[derive(Debug)]
+pub struct DetachedNode {
+    server: Server,
+    services: PendingServices,
+}
+
+impl DetachedNode {
     fn new() -> Self {
         Self {
-            server: server::Builder::new(),
-            services: Services::default(),
+            server: server::Server::new(),
+            services: PendingServices::default(),
         }
-    }
-
-    /// Add a named service to the node.
-    pub fn add_service<O>(mut self, name: String, object: O) -> Self
-    where
-        O: Object + Sync + Send + 'static,
-    {
-        self.services.0.insert(name, Box::new(object));
-        self
     }
 
     /// Bind the node to an address, accepting incoming connections on an
@@ -44,49 +51,16 @@ impl Builder {
         self
     }
 
-    /// Attach the node to an existing space.
-    pub fn attach_to_space(self, address: Address) -> AttachBuilder {
-        AttachBuilder {
-            server: self.server,
-            services: self.services,
-            address,
-            authentication_parameters: session::authentication::Parameters::new(),
-        }
-    }
-
-    /// Host a new space on this node.
-    fn host_space(self) -> HostBuilder<PermissiveAuthenticator> {
-        HostBuilder {
-            server: self.server,
-            services: self.services,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct AttachBuilder {
-    services: Services,
-    server: server::Builder<PermissiveAuthenticator>,
-    address: Address,
-    authentication_parameters: session::authentication::Parameters,
-}
-
-impl AttachBuilder {
-    pub fn set_authentication_parameter<V>(mut self, name: String, value: V) -> Self
-    where
-        V: value::IntoValue<'static>,
-    {
-        self.authentication_parameters
-            .insert(name, value.into_value());
-        self
-    }
-
-    /// Builds the node, attaching it to the space hosted by another node with
-    /// the configured parameters.
+    /// Attaches the node to the space hosted at the given address.
     ///
     /// All services added to this node are registered on the space. Any
     /// connection or registration failure causes the attachment to stop.
-    pub async fn build(self) -> Result<Node<service_directory::Client>, Error> {
+    pub async fn attach_to_space(
+        self,
+        address: Address,
+        authentication_parameters: session::authentication::Parameters,
+    ) -> Result<AttachedNode, Error> {
+        todo!()
         // let service = MessagingService::new(registered_services_receiver);
         // let session_registry = session::Registry::new(self.service.clone());
         // let sd_session = session_registry
@@ -129,52 +103,50 @@ impl AttachBuilder {
         //     session_registry,
         //     service_directory,
         // })
-        todo!()
-    }
-}
-
-#[derive(Debug)]
-pub struct HostBuilder<A> {
-    server: server::Builder<A>,
-    services: Services,
-}
-
-impl<A> HostBuilder<A> {
-    pub fn set_authenticator<A2>(mut self, authenticator: A2) -> HostBuilder<A2> {
-        HostBuilder {
-            server: self.server.set_authenticator(authenticator),
-            services: self.services,
-        }
     }
 
-    pub async fn build(self) -> Result<Node<service_directory::Client>, Error> {
-        todo!()
-    }
-}
-
-#[derive(Debug)]
-pub struct Node<SD> {
-    session_registry: session::Cache<MessagingService>,
-    service_directory: SD,
-}
-
-impl<SD> Node<SD> {
-    fn endpoints(&self) -> &[Address] {
+    /// Host a new space on this node.
+    fn host_space<A>(self, authenticator: A) -> AttachedNode {
         todo!()
     }
 }
 
 #[async_trait]
-impl<SD> Space for Node<SD>
-where
-    SD: ServiceDirectory + Send + Sync,
-{
-    type ServiceDirectory = SD;
+impl Node for DetachedNode {
+    /// Add a named service to the node.
+    async fn add_service<S, O>(&mut self, name: S, object: O) -> Result<(), Error>
+    where
+        S: ToString,
+        O: Object + Sync + Send + 'static,
+    {
+        self.services.add(name.to_string(), object)
+    }
 
+    async fn remove_service(&mut self, name: &str) -> Result<BoxObject, Error> {}
+}
+
+pub struct AttachedNode {
+    service_directory: Arc<dyn ServiceDirectory>,
+    services: RegisteredServices,
+    session_cache: SessionCache,
+    server: Server,
+}
+
+impl std::fmt::Debug for AttachedNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AttachedNode")
+            .field("services", &self.services)
+            .field("server", &self.server)
+            .finish()
+    }
+}
+
+#[async_trait]
+impl Space for AttachedNode {
     async fn service(&self, name: &str) -> Result<BoxObject, Error> {
         let service = self.service_directory.service(name).await?;
         let session = self
-            .session_registry
+            .session_cache
             .get(
                 name,
                 sort_service_endpoints(&service),
@@ -182,20 +154,17 @@ where
                 Default::default(),
             )
             .await?;
-        let meta_object =
-            object::fetch_meta(&session, service.id(), service::MAIN_OBJECT_ID).await?;
-        let object = object::Client::new(
+        let object = object::Client::connect(
             service.id(),
             service::MAIN_OBJECT_ID,
             service.object_uid(),
-            meta_object,
             session,
         );
         Ok(Box::new(object))
     }
 
-    fn service_directory(&self) -> &Self::ServiceDirectory {
-        &self.service_directory
+    fn service_directory(&self) -> &dyn ServiceDirectory {
+        self.service_directory.as_ref()
     }
 }
 
@@ -209,13 +178,4 @@ fn sort_service_endpoints(service: &Info) -> Vec<session::Reference> {
         )
     });
     endpoints
-}
-
-#[derive(Default)]
-pub(super) struct Services(HashMap<String, BoxObject<'static>>);
-
-impl std::fmt::Debug for Services {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.0.keys()).finish()
-    }
 }

@@ -1,8 +1,4 @@
-use crate::{
-    error::Error,
-    os,
-    session::{self, Session},
-};
+use crate::{error::Error, os, session};
 use async_trait::async_trait;
 use qi_messaging::message;
 pub use qi_value::{
@@ -40,6 +36,7 @@ pub trait Object {
 }
 
 pub type BoxObject<'a> = Box<dyn Object + Send + Sync + 'a>;
+pub type ArcObject = Arc<dyn Object + Send + Sync>;
 
 #[sealed]
 #[async_trait]
@@ -161,24 +158,24 @@ pub struct Client {
     id: Id,
     uid: Uid,
     meta: MetaObject,
-    session: Session,
+    session: session::Session,
 }
 
 impl Client {
-    pub(crate) fn new(
+    pub(crate) async fn connect(
         service_id: ServiceId,
         id: Id,
         uid: Uid,
-        meta: MetaObject,
-        session: Session,
-    ) -> Self {
-        Self {
+        session: session::Session,
+    ) -> Result<Self, Error> {
+        let meta = fetch_meta_object(&session, service_id, id).await?;
+        Ok(Self {
             service_id,
             id,
             uid,
-            session,
             meta,
-        }
+            session,
+        })
     }
 
     pub fn id(&self) -> session::Uid {
@@ -186,14 +183,14 @@ impl Client {
     }
 }
 
-pub(crate) async fn fetch_meta(
-    session: &Session,
+pub(crate) async fn fetch_meta_object(
+    session: &session::Session,
     service_id: ServiceId,
     id: Id,
 ) -> Result<MetaObject, Error> {
     Ok(session
         .call(
-            message::Address::new(service_id, id, ACTION_ID_METAOBJECT),
+            message::Address(service_id, id, ACTION_ID_METAOBJECT),
             0.into_value(), // unused
             MetaObject::signature().into_type(),
         )
@@ -219,7 +216,7 @@ impl Object for Client {
         Ok(self
             .session
             .call(
-                message::Address::new(self.service_id, self.id, method.uid),
+                message::Address(self.service_id, self.id, method.uid),
                 args,
                 method.return_signature.to_type().cloned(),
             )

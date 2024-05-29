@@ -1,4 +1,5 @@
-use crate::{Address, Error};
+use crate::Error;
+use qi_messaging::Address;
 use qi_value as value;
 use std::str::FromStr;
 use url::Url;
@@ -140,11 +141,9 @@ pub(crate) enum Inner {
 
 #[cfg(test)]
 mod tests {
-    use value::FromValue;
-
     use super::*;
-    use crate::Address;
     use std::net::Ipv4Addr;
+    use value::FromValue;
 
     #[test]
     fn test_addresses_deserialize() {
@@ -154,7 +153,8 @@ mod tests {
             0x3a, 0x2f, 0x2f, 0x31, 0x32, 0x37, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x31, 0x3a, 0x34,
             0x31, 0x36, 0x38, 0x31,
         ];
-        let endpoints = Vec::<Reference>::from_value(qi_format::from_buf(input.as_slice()).unwrap()).unwrap();
+        let endpoints =
+            Vec::<Reference>::from_value(qi_format::from_buf(input.as_slice()).unwrap()).unwrap();
         assert_eq!(
             endpoints,
             [

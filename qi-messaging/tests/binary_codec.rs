@@ -187,10 +187,10 @@ impl qi_messaging::BodyBuf for JsonBody {
         serde_json::to_value(value).map(Self)
     }
 
-    fn deserialize<T>(self) -> Result<T, Self::Error>
+    fn deserialize<'de, T>(&'de self) -> Result<T, Self::Error>
     where
-        T: serde::de::DeserializeOwned,
+        T: serde::de::Deserialize<'de>,
     {
-        serde_json::from_value(self.0)
+        T::deserialize(&self.0)
     }
 }

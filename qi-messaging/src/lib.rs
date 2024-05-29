@@ -53,12 +53,12 @@ pub mod message;
 mod server;
 
 pub use self::{
+    address::Address,
     body::BodyBuf,
     client::{CallFuture, Client, WeakClient},
-    endpoint::endpoint,
     error::Error,
     message::Message,
 };
 pub use qi_value as value;
 
-pub type CapabilitiesMap = std::collections::HashMap<String, value::Dynamic<value::Value<'static>>>;
+pub type CapabilitiesMap<'a> = std::collections::HashMap<String, value::Dynamic<value::Value<'a>>>;

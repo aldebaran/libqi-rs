@@ -1,50 +1,35 @@
-use crate::{Address, PermissiveAuthenticator};
+use crate::{Authenticator, PermissiveAuthenticator};
+use qi_messaging::Address;
 
-#[derive(Debug)]
-pub(super) struct Builder<A> {
-    authenticator: A,
-    addresses: Vec<Address>,
-}
-
-impl Builder<PermissiveAuthenticator> {
-    pub(super) fn new() -> Self {
-        Self {
-            authenticator: PermissiveAuthenticator,
-            addresses: Vec::new(),
-        }
-    }
-}
-
-impl<A> Builder<A> {
-    pub(super) fn set_authenticator<A2>(mut self, authenticator: A2) -> Builder<A2> {
-        Builder {
-            authenticator,
-            addresses: self.addresses,
-        }
-    }
-
-    pub(super) fn bind(&mut self, address: Address) {
-        self.addresses.push(address)
-    }
-}
-
-#[derive(Default, Debug)]
 pub(super) struct Server {
     endpoints: Vec<Address>,
+    authenticator: Box<dyn Authenticator>,
 }
 
 impl Server {
-    // pub(super) fn new(service: Svc, authenticator: A) -> Self {
-    //     Self {
-    //         service,
-    //         authenticator,
-    //         endpoints: Vec::new(),
-    //         server_tasks: JoinSet::new(),
-    //     }
-    // }
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
 
     pub(super) fn endpoints(&self) -> &[Address] {
         &self.endpoints
+    }
+}
+
+impl std::fmt::Debug for Server {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Server")
+            .field("endpoints", &self.endpoints)
+            .finish()
+    }
+}
+
+impl Default for Server {
+    fn default() -> Self {
+        Self {
+            endpoints: Default::default(),
+            authenticator: Box::new(PermissiveAuthenticator),
+        }
     }
 }
 

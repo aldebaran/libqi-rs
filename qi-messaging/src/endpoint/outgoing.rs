@@ -98,11 +98,11 @@ impl<Msgs, Handler, Snk, InBody, OutBody> Stream
     for OutgoingMessages<Msgs, Handler, Handler::Future, Snk, InBody, OutBody>
 where
     Msgs: TryStream<Ok = Message<InBody>>,
-    Msgs::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    Msgs::Error: std::error::Error + Sync + Send + 'static,
     Handler: tower_service::Service<(Address, InBody), Response = OutBody>,
-    Handler::Error: std::string::ToString + Into<Box<dyn std::error::Error + Send + Sync>>,
+    Handler::Error: std::error::Error + Sync + Send + 'static,
     Snk: Sink<(Address, OnewayRequest<InBody>)>,
-    Snk::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    Snk::Error: std::error::Error + Sync + Send + 'static,
 {
     type Item = Result<Message<OutBody>, Error>;
 
@@ -185,11 +185,11 @@ pin_project! {
 impl<Msgs, Svc, Snk, InBody, OutBody> Inner<Msgs, Svc, Svc::Future, Snk, InBody, OutBody>
 where
     Msgs: TryStream<Ok = Message<InBody>>,
-    Msgs::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    Msgs::Error: std::error::Error + Sync + Send + 'static,
     Svc: tower_service::Service<(Address, InBody), Response = OutBody>,
-    Svc::Error: std::string::ToString + Into<Box<dyn std::error::Error + Send + Sync>>,
+    Svc::Error: std::error::Error + Sync + Send + 'static,
     Snk: Sink<(Address, OnewayRequest<InBody>)>,
-    Snk::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    Snk::Error: std::error::Error + Sync + Send + 'static,
 {
     fn poll_dispatch(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
         let mut this = self.as_mut().project();

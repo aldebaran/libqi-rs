@@ -1,7 +1,7 @@
-use std::cmp::Ordering;
 use once_cell::sync::Lazy;
 use qi_messaging::CapabilitiesMap;
 use qi_value::{Dynamic, IntoValue};
+use std::cmp::Ordering;
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub(crate) struct Capabilities {
@@ -43,7 +43,7 @@ impl Capabilities {
         }
     }
 
-    fn to_map(self) -> CapabilitiesMap {
+    fn to_map(self) -> CapabilitiesMap<'static> {
         CapabilitiesMap::from_iter([
             (
                 Self::REMOTE_CANCELABLE_CALLS.to_owned(),
@@ -111,7 +111,7 @@ pub(crate) fn check_required(
     Ok(capabilities)
 }
 
-pub(crate) fn local_map() -> &'static CapabilitiesMap {
+pub(crate) fn local_map() -> &'static CapabilitiesMap<'static> {
     const LOCAL_CAPABILITIES: Capabilities = Capabilities::new();
     static LOCAL_CAPABILITIES_MAP: Lazy<CapabilitiesMap> =
         Lazy::new(|| LOCAL_CAPABILITIES.to_map());
@@ -133,7 +133,7 @@ fn intersect(this: &mut CapabilitiesMap, other: &CapabilitiesMap) {
     this.retain(|k, _| other.get(k).is_some());
 }
 
-pub(crate) fn shared_with_local(map: &CapabilitiesMap) -> CapabilitiesMap {
+pub(crate) fn shared_with_local(map: &CapabilitiesMap) -> CapabilitiesMap<'static> {
     let mut local = local_map().clone();
     intersect(&mut local, map);
     local
@@ -142,7 +142,10 @@ pub(crate) fn shared_with_local(map: &CapabilitiesMap) -> CapabilitiesMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{messaging::CapabilitiesMap, value::{Value, Dynamic}};
+    use crate::{
+        messaging::CapabilitiesMap,
+        value::{Dynamic, Value},
+    };
     use assert_matches::assert_matches;
 
     #[test]

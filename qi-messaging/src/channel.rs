@@ -1,131 +1,102 @@
-use crate::{address::Address, binary_codec, endpoint, message, BodyBuf, Client, Error};
-use futures::{Sink, SinkExt, StreamExt};
-use std::{future::Future, pin::Pin};
+use crate::{address::Address, binary_codec, BodyBuf, Error, Message};
+use async_stream::stream;
+use futures::{Sink, SinkExt, Stream, TryStreamExt};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
+    net::{TcpListener, TcpStream},
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-pub async fn connect<'a, WriteBody, ReadBody, Handler, Snk>(
+pub async fn connect<ReadBody, WriteBody>(
     address: Address,
-    handler: Handler,
-    oneway_requests_sink: Snk,
 ) -> Result<
     (
-        Client<WriteBody, ReadBody>,
-        impl Future<Output = Result<(), Error>>,
+        impl Stream<Item = Result<Message<ReadBody>, Error>>,
+        impl Sink<Message<WriteBody>, Error = Error>,
     ),
-    std::io::Error,
+    Error,
 >
 where
-    Handler: tower_service::Service<(message::Address, ReadBody), Response = WriteBody>,
-    Handler::Error: std::string::ToString + Into<Box<dyn std::error::Error + Send + Sync>>,
-    Snk: Sink<(message::Address, message::OnewayRequest<ReadBody>)>,
-    Snk::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-    ReadBody: BodyBuf + Send,
+    ReadBody: BodyBuf,
     ReadBody::Error: std::error::Error + Sync + Send + 'static,
-    WriteBody: BodyBuf + Send,
+    WriteBody: BodyBuf,
     WriteBody::Error: std::error::Error + Send + Sync + 'static,
 {
-    let (read, write) = connect_transport(address).await?;
-    let messages_stream = FramedRead::new(read, binary_codec::Decoder::new());
-    let messages_sink = FramedWrite::new(write, binary_codec::Encoder);
-
-    let (client, outgoing_messages) = endpoint(messages_stream, handler, oneway_requests_sink);
-    let connection = outgoing_messages.forward(messages_sink.sink_err_into());
-    Ok((client, connection))
+    let (read, write) = match address {
+        Address::Tcp { address, ssl: None } => {
+            let (read, write) = TcpStream::connect(address).await?.into_split();
+            (Box::pin(read), Box::pin(write))
+        }
+        _ => unimplemented!(),
+    };
+    Ok(rw_to_messages_stream_sink(read, write))
 }
 
-async fn connect_transport(
+pub async fn serve<ReadBody, WriteBody>(
     address: Address,
 ) -> Result<
     (
-        Pin<Box<dyn AsyncRead + Send>>,
-        Pin<Box<dyn AsyncWrite + Send>>,
+        impl Stream<
+            Item = (
+                impl Stream<Item = Result<Message<ReadBody>, Error>>,
+                impl Sink<Message<WriteBody>, Error = Error>,
+                Address,
+            ),
+        >,
+        Vec<Address>,
     ),
-    std::io::Error,
-> {
+    Error,
+>
+where
+    ReadBody: BodyBuf,
+    ReadBody::Error: std::error::Error + Sync + Send + 'static,
+    WriteBody: BodyBuf,
+    WriteBody::Error: std::error::Error + Send + Sync + 'static,
+{
     match address {
-        Address::Tcp { address, ssl: None } => {
-            let (read, write) = TcpStream::connect(address).await?.into_split();
-            Ok((Box::pin(read), Box::pin(write)))
+        Address::Tcp { address, ssl } => {
+            if ssl.is_some() {
+                // TODO - handle listening as a SSL/TLS endpoint.
+                unimplemented!("binding to a TCP endpoint with SSL is not yet supported")
+            }
+            let listener = TcpListener::bind(address).await?;
+            let endpoints = listener
+                .local_addr()
+                .map(|address| Address::Tcp { address, ssl })
+                .into_iter()
+                .collect();
+            let clients = stream! {
+                loop {
+                    // TODO: Handle case when accept returns an error that is fatal for this listener.
+                    if let Ok((socket , address)) = listener.accept().await {
+                        let (read, write) = socket.into_split();
+                        let (stream, sink) = rw_to_messages_stream_sink(read, write);
+                        yield (stream, sink, Address::Tcp { address, ssl });
+                    }
+                }
+            };
+            Ok((clients, endpoints))
         }
-        _ => unimplemented!(),
     }
 }
 
-// pub(crate) async fn serve<'a, F, Svc>(
-//     address: Address,
-//     make_service: F,
-// ) -> Result<(ServerClientsStream<'a, F>, Vec<Address>), std::io::Error>
-// where
-//     F: FnMut() -> Svc,
-//     Svc: tower_service::Service<(message::Address, Bytes)> + 'a,
-// {
-//     match address {
-//         Address::Tcp { address, ssl } => {
-//             if address.port() == 0 {
-//                 unimplemented!("binding to a TCP endpoint with port 0 is not yet supported")
-//             }
-//             if ssl.is_some() {
-//                 unimplemented!("binding to a TCP endpoint with SSL is not yet supported")
-//             }
-//             let listener = TcpListener::bind(address).await?;
-//             let endpoints = listener
-//                 .local_addr()
-//                 .map(|address| Address::Tcp { address, ssl })
-//                 .into_iter()
-//                 .collect();
-//             let clients = ServerClientsStream {
-//                 listener,
-//                 make_service,
-//                 ssl,
-//                 phantom: PhantomData,
-//             };
-//             Ok((clients, endpoints))
-//         }
-//     }
-// }
-
-// pub(crate) struct ServerClientsStream<'a, F> {
-//     listener: TcpListener,
-//     make_service: F,
-//     ssl: Option<SslKind>,
-//     phantom: PhantomData<&'a ()>,
-// }
-
-// impl<'a, F, Svc> Stream for ServerClientsStream<'a, F>
-// where
-//     F: FnMut() -> Svc,
-//     Svc: tower_service::Service<(message::Address, Bytes)> + 'a,
-// {
-//     type Item = (messaging::Client, Connection<'a>, Address);
-
-//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-//         loop {
-//             // TODO: Handle case when accept returns an error that is fatal for this listener.
-//             if let Ok((socket, address)) = ready!(self.listener.poll_accept(cx)) {
-//                 let (read, write) = socket.into_split();
-//                 let (client, connection) = connect_rw_endpoint(read, write, (self.make_service)());
-//                 return Poll::Ready(Some((
-//                     client,
-//                     connection,
-//                     Address::Tcp {
-//                         address,
-//                         ssl: self.ssl,
-//                     },
-//                 )));
-//             }
-//         }
-//     }
-// }
-
-// impl<'a, F> FusedStream for ServerClientsStream<'a, F>
-// where
-//     Self: Stream,
-// {
-//     fn is_terminated(&self) -> bool {
-//         false
-//     }
-// }
+fn rw_to_messages_stream_sink<R, W, ReadBody, WriteBody>(
+    read: R,
+    write: W,
+) -> (
+    impl Stream<Item = Result<Message<ReadBody>, Error>>,
+    impl Sink<Message<WriteBody>, Error = Error>,
+)
+where
+    R: AsyncRead,
+    W: AsyncWrite,
+    ReadBody: BodyBuf,
+    ReadBody::Error: std::error::Error + Sync + Send + 'static,
+    WriteBody: BodyBuf,
+    WriteBody::Error: std::error::Error + Send + Sync + 'static,
+{
+    (
+        FramedRead::new(read, binary_codec::Decoder::new()).err_into(),
+        FramedWrite::new(write, binary_codec::Encoder).sink_err_into(),
+    )
+}

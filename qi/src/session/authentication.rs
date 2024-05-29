@@ -2,7 +2,7 @@ use qi_messaging::CapabilitiesMap;
 use qi_value::{Dynamic, Value};
 use std::collections::HashMap;
 
-pub type Parameters = HashMap<String, Value<'static>>;
+pub type Parameters<'a> = HashMap<String, Value<'a>>;
 
 pub trait Authenticator {
     fn verify(&self, parameters: Parameters) -> Result<(), Error>;

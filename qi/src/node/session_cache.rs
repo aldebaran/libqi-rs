@@ -1,6 +1,6 @@
-use super::{authentication, reference, Address, Reference, Session};
 use crate::{messaging::message, Error};
 use bytes::Bytes;
+use qi_messaging::Address;
 use std::{
     collections::HashMap,
     sync::{Arc, Weak},
@@ -13,19 +13,19 @@ use tokio::sync::Mutex;
 /// It creates new sessions that are associated with services and register them
 /// for further retrieval, enabling usage of service session references.
 #[derive(Clone, Debug)]
-pub(crate) struct Cache<Svc> {
-    /// The service used to open messaging endpoints and receive
-    /// messages from new session channels.
-    service: Svc,
+pub(crate) struct Cache<Handler, Snk> {
+    handler: Handler,
+    oneway_requests_sink: Snk,
 
     /// The list of existing sessions with the associated service name.
     sessions: Arc<Mutex<HashMap<String, Weak<Session>>>>,
 }
 
-impl<Svc> Cache<Svc> {
-    pub(crate) fn new(service: Svc) -> Self {
+impl<Handler, Snk> Cache<Handler, Snk> {
+    pub(crate) fn new(handler: Handler, oneway_requests_sink: Snk) -> Self {
         Self {
-            service,
+            handler,
+            oneway_requests_sink,
             sessions: Arc::default(),
         }
     }
@@ -39,9 +39,9 @@ impl<Svc> Cache<Svc> {
     }
 }
 
-impl<Svc> Cache<Svc>
+impl<Handler, Snk> Cache<Handler, Snk>
 where
-    Svc: tower::Service<(message::Address, Bytes)> + Clone + 'static,
+    Handler: tower::Service<(message::Address, Bytes)> + Clone + 'static,
 {
     /// Gets a session to the given references, using the service name to store
     /// any created session for further retrieval.
@@ -84,7 +84,7 @@ where
         credentials: authentication::Parameters,
     ) -> Result<Arc<Session>, Error> {
         let (session, connection) =
-            Session::connect(address, credentials, self.service.clone()).await?;
+            Session::connect(address, credentials, self.handler.clone()).await?;
         let session = Arc::new(session);
         let service_name = service_name.to_owned();
         self.sessions

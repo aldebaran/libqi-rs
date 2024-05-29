@@ -90,7 +90,7 @@ impl std::fmt::Display for Info {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Address;
+    use qi_messaging::Address;
     use std::net::{Ipv4Addr, SocketAddr};
 
     #[test]

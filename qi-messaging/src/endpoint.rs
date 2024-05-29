@@ -5,38 +5,57 @@ use crate::{
     message::{Address, OnewayRequest},
     server, Client, Error, Message,
 };
-use futures::{stream::FusedStream, Sink, TryStream};
+use futures::{stream::FusedStream, Sink, SinkExt, Stream, StreamExt, TryStream};
+use std::future::Future;
 
-#[allow(clippy::type_complexity)]
-pub fn endpoint<Msgs, Handler, Snk, InBody, OutBody>(
+pub fn dispatch<Msgs, CallHandler, OnewaySink, InBody, OutBody>(
     messages: Msgs,
-    handker: Handler,
-    oneway_requests_sink: Snk,
+    call_handler: CallHandler,
+    oneway_sink: OnewaySink,
 ) -> (
     Client<OutBody, InBody>,
     impl FusedStream<Item = Result<Message<OutBody>, Error>>,
 )
 where
     Msgs: TryStream<Ok = Message<InBody>>,
-    Msgs::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
-    Handler: tower_service::Service<(Address, InBody), Response = OutBody>,
-    Handler::Error: std::string::ToString + Into<Box<dyn std::error::Error + Send + Sync>>,
-    Snk: Sink<(Address, OnewayRequest<InBody>)>,
-    Snk::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    Msgs::Error: std::error::Error + Sync + Send + 'static,
+    CallHandler: tower_service::Service<(Address, InBody), Response = OutBody>,
+    CallHandler::Error: std::error::Error + Sync + Send + 'static,
+    OnewaySink: Sink<(Address, OnewayRequest<InBody>)>,
+    OnewaySink::Error: std::error::Error + Sync + Send + 'static,
     InBody: Send,
     OutBody: Send,
 {
     let id_factory = SharedIdFactory::new();
     let (client, client_requests) = client::pair(id_factory, 1);
-    let server_responses = server::Responses::new(handker);
+    let server_responses = server::Responses::new(call_handler);
     // TODO: Use stream! instead of defining the stream ourselves
-    let outgoing = OutgoingMessages::new(
-        messages,
-        server_responses,
-        oneway_requests_sink,
-        client_requests,
-    );
+    let outgoing = OutgoingMessages::new(messages, server_responses, oneway_sink, client_requests);
     (client, outgoing)
+}
+
+pub fn start<MsgStream, MsgSink, CallHandler, OnewaySink, ReadBody, WriteBody>(
+    messages_stream: MsgStream,
+    messages_sink: MsgSink,
+    call_handler: CallHandler,
+    oneway_sink: OnewaySink,
+) -> (
+    Client<WriteBody, ReadBody>,
+    impl Future<Output = Result<(), Error>>,
+)
+where
+    MsgStream: Stream<Item = Result<Message<ReadBody>, Error>>,
+    MsgSink: Sink<Message<WriteBody>, Error = Error>,
+    CallHandler: tower_service::Service<(Address, ReadBody), Response = WriteBody>,
+    CallHandler::Error: std::error::Error + Sync + Send + 'static,
+    OnewaySink: Sink<(Address, OnewayRequest<ReadBody>)>,
+    OnewaySink::Error: std::error::Error + Sync + Send + 'static,
+    ReadBody: Send,
+    WriteBody: Send,
+{
+    let (client, outgoing_messages) = dispatch(messages_stream, call_handler, oneway_sink);
+    let connection = outgoing_messages.forward(messages_sink.sink_err_into());
+    (client, connection)
 }
 
 mod outgoing;

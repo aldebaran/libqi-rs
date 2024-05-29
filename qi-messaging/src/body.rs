@@ -12,7 +12,7 @@ pub trait BodyBuf: Sized {
     where
         T: serde::Serialize;
 
-    fn deserialize<T>(self) -> Result<T, Self::Error>
+    fn deserialize<'de, T>(&'de self) -> Result<T, Self::Error>
     where
-        T: serde::de::DeserializeOwned;
+        T: serde::de::Deserialize<'de>;
 }

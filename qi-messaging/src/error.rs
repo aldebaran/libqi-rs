@@ -12,9 +12,6 @@ pub enum Error {
     //------------------------------------------------------------------------
     // URL related errors.
     //------------------------------------------------------------------------
-    #[error(transparent)]
-    ParseUrl(#[from] url::ParseError),
-
     #[error("unsupported URL scheme \"{0}\"")]
     UnsupportedUrlScheme(String),
 
