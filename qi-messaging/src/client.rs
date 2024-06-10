@@ -1,7 +1,7 @@
 use crate::{
     id_factory::SharedIdFactory,
     message::{Address, Id, OnewayRequest, Response},
-    Error, Message,
+    CapabilitiesMap, Error, Message,
 };
 use futures::{
     stream::{FusedStream, FuturesUnordered},
@@ -83,9 +83,15 @@ where
         mut self: Pin<&mut Self>,
         (address, request): (Address, OnewayRequest<T>),
     ) -> Result<(), Self::Error> {
-        self.requests
-            .send_item(Request::Oneway(address, request))
-            .map_err(Into::into)
+        let request = match request {
+            OnewayRequest::Capabilities(capabilities) => Request::Capababilities {
+                address,
+                capabilities,
+            },
+            OnewayRequest::Post(value) => Request::Post { address, value },
+            OnewayRequest::Event(value) => Request::Event { address, value },
+        };
+        self.requests.send_item(request).map_err(Into::into)
     }
 
     fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -130,7 +136,18 @@ enum Request<T, R> {
         cancel_token: CancellationToken,
         response_sender: oneshot::Sender<Result<R, Error>>,
     },
-    Oneway(Address, OnewayRequest<T>),
+    Post {
+        address: Address,
+        value: T,
+    },
+    Event {
+        address: Address,
+        value: T,
+    },
+    Capababilities {
+        address: Address,
+        capabilities: CapabilitiesMap<'static>,
+    },
 }
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
@@ -336,19 +353,15 @@ impl<T, R> Stream for Requests<T, R> {
                             });
                             Message::Call { id, address, value }
                         }
-                        Request::Oneway(address, request) => match request {
-                            OnewayRequest::Post(value) => Message::Post { id, address, value },
-                            OnewayRequest::Event(value) => Message::Event { id, address, value },
-                            OnewayRequest::Capabilities(capabilities) => Message::Capabilities {
-                                id,
-                                address,
-                                capabilities,
-                            },
-                            OnewayRequest::Cancel(call_id) => Message::Cancel {
-                                id,
-                                address,
-                                call_id,
-                            },
+                        Request::Post { address, value } => Message::Post { id, address, value },
+                        Request::Event { address, value } => Message::Event { id, address, value },
+                        Request::Capababilities {
+                            address,
+                            capabilities,
+                        } => Message::Capabilities {
+                            id,
+                            address,
+                            capabilities,
                         },
                     };
                     Poll::Ready(Some(message))

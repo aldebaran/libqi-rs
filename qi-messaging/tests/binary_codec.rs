@@ -171,6 +171,7 @@ struct JsonBody(serde_json::Value);
 impl qi_messaging::BodyBuf for JsonBody {
     type Error = serde_json::Error;
     type Data = Bytes;
+    type Deserializer<'de> = &'de serde_json::Value;
 
     fn from_bytes(bytes: Bytes) -> Result<Self, Self::Error> {
         serde_json::from_slice(&bytes).map(Self)
@@ -187,10 +188,7 @@ impl qi_messaging::BodyBuf for JsonBody {
         serde_json::to_value(value).map(Self)
     }
 
-    fn deserialize<'de, T>(&'de self) -> Result<T, Self::Error>
-    where
-        T: serde::de::Deserialize<'de>,
-    {
-        T::deserialize(&self.0)
+    fn deserializer(&mut self) -> Self::Deserializer<'_> {
+        &self.0
     }
 }

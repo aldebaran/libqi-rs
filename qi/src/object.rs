@@ -35,7 +35,7 @@ pub trait Object {
     }
 }
 
-pub type BoxObject<'a> = Box<dyn Object + Send + Sync + 'a>;
+pub type BoxObject = Box<dyn Object + Send + Sync>;
 pub type ArcObject = Arc<dyn Object + Send + Sync>;
 
 #[sealed]
@@ -162,6 +162,21 @@ pub struct Client {
 }
 
 impl Client {
+    pub(crate) fn new(
+        service_id: ServiceId,
+        id: Id,
+        uid: Uid,
+        meta: MetaObject,
+        session: session::Session,
+    ) -> Self {
+        Self {
+            service_id,
+            id,
+            uid,
+            meta,
+            session,
+        }
+    }
     pub(crate) async fn connect(
         service_id: ServiceId,
         id: Id,
@@ -192,7 +207,7 @@ pub(crate) async fn fetch_meta_object(
         .call(
             message::Address(service_id, id, ACTION_ID_METAOBJECT),
             0.into_value(), // unused
-            MetaObject::signature().into_type(),
+            MetaObject::signature().into_type().as_ref(),
         )
         .await?
         .cast_into()?)
@@ -218,7 +233,7 @@ impl Object for Client {
             .call(
                 message::Address(self.service_id, self.id, method.uid),
                 args,
-                method.return_signature.to_type().cloned(),
+                method.return_signature.to_type(),
             )
             .await?)
     }

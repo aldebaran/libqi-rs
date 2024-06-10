@@ -109,6 +109,7 @@ pub struct Decoder<T> {
 impl<T> Decoder<T>
 where
     T: BodyBuf,
+    for<'de> <T::Deserializer<'de> as serde::Deserializer<'de>>::Error: Into<T::Error>,
 {
     pub fn new() -> Self {
         Self {
@@ -138,6 +139,7 @@ where
 impl<T> tokio_util::codec::Decoder for Decoder<T>
 where
     T: BodyBuf,
+    for<'de> <T::Deserializer<'de> as serde::Deserializer<'de>>::Error: Into<T::Error>,
 {
     type Item = Message<T>;
     type Error = DecodeError<T::Error>;

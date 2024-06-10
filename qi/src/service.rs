@@ -90,7 +90,8 @@ impl std::fmt::Display for Info {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use qi_messaging::Address;
+    use crate::{binary_value, messaging};
+    use messaging::Address;
     use std::net::{Ipv4Addr, SocketAddr};
 
     #[test]
@@ -110,7 +111,7 @@ mod tests {
             0xc1, 0x2e, 0xcb, 0xea, 0x6b, 0x58, 0xcc, 0x42, 0x20, 0xb7, 0x33, 0x3d, 0xc4, 0xe1,
             0x0d, 0x8a, 0xd6, 0x16,
         ][..];
-        let service_info: Info = input.deserialize_value().unwrap();
+        let service_info: Info = binary_value::deserialize_reflect(&mut input).unwrap();
         assert_eq!(
             service_info,
             Info {
@@ -119,8 +120,8 @@ mod tests {
                 machine_id: "9a65b56e-c3d3-4485-8924-661b036202b3".parse().unwrap(),
                 process_id: 3420486,
                 endpoints: vec![
-                    session::Reference::new_service("Calculator".to_owned()),
-                    session::Reference::new_endpoint(Address::Tcp {
+                    session::Reference::service("Calculator"),
+                    session::Reference::endpoint(Address::Tcp {
                         address: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 41681),
                         ssl: None
                     })
@@ -142,7 +143,7 @@ mod tests {
             0x14, 0x00, 0x00, 0x00, 0xfd, 0xeb, 0xc1, 0x2e, 0xcb, 0xea, 0x6b, 0x58, 0xcc, 0x42,
             0x20, 0xb7, 0x33, 0x3d, 0xc4, 0xe1, 0x0d, 0x8a, 0xd6, 0x16,
         ][..];
-        let object_uid: object::Uid = input.deserialize_value().unwrap();
+        let object_uid: object::Uid = binary_value::deserialize_reflect(&mut input).unwrap();
         assert_eq!(
             object_uid,
             object::Uid::from_bytes([

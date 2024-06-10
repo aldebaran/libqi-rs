@@ -29,6 +29,9 @@ pub enum Error {
     #[error("a service with the name \"{0}\" already exists on this node")]
     ServiceExists(String),
 
+    #[error("service \"{0}\" not found")]
+    ServiceNotFound(String),
+
     #[error("value conversion error")]
     FromValue(#[from] FromValueError),
 

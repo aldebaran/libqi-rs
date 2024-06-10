@@ -19,6 +19,8 @@ pub async fn connect<ReadBody, WriteBody>(
 where
     ReadBody: BodyBuf,
     ReadBody::Error: std::error::Error + Sync + Send + 'static,
+    for<'de> <ReadBody::Deserializer<'de> as serde::Deserializer<'de>>::Error:
+        Into<ReadBody::Error>,
     WriteBody: BodyBuf,
     WriteBody::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -50,6 +52,8 @@ pub async fn serve<ReadBody, WriteBody>(
 where
     ReadBody: BodyBuf,
     ReadBody::Error: std::error::Error + Sync + Send + 'static,
+    for<'de> <ReadBody::Deserializer<'de> as serde::Deserializer<'de>>::Error:
+        Into<ReadBody::Error>,
     WriteBody: BodyBuf,
     WriteBody::Error: std::error::Error + Send + Sync + 'static,
 {
@@ -92,6 +96,8 @@ where
     W: AsyncWrite,
     ReadBody: BodyBuf,
     ReadBody::Error: std::error::Error + Sync + Send + 'static,
+    for<'de> <ReadBody::Deserializer<'de> as serde::Deserializer<'de>>::Error:
+        Into<ReadBody::Error>,
     WriteBody: BodyBuf,
     WriteBody::Error: std::error::Error + Send + Sync + 'static,
 {

@@ -8,8 +8,8 @@ use crate::{
 use futures::{stream::FusedStream, Sink, SinkExt, Stream, StreamExt, TryStream};
 use std::future::Future;
 
-pub fn dispatch<Msgs, CallHandler, OnewaySink, InBody, OutBody>(
-    messages: Msgs,
+pub fn dispatch<MsgStream, CallHandler, OnewaySink, InBody, OutBody>(
+    messages: MsgStream,
     call_handler: CallHandler,
     oneway_sink: OnewaySink,
 ) -> (
@@ -17,8 +17,8 @@ pub fn dispatch<Msgs, CallHandler, OnewaySink, InBody, OutBody>(
     impl FusedStream<Item = Result<Message<OutBody>, Error>>,
 )
 where
-    Msgs: TryStream<Ok = Message<InBody>>,
-    Msgs::Error: std::error::Error + Sync + Send + 'static,
+    MsgStream: TryStream<Ok = Message<InBody>>,
+    MsgStream::Error: std::error::Error + Sync + Send + 'static,
     CallHandler: tower_service::Service<(Address, InBody), Response = OutBody>,
     CallHandler::Error: std::error::Error + Sync + Send + 'static,
     OnewaySink: Sink<(Address, OnewayRequest<InBody>)>,

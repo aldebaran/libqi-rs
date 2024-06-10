@@ -29,7 +29,7 @@ fn client_call() {
 
     let service = StrictService::new();
     let sink = StrictSink::new();
-    let (mut client, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (mut client, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -79,7 +79,7 @@ fn client_call_error() {
 
     let service = StrictService::new();
     let sink = StrictSink::new();
-    let (mut client, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (mut client, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -123,7 +123,7 @@ fn client_call_canceled() {
 
     let service = StrictService::new();
     let sink = StrictSink::new();
-    let (mut client, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (mut client, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -162,7 +162,7 @@ fn client_post() {
     let service = StrictService::new();
     let sink = StrictSink::new();
     let (mut client, outgoing) =
-        endpoint(stream::empty::<Result<_, Infallible>>(), &service, &sink);
+        endpoint::dispatch(stream::empty::<Result<_, Infallible>>(), &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -192,7 +192,7 @@ fn client_event() {
     let service = StrictService::new();
     let sink = StrictSink::new();
     let (mut client, outgoing) =
-        endpoint(stream::empty::<Result<_, Infallible>>(), &service, &sink);
+        endpoint::dispatch(stream::empty::<Result<_, Infallible>>(), &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -222,7 +222,7 @@ fn client_capabilities() {
     let service = StrictService::<()>::new();
     let sink = StrictSink::new();
     let (mut client, outgoing) =
-        endpoint(stream::empty::<Result<_, Infallible>>(), &service, &sink);
+        endpoint::dispatch(stream::empty::<Result<_, Infallible>>(), &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -262,7 +262,7 @@ fn service_call() {
 
     let service = StrictService::new();
     let sink = StrictSink::new();
-    let (_, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     service.set_state(ServiceState::Ready);
@@ -310,7 +310,7 @@ fn service_ready_error() {
 
     let service = StrictService::new();
     let sink = StrictSink::new();
-    let (_, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
 
@@ -339,7 +339,7 @@ fn service_call_error() {
 
     let service = StrictService::new();
     let sink = StrictSink::new();
-    let (_, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
 
@@ -382,7 +382,7 @@ fn service_call_cancel() {
         mpsc::channel::<Result<_, Infallible>>(1);
 
     let service = CountedPendingService::new();
-    let (_, outgoing) = endpoint(incoming_messages_receiver, &service, sink::drain());
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, sink::drain());
     let mut outgoing = task::spawn(outgoing);
 
     incoming_messages_sender
@@ -435,7 +435,7 @@ fn service_concurrent_calls() {
     .take(SERVICE_CONCURRENT_CALLS);
 
     let service = CountedPendingService::new();
-    let (_, outgoing) = endpoint(messages, &service, sink::drain());
+    let (_, outgoing) = endpoint::dispatch(messages, &service, sink::drain());
     let mut messages = task::spawn(outgoing);
 
     // Process incoming messages.
@@ -452,7 +452,7 @@ fn sink_post() {
 
     let service = StrictService::new();
     let sink = StrictSink::new();
-    let (_, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     service.set_state(ServiceState::Ready);
@@ -494,7 +494,7 @@ fn sink_event() {
 
     let service = StrictService::new();
     let sink = StrictSink::new();
-    let (_, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     service.set_state(ServiceState::Ready);
@@ -529,7 +529,7 @@ fn sink_capabilities() {
 
     let service = StrictService::<()>::new();
     let sink = StrictSink::new();
-    let (_, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     service.set_state(ServiceState::Ready);
@@ -570,7 +570,7 @@ fn sink_error() {
 
     let service = StrictService::new();
     let sink = StrictSink::new();
-    let (_, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
 
@@ -600,7 +600,7 @@ fn incoming_messages_error() {
 
     let service = StrictService::<()>::new();
     let sink = StrictSink::new();
-    let (_, outgoing) = endpoint(incoming_messages_receiver, &service, &sink);
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &service, &sink);
 
     let mut outgoing = task::spawn(outgoing);
     service.set_state(ServiceState::Ready);
@@ -627,7 +627,8 @@ fn endpoint_termination() {
         mpsc::channel::<Result<_, std::convert::Infallible>>(1);
 
     let service = CountedPendingService::new();
-    let (client, outgoing) = endpoint(incoming_messages_receiver, &service, sink::drain());
+    let (client, outgoing) =
+        endpoint::dispatch(incoming_messages_receiver, &service, sink::drain());
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());

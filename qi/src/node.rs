@@ -1,53 +1,66 @@
+mod messaging_handler;
 mod server;
-mod services;
-mod session_cache;
+mod service_map;
+mod session_factory;
 
-use std::sync::Arc;
-
-pub use self::server::BindError;
 use self::{
     server::Server,
-    services::{PendingServices, RegisteredServices},
+    service_map::{PendingServiceMap, ServiceMap},
 };
 use crate::{
     object::{self, BoxObject, Object},
     os::MachineId,
     service::{self, Info},
     service_directory::ServiceDirectory,
-    session, value, Error, Space,
+    session::{
+        self,
+        authentication::{self, Authenticator, PermissiveAuthenticator},
+    },
+    Error, Result, Space,
 };
 use async_trait::async_trait;
+use messaging_handler::MessagingHandler;
 use qi_messaging::Address;
-use tower::Service;
+use session_factory::SessionFactory;
+use std::{future::Future, sync::Arc};
+use tokio::sync::Mutex;
 
 #[async_trait]
 pub trait Node {
-    async fn add_service<S, O>(&mut self, name: S, object: O) -> Result<(), Error>
+    async fn add_service<S, O>(&mut self, name: String, object: O) -> Result<()>
     where
-        S: ToString,
         O: Object + Sync + Send + 'static;
 
-    async fn remove_service(&mut self, name: &str) -> Result<BoxObject, Error>;
+    async fn remove_service(&mut self, name: &str) -> Result<BoxObject>;
 }
 
-#[derive(Debug)]
-pub struct DetachedNode {
-    server: Server,
-    services: PendingServices,
+#[derive(Default, Debug)]
+pub struct Builder<Auth> {
+    authenticator: Auth,
+    bind_addresses: Vec<Address>,
+    services: PendingServiceMap,
 }
 
-impl DetachedNode {
-    fn new() -> Self {
-        Self {
-            server: server::Server::new(),
-            services: PendingServices::default(),
+impl<Auth> Builder<Auth>
+where
+    Auth: Authenticator + Send + Sync + Clone + 'static,
+{
+    pub fn new() -> Builder<PermissiveAuthenticator> {
+        Builder::default()
+    }
+
+    pub fn with_authenticator<A>(self, authenticator: A) -> Builder<A> {
+        Builder {
+            authenticator,
+            bind_addresses: self.bind_addresses,
+            services: self.services,
         }
     }
 
     /// Bind the node to an address, accepting incoming connections on an
     /// endpoint at this address.
-    pub fn listen(mut self, address: Address) -> Self {
-        self.server.bind(address);
+    pub fn bind(mut self, address: Address) -> Self {
+        self.bind_addresses.push(address);
         self
     }
 
@@ -58,9 +71,22 @@ impl DetachedNode {
     pub async fn attach_to_space(
         self,
         address: Address,
-        authentication_parameters: session::authentication::Parameters,
-    ) -> Result<AttachedNode, Error> {
+        authentication_parameters: authentication::Parameters<'_>,
+    ) -> Result<AttachedNode> {
         todo!()
+        // let services = Arc::default();
+        // let handler = MessagingHandler::new(Arc::clone(&services));
+        // let (server, server_connection) =
+        //     server::Server::new(handler.clone(), handler, authenticator);
+        // (
+        //     Self {
+        //         server,
+        //         pending_services: Default::default(),
+        //         services,
+        //     },
+        //     server_connection,
+        // )
+
         // let service = MessagingService::new(registered_services_receiver);
         // let session_registry = session::Registry::new(self.service.clone());
         // let sd_session = session_registry
@@ -112,23 +138,29 @@ impl DetachedNode {
 }
 
 #[async_trait]
-impl Node for DetachedNode {
+impl<A> Node for Builder<A>
+where
+    A: Send,
+{
     /// Add a named service to the node.
-    async fn add_service<S, O>(&mut self, name: S, object: O) -> Result<(), Error>
+    async fn add_service<S, O>(&mut self, name: String, object: O) -> Result<()>
     where
-        S: ToString,
         O: Object + Sync + Send + 'static,
     {
-        self.services.add(name.to_string(), object)
+        self.services.add(name, Box::new(object))
     }
 
-    async fn remove_service(&mut self, name: &str) -> Result<BoxObject, Error> {}
+    async fn remove_service(&mut self, name: &str) -> Result<BoxObject> {
+        self.services
+            .remove(name)
+            .ok_or_else(|| Error::ServiceNotFound(name.to_string()))
+    }
 }
 
 pub struct AttachedNode {
-    service_directory: Arc<dyn ServiceDirectory>,
-    services: RegisteredServices,
-    session_cache: SessionCache,
+    service_directory: Arc<dyn ServiceDirectory + Send + Sync>,
+    services: ServiceMap,
+    session_factory: SessionFactory<MessagingHandler, MessagingHandler>,
     server: Server,
 }
 
@@ -136,6 +168,7 @@ impl std::fmt::Debug for AttachedNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AttachedNode")
             .field("services", &self.services)
+            .field("session_factory", &self.session_factory)
             .field("server", &self.server)
             .finish()
     }
@@ -143,13 +176,13 @@ impl std::fmt::Debug for AttachedNode {
 
 #[async_trait]
 impl Space for AttachedNode {
-    async fn service(&self, name: &str) -> Result<BoxObject, Error> {
+    async fn service(&self, name: &str) -> Result<BoxObject> {
         let service = self.service_directory.service(name).await?;
         let session = self
-            .session_cache
-            .get(
+            .session_factory
+            .establish(
                 name,
-                sort_service_endpoints(&service),
+                sort_service_endpoints(&service).iter(),
                 // Connecting to service nodes of a space should not require credentials.
                 Default::default(),
             )
@@ -159,7 +192,8 @@ impl Space for AttachedNode {
             service::MAIN_OBJECT_ID,
             service.object_uid(),
             session,
-        );
+        )
+        .await?;
         Ok(Box::new(object))
     }
 

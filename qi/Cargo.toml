@@ -3,7 +3,6 @@ name = "qi"
 description = ""
 
 license-file = "../LICENSE.txt"
-repository = "https://github.com/nyibbang/libqi-rs"
 version = "0.1.0-dev"
 edition = "2021"
 rust-version = "1.68"
@@ -19,7 +18,7 @@ async-trait = "0.1.68"
 futures = "0.3.27"
 sealed = "0.5.0"
 thiserror = "1.0.39"
-tokio = { version = "1.28.2" }
+tokio = { version = "1.38.0" }
 tokio-util = { version = "0.7.10", features = ["codec"] }
 bytes = "1.5.0"
 once_cell = "1.18.0"
@@ -27,10 +26,9 @@ machine-uid = { version = "0.5.1", optional = true }
 dirs = "5.0.1"
 uuid = { version = "1.6.1", features = ["v4", "v5"] }
 sha1 = "0.10.6"
-tower = { version = "0.4.13", features = ["util", "filter", "steer"] }
+tower = { version = "0.4.13", features = ["util"] }
 serde = "1.0.197"
 url = { version = "2.5.0" }
-async-stream = "0.3.5"
 
 [dev-dependencies]
 assert_matches = "1.5.0"

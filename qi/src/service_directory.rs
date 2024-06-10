@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{
     error::Error,
     object::{self, Object},
@@ -13,7 +11,8 @@ use qi_value::{
     ActionId, IntoValue, Reflect, ServiceId,
 };
 
-pub(crate) const SERVICE_NAME: &str = "ServiceDirectory";
+pub(super) const SERVICE_NAME: &str = "ServiceDirectory";
+const SERVICE_ID: ServiceId = ServiceId(1);
 
 #[async_trait]
 pub trait ServiceDirectory {
@@ -32,14 +31,15 @@ pub struct Client {
 
 impl Client {
     pub fn new(session: session::Session) -> Self {
-        let object = object::Client::new(
-            SERVICE_ID,
-            service::MAIN_OBJECT_ID,
-            object::Uid::default(),
-            Meta::get().object.clone(),
-            session,
-        );
-        Self { object }
+        Self {
+            object: object::Client::new(
+                SERVICE_ID,
+                service::MAIN_OBJECT_ID,
+                object::Uid::default(),
+                Meta::get().object.clone(),
+                session,
+            ),
+        }
     }
 
     pub fn id(&self) -> session::Uid {
@@ -205,5 +205,3 @@ impl Meta {
         &META
     }
 }
-
-const SERVICE_ID: ServiceId = ServiceId(1);

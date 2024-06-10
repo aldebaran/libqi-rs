@@ -1,46 +1,18 @@
-use crate::{messaging::message, object::ArcObject, service, Error};
-use bytes::Bytes;
+use crate::{binary_value::BinaryValue, messaging::message, service, BoxObject, Error, Result};
 use qi_value::{ObjectId, ServiceId};
 use std::collections::HashMap;
 
-#[derive(Default)]
-pub(super) struct PendingServices(HashMap<String, ArcObject>);
-
-impl PendingServices {
-    pub(super) fn add(&mut self, name: String, object: ArcObject) -> Result<(), Error> {
-        use std::collections::hash_map::Entry;
-        match self.0.entry(name) {
-            Entry::Occupied(entry) => Err(Error::ServiceExists(entry.key().clone())),
-            Entry::Vacant(entry) => {
-                entry.insert(object);
-                Ok(())
-            }
-        }
-    }
-}
-
-impl std::fmt::Debug for PendingServices {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.0.keys()).finish()
-    }
-}
-
 #[derive(Default, Debug)]
-pub(super) struct RegisteredServices(HashMap<ServiceId, (String, Objects)>);
+pub(super) struct ServiceMap {
+    services: HashMap<ServiceId, ServiceObjects>,
+}
 
-impl tower::Service<(message::Address, Bytes)> for RegisteredServices {
-    type Response = Bytes;
-    type Error = Error;
-    type Future = CallFuture;
-
-    fn poll_ready(
+impl ServiceMap {
+    pub(super) async fn call(
         &mut self,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), Self::Error>> {
-        todo!()
-    }
-
-    fn call(&mut self, (address, value): (message::Address, Bytes)) -> Self::Future {
+        address: message::Address,
+        value: BinaryValue,
+    ) -> Result<BinaryValue> {
         todo!()
         // let address = call.address();
         // let service_id = address.service();
@@ -84,42 +56,63 @@ impl tower::Service<(message::Address, Bytes)> for RegisteredServices {
         //     Err(err) => future::err(messaging::Error::Other(err)).boxed(),
         // }
     }
+
+    pub(super) fn post(&mut self, address: message::Address, value: BinaryValue) -> Result<()> {
+        todo!()
+    }
+
+    pub(super) fn event(&mut self, address: message::Address, value: BinaryValue) -> Result<()> {
+        todo!()
+    }
 }
 
 #[derive(Default)]
-pub(super) struct Objects(HashMap<ObjectId, ArcObject>);
+struct ServiceObjects {
+    name: String,
+    objects: HashMap<ObjectId, BoxObject>,
+}
 
-impl Objects {
-    pub(super) fn new() -> Self {
-        Self(HashMap::new())
-    }
-
-    pub(super) fn add_main_object(&mut self, object: ArcObject) {
-        self.0.insert(service::MAIN_OBJECT_ID, object);
-    }
-
-    pub(super) fn get(&self, id: &ObjectId) -> Option<&ArcObject> {
-        self.0.get(id)
+impl ServiceObjects {
+    pub(super) fn new(name: String, main_object: BoxObject) -> Self {
+        Self {
+            name,
+            objects: [(service::MAIN_OBJECT_ID, main_object)]
+                .into_iter()
+                .collect(),
+        }
     }
 }
 
-impl std::fmt::Debug for Objects {
+impl std::fmt::Debug for ServiceObjects {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_map()
-            .entries(self.0.keys().map(|id| (id, "Object")))
+        f.debug_struct("ServiceObjects")
+            .field("name", &self.name)
             .finish()
     }
 }
 
-pub(super) struct CallFuture;
+#[derive(Default)]
+pub(super) struct PendingServiceMap(HashMap<String, BoxObject>);
 
-impl std::future::Future for CallFuture {
-    type Output = Result<Bytes, Error>;
+impl PendingServiceMap {
+    pub(super) fn add(&mut self, name: String, object: BoxObject) -> Result<()> {
+        use std::collections::hash_map::Entry;
+        match self.0.entry(name) {
+            Entry::Occupied(entry) => Err(Error::ServiceExists(entry.key().clone())),
+            Entry::Vacant(entry) => {
+                entry.insert(object);
+                Ok(())
+            }
+        }
+    }
 
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        todo!()
+    pub(super) fn remove(&mut self, name: &str) -> Option<BoxObject> {
+        self.0.remove(name)
+    }
+}
+
+impl std::fmt::Debug for PendingServiceMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.0.keys()).finish()
     }
 }

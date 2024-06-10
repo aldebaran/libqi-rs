@@ -8,7 +8,7 @@ pub trait Authenticator {
     fn verify(&self, parameters: Parameters) -> Result<(), Error>;
 }
 
-#[derive(Debug)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct PermissiveAuthenticator;
 
 impl Authenticator for PermissiveAuthenticator {
@@ -17,8 +17,8 @@ impl Authenticator for PermissiveAuthenticator {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct UserTokenAuthenticator {
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct UserTokenAuthenticator {
     user: String,
     token: String,
 }
@@ -46,9 +46,9 @@ pub(super) fn state_done_map(mut capabilities: CapabilitiesMap) -> CapabilitiesM
     capabilities
 }
 
-pub(super) fn to_result(capabilities: &CapabilitiesMap) -> Result<(), Error> {
+pub(super) fn extract_state_result(capabilities: &mut CapabilitiesMap) -> Result<(), Error> {
     let Dynamic(state) = capabilities
-        .get(STATE_KEY)
+        .remove(STATE_KEY)
         .ok_or_else(|| Error::StateValue("missing".to_owned()))?
         .clone();
     match state {

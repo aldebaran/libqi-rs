@@ -16,16 +16,6 @@ impl<'de> serde::Deserialize<'de> for Value<'static> {
     }
 }
 
-pub fn deserialize_value_of_type<'de, 't, D>(
-    deserializer: D,
-    value_type: Option<&'t Type>,
-) -> Result<Value<'static>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    ValueOfType::new(value_type).deserialize(deserializer)
-}
-
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ValueOfType<'v, 't> {
     value_type: Option<&'t Type>,

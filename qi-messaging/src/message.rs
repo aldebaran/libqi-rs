@@ -1,6 +1,7 @@
 use crate::{body::BodyBuf, CapabilitiesMap};
 use qi_value::Dynamic;
 pub use qi_value::{ActionId as Action, ObjectId as Object, ServiceId as Service};
+use serde::Deserialize;
 
 #[derive(
     Default,
@@ -190,7 +191,10 @@ where
     }
 }
 
-impl<T: BodyBuf> Message<T> {
+impl<T> Message<T>
+where
+    T: BodyBuf,
+{
     pub(crate) fn into_parts(self) -> Result<(MetaData, T), T::Error> {
         match self {
             Message::Call { id, address, value } => Ok((
@@ -268,7 +272,10 @@ impl<T: BodyBuf> Message<T> {
         }
     }
 
-    pub(crate) fn from_parts(meta: MetaData, body: T) -> Result<Self, T::Error> {
+    pub(crate) fn from_parts(meta: MetaData, mut body: T) -> Result<Self, T::Error>
+    where
+        for<'de> <T::Deserializer<'de> as serde::Deserializer<'de>>::Error: Into<T::Error>,
+    {
         let MetaData { id, address, ty } = meta;
         let msg = match ty {
             Type::Call => Self::Call {
@@ -284,7 +291,7 @@ impl<T: BodyBuf> Message<T> {
             Type::Error => Self::Error {
                 id,
                 address,
-                error: body.deserialize()?,
+                error: Deserialize::deserialize(body.deserializer()).map_err(Into::into)?,
             },
             Type::Post => Self::Post {
                 id,
@@ -299,12 +306,12 @@ impl<T: BodyBuf> Message<T> {
             Type::Capabilities => Self::Capabilities {
                 id,
                 address,
-                capabilities: body.deserialize()?,
+                capabilities: Deserialize::deserialize(body.deserializer()).map_err(Into::into)?,
             },
             Type::Cancel => Self::Cancel {
                 id,
                 address,
-                call_id: body.deserialize()?,
+                call_id: Deserialize::deserialize(body.deserializer()).map_err(Into::into)?,
             },
             Type::Canceled => Self::Canceled { id, address },
         };
@@ -338,7 +345,6 @@ pub enum OnewayRequest<T> {
     Post(T),
     Event(T),
     Capabilities(CapabilitiesMap<'static>),
-    Cancel(Id),
 }
 
 #[derive(

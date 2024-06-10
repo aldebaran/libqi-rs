@@ -1,5 +1,3 @@
-// mod ser;
-
 /// The type of a value in the `qi` type system.
 ///
 /// The absence of a type equals to the unit `Dynamic` type, which is the set of all types.

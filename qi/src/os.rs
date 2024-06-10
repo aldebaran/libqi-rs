@@ -115,3 +115,23 @@ pub fn process_uuid() -> Uuid {
     static PROCESS_UUID: Lazy<Uuid> = Lazy::new(Uuid::new_v4);
     *PROCESS_UUID
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{binary_value, os::MachineId};
+    use std::str::FromStr;
+
+    #[test]
+    fn machine_id_deserialize() {
+        let mut input = &[
+            0x24, 0x00, 0x00, 0x00, 0x39, 0x61, 0x36, 0x35, 0x62, 0x35, 0x36, 0x65, 0x2d, 0x63,
+            0x33, 0x64, 0x33, 0x2d, 0x34, 0x34, 0x38, 0x35, 0x2d, 0x38, 0x39, 0x32, 0x34, 0x2d,
+            0x36, 0x36, 0x31, 0x62, 0x30, 0x33, 0x36, 0x32, 0x30, 0x32, 0x62, 0x33,
+        ][..];
+        let machine_id: MachineId = binary_value::deserialize_reflect(&mut input).unwrap();
+        assert_eq!(
+            machine_id,
+            MachineId::from_str("9a65b56e-c3d3-4485-8924-661b036202b3").unwrap(),
+        )
+    }
+}

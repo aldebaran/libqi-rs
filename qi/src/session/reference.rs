@@ -9,46 +9,50 @@ use url::Url;
 /// It means that it potentially carries the information required to create a new session, such as
 /// the address used to start a communication transport.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct Reference(pub(crate) Inner);
+pub struct Reference(Kind);
 
 impl Reference {
     #[cfg(test)]
-    pub(crate) fn new_service(name: String) -> Self {
-        Self(Inner::Service(name))
+    pub(crate) fn service(name: impl ToString) -> Self {
+        Self(Kind::Service(name.to_string()))
     }
 
-    pub(crate) fn new_endpoint(address: Address) -> Self {
-        Self(Inner::Endpoint(address))
+    pub(crate) fn endpoint(address: Address) -> Self {
+        Self(Kind::Endpoint(address))
     }
 
-    pub fn from_url(url: &Url) -> Result<Self, Error> {
+    pub(crate) fn kind(&self) -> &Kind {
+        &self.0
+    }
+
+    pub(super) fn from_url(url: &Url) -> Result<Self, Error> {
         match url.scheme() {
-            "qi" => Ok(Self(Inner::Service(url.path().to_owned()))),
-            _ => Ok(Self(Inner::Endpoint(Address::from_url(url)?))),
+            "qi" => Ok(Self(Kind::Service(url.path().to_owned()))),
+            _ => Ok(Self(Kind::Endpoint(Address::from_url(url)?))),
         }
     }
 
     pub(crate) fn is_service_relative(&self) -> bool {
-        matches!(self.0, Inner::Service { .. })
+        matches!(self.0, Kind::Service { .. })
     }
 
-    pub(crate) fn as_service_relative(&self) -> Option<&String> {
+    pub(super) fn as_service_relative(&self) -> Option<&String> {
         match &self.0 {
-            Inner::Service(service) => Some(service),
+            Kind::Service(service) => Some(service),
             _ => None,
         }
     }
 
-    pub(crate) fn into_endpoint(self) -> Option<Address> {
+    pub(super) fn into_endpoint(self) -> Option<Address> {
         match self.0 {
-            Inner::Endpoint(address) => Some(address),
+            Kind::Endpoint(address) => Some(address),
             _ => None,
         }
     }
 
     pub(crate) fn is_machine_local(&self) -> bool {
         match &self.0 {
-            Inner::Endpoint(address) => address.is_machine_local(),
+            Kind::Endpoint(address) => address.is_machine_local(),
             _ => false,
         }
     }
@@ -65,15 +69,15 @@ impl FromStr for Reference {
 impl std::fmt::Display for Reference {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
-            Inner::Service(service) => write!(f, "qi:{service}"),
-            Inner::Endpoint(addr) => addr.fmt(f),
+            Kind::Service(service) => write!(f, "qi:{service}"),
+            Kind::Endpoint(addr) => addr.fmt(f),
         }
     }
 }
 
 impl From<Address> for Reference {
     fn from(addr: Address) -> Self {
-        Self(Inner::Endpoint(addr))
+        Self(Kind::Endpoint(addr))
     }
 }
 
@@ -131,7 +135,7 @@ impl<'a> TryFrom<value::Value<'a>> for Reference {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub(crate) enum Inner {
+pub(crate) enum Kind {
     /// A reference to an existing service session.
     Service(String),
     /// A reference to the address of an endpoint, that potentially requires opening a new channel
@@ -158,8 +162,8 @@ mod tests {
         assert_eq!(
             endpoints,
             [
-                Reference(Inner::Service("Calculator".to_owned())),
-                Reference(Inner::Endpoint(Address::Tcp {
+                Reference(Kind::Service("Calculator".to_owned())),
+                Reference(Kind::Endpoint(Address::Tcp {
                     address: std::net::SocketAddrV4::new(Ipv4Addr::LOCALHOST, 41681).into(),
                     ssl: None
                 }))
