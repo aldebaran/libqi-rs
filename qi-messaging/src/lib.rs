@@ -48,15 +48,18 @@ pub mod channel;
 mod client;
 pub mod endpoint;
 mod error;
+mod handler;
 mod id_factory;
 pub mod message;
 mod server;
 
+use self::server::Server;
 pub use self::{
     address::Address,
     body::BodyBuf,
-    client::{CallFuture, Client, WeakClient},
+    client::{Client, WeakClient},
     error::Error,
+    handler::Handler,
     message::Message,
 };
 pub use qi_value as value;

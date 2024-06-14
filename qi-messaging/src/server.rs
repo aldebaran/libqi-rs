@@ -1,10 +1,10 @@
 use crate::{
-    message::{Address, Id},
-    Message,
+    message::{Address, Id, OnewayRequest},
+    Handler, Message,
 };
 use futures::{
     stream::{FusedStream, FuturesUnordered},
-    Stream, TryFuture,
+    Stream, StreamExt, TryFuture,
 };
 use pin_project_lite::pin_project;
 use qi_value::Dynamic;
@@ -16,19 +16,19 @@ use std::{
 };
 
 pin_project! {
-    pub(crate) struct Responses<Handler, Future, T> {
+    pub(super) struct Server<Handler, Future, T> {
         handler: Handler,
         #[pin]
-        call_futures: FuturesUnordered<CallResponseFuture<Future>>,
+        call_futures: FuturesUnordered<CallFuture<Future>>,
         ph: PhantomData<T>,
     }
 }
 
-impl<Handler, T> Responses<Handler, Handler::Future, T>
+impl<H, T> Server<H, H::Future, T>
 where
-    Handler: tower_service::Service<(Address, T)>,
+    H: Handler<T>,
 {
-    pub(crate) fn new(handler: Handler) -> Self {
+    pub(super) fn new(handler: H) -> Self {
         Self {
             handler,
             call_futures: FuturesUnordered::new(),
@@ -36,41 +36,41 @@ where
         }
     }
 
-    pub(crate) fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Handler::Error>> {
-        self.handler.poll_ready(cx)
-    }
-
-    pub(crate) fn call(&mut self, id: Id, (address, value): (Address, T)) {
-        let future = self.handler.call((address, value));
+    pub(super) fn call(&mut self, id: Id, address: Address, value: T) {
+        let call_future = self.handler.call(address, value);
         self.call_futures
-            .push(CallResponseFuture::new(id, address, future));
+            .push(CallFuture::new(id, address, call_future));
     }
 
-    pub(crate) fn cancel(self: Pin<&mut Self>, id: Id) {
-        for mut call_future in self.project().call_futures.iter_pin_mut() {
-            if call_future.as_mut().id == id {
+    pub(super) fn oneway_request(&mut self, address: Address, request: OnewayRequest<T>) {
+        let _res = self.handler.oneway_request(address, request); // TODO: log ?
+    }
+
+    pub(crate) fn cancel(self: Pin<&mut Self>, id: &Id) {
+        for call_future in self.project().call_futures.iter_pin_mut() {
+            if &call_future.id == id {
                 call_future.cancel()
             }
         }
     }
 }
 
-impl<Svc, T> Stream for Responses<Svc, Svc::Future, T>
+impl<H, T> Stream for Server<H, H::Future, T>
 where
-    Svc: tower_service::Service<(Address, T)>,
-    Svc::Error: std::string::ToString,
+    H: Handler<T>,
+    H::Error: std::string::ToString,
 {
-    type Item = Message<Svc::Response>;
+    type Item = Message<H::Reply>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project().call_futures.poll_next(cx)
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.call_futures.poll_next_unpin(cx)
     }
 }
 
-impl<Svc, T> FusedStream for Responses<Svc, Svc::Future, T>
+impl<H, T> FusedStream for Server<H, H::Future, T>
 where
-    Svc: tower_service::Service<(Address, T)>,
-    Svc::Error: std::string::ToString,
+    H: Handler<T>,
+    H::Error: std::string::ToString,
 {
     fn is_terminated(&self) -> bool {
         self.call_futures.is_terminated()
@@ -79,7 +79,7 @@ where
 
 pin_project! {
     #[derive(Debug)]
-    struct CallResponseFuture<F> {
+    struct CallFuture<F> {
         id: Id,
         address: Address,
         #[pin]
@@ -87,7 +87,7 @@ pin_project! {
     }
 }
 
-impl<F> CallResponseFuture<F> {
+impl<F> CallFuture<F> {
     fn new(id: Id, address: Address, inner: F) -> Self {
         Self {
             id,
@@ -107,7 +107,7 @@ impl<F> CallResponseFuture<F> {
     }
 }
 
-impl<F, T, E> Future for CallResponseFuture<F>
+impl<F, T, E> Future for CallFuture<F>
 where
     F: Future<Output = Result<T, E>>,
     E: std::string::ToString,
