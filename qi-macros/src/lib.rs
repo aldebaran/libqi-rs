@@ -54,23 +54,25 @@ pub fn proc_macro_derive_from_value(input: TokenStream) -> TokenStream {
 /// # Example
 ///
 /// ```
-/// qi::object! {
-///     Motion {
-///         /// Go to some position.
-///         #[method]
-///         async fn go_to(&self, position: Position) -> Result<(), Error>;
+/// # mod qi {
+/// #   pub(super) use qi_macros::{object, Valuable};
+/// # }
+/// #[qi::object]
+/// trait Motion {
+///     /// Go to some position.
+///     async fn go_to(&self, position: Position) -> Result<(), Error>;
 ///
-///         /// The current position.
-///         #[property]
-///         position: Position,
+///     /// The current position.
+///     #[property]
+///     fn position() -> Position;
 ///
-///         /// The moving state.
-///         #[signal]
-///         moving: bool,
-///     }
+///     /// The moving state.
+///     #[signal]
+///     fn moving() -> bool;
 /// }
 ///
 /// #[derive(qi::Valuable)]
+/// ##[qi(value(crate = "qi_value"))]
 /// struct Position {
 ///     x: u32,
 ///     y: u32,
@@ -78,9 +80,10 @@ pub fn proc_macro_derive_from_value(input: TokenStream) -> TokenStream {
 /// ```
 ///
 /// This code declares the trait `Motion` and and a type `MotionClient`
-/// that implements `Motion` that is convertible from a `qi::BoxObject`.
-#[proc_macro]
-pub fn object(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as object::Object);
-    input.derive().into()
+/// that implements `Motion`.
+#[proc_macro_attribute]
+pub fn object(_attr: TokenStream, _item: TokenStream) -> TokenStream {
+    todo!()
+    // let input = parse_macro_input!(input as object::Object);
+    // input.derive().into()
 }

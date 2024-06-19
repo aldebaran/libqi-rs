@@ -1,17 +1,15 @@
-use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, Sink, StreamExt};
-use qi_messaging::message::OnewayRequest;
+use crate::{
+    messaging,
+    session::{self, authentication, Session, WeakSession},
+    value::BinaryValue,
+    Error,
+};
+use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
+use std::{collections::HashMap, future::Future, sync::Arc};
 use tokio::{
     select,
     sync::{mpsc, Mutex},
 };
-
-use crate::{
-    binary_value::BinaryValue,
-    messaging::{self, message},
-    session::{self, authentication, Session, WeakSession},
-    Error,
-};
-use std::{collections::HashMap, future::Future, sync::Arc};
 
 /// A session cache that handles session references and keeps track of existing
 /// sessions to a space services.
@@ -19,9 +17,8 @@ use std::{collections::HashMap, future::Future, sync::Arc};
 /// It creates new sessions that are associated with services and register them
 /// for further retrieval, enabling usage of service session references.
 #[derive(Debug)]
-pub(super) struct SessionFactory<CallHandler, OnewaySink> {
-    call_handler: CallHandler,
-    oneway_sink: OnewaySink,
+pub(super) struct SessionFactory<Handler> {
+    handler: Handler,
 
     connections: mpsc::Sender<BoxFuture<'static, String>>,
 
@@ -29,17 +26,13 @@ pub(super) struct SessionFactory<CallHandler, OnewaySink> {
     sessions: Arc<Mutex<HashMap<String, WeakSession>>>,
 }
 
-impl<CallHandler, OnewaySink> SessionFactory<CallHandler, OnewaySink> {
-    pub(super) fn new(
-        call_handler: CallHandler,
-        oneway_sink: OnewaySink,
-    ) -> (Self, impl Future<Output = ()>) {
+impl<Handler> SessionFactory<Handler> {
+    pub(super) fn new(handler: Handler) -> (Self, impl Future<Output = ()>) {
         let sessions = Default::default();
         let (connections_sender, mut connections_receiver) = mpsc::channel(1);
         (
             Self {
-                call_handler,
-                oneway_sink,
+                handler,
                 sessions: Arc::clone(&sessions),
                 connections: connections_sender,
             },
@@ -75,16 +68,12 @@ impl<CallHandler, OnewaySink> SessionFactory<CallHandler, OnewaySink> {
     }
 }
 
-impl<CallHandler, OnewaySink> SessionFactory<CallHandler, OnewaySink>
+impl<Handler> SessionFactory<Handler>
 where
-    CallHandler: tower::Service<(message::Address, BinaryValue), Response = BinaryValue, Error = Error>
+    Handler: messaging::Handler<BinaryValue, Reply = BinaryValue, Error = Error>
         + Clone
         + Send
-        + 'static,
-    CallHandler::Future: Send,
-    OnewaySink: Sink<(message::Address, OnewayRequest<BinaryValue>), Error = Error>
-        + Clone
-        + Send
+        + Sync
         + 'static,
 {
     /// Gets a session to the given references, using the service name to store
@@ -127,13 +116,8 @@ where
         address: messaging::Address,
         credentials: authentication::Parameters<'_>,
     ) -> Result<Session, Error> {
-        let (session, connection) = Session::connect(
-            address,
-            credentials,
-            self.call_handler.clone(),
-            self.oneway_sink.clone(),
-        )
-        .await?;
+        let (session, connection) =
+            Session::connect(address, credentials, self.handler.clone()).await?;
         let service_name = service_name.to_owned();
         self.sessions
             .lock()

@@ -1,8 +1,5 @@
 use crate::Error;
-use std::{
-    net::{IpAddr, Ipv6Addr, SocketAddr},
-    str::FromStr,
-};
+use std::{net::SocketAddr, str::FromStr};
 use url::Url;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -36,6 +33,14 @@ impl Address {
     }
 }
 
+impl FromStr for Address {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_url(&s.parse()?)
+    }
+}
+
 impl std::fmt::Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -52,20 +57,14 @@ impl std::fmt::Display for Address {
 }
 
 fn socket_addr_from_url(url: &Url) -> Result<SocketAddr, Error> {
-    // We don't use `Url::socket_addrs` on purpose: the host must be an IP address and no resolution
-    // is required. Another problem is that `socket_addrs` returns a list of addresses, which would
-    // mean that we either have to select one of them arbitrarily, or we cannot parse a single
-    // address from a string.
-    const DEFAULT_HOST: IpAddr = IpAddr::V6(Ipv6Addr::LOCALHOST);
     const DEFAULT_PORT: u16 = 9559;
-    let host = match url.host() {
-        Some(url::Host::Ipv4(addr)) => addr.into(),
-        Some(url::Host::Ipv6(addr)) => addr.into(),
-        Some(url::Host::Domain(domain)) => return Err(Error::InvalidUrlHost(domain.to_owned())),
-        None => DEFAULT_HOST,
-    };
-    let port = url.port_or_known_default().unwrap_or(DEFAULT_PORT);
-    Ok(SocketAddr::new(host, port))
+    url.socket_addrs(|| match Scheme::from_str(url.scheme()) {
+        Ok(Scheme::Tcp(_)) => Some(DEFAULT_PORT),
+        Err(_) => None,
+    })?
+    .first()
+    .copied()
+    .ok_or_else(|| Error::InvalidUrlHost(url.to_string()))
 }
 
 #[derive(Debug)]

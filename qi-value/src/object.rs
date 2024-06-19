@@ -63,7 +63,7 @@ impl std::fmt::Display for Object {
     derive_more::Into,
     derive_more::IntoIterator,
 )]
-#[qi(value = "crate", transparent)]
+#[qi(value(crate = "crate", transparent))]
 pub struct ObjectUid(
     // SHA-1 digest as bytes of Big Endian encoded sequence of 5 DWORD.
     [u8; 20],
@@ -113,7 +113,7 @@ impl std::fmt::Display for ObjectUid {
     serde::Serialize,
     serde::Deserialize,
 )]
-#[qi(value = "crate")]
+#[qi(value(crate = "crate"))]
 pub struct MetaObject {
     pub methods: Map<ActionId, MetaMethod>,
     pub signals: Map<ActionId, MetaSignal>,
@@ -203,7 +203,7 @@ impl MetaObjectBuilder {
     serde::Serialize,
     serde::Deserialize,
 )]
-#[qi(value = "crate", rename_all = "camelCase")]
+#[qi(value(crate = "crate", case = "camelCase"))]
 pub struct MetaMethod {
     pub uid: ActionId,
     pub return_signature: Signature,
@@ -361,7 +361,7 @@ impl Default for MetaMethodBuilderParameter {
     serde::Serialize,
     serde::Deserialize,
 )]
-#[qi(value = "crate")]
+#[qi(value(crate = "crate"))]
 pub struct MetaMethodParameter {
     pub name: String,
     pub description: String,
@@ -380,7 +380,7 @@ pub struct MetaMethodParameter {
     serde::Serialize,
     serde::Deserialize,
 )]
-#[qi(value = "crate")]
+#[qi(value(crate = "crate"))]
 pub struct MetaSignal {
     pub uid: ActionId,
     pub name: String,
@@ -400,7 +400,7 @@ pub struct MetaSignal {
     serde::Serialize,
     serde::Deserialize,
 )]
-#[qi(value = "crate")]
+#[qi(value(crate = "crate"))]
 pub struct MetaProperty {
     pub uid: ActionId,
     pub name: String,

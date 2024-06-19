@@ -53,7 +53,6 @@ mod id_factory;
 pub mod message;
 mod server;
 
-use self::server::Server;
 pub use self::{
     address::Address,
     body::BodyBuf,

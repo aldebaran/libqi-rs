@@ -1,53 +1,42 @@
 use crate::{
-    message::{Address, Id, OnewayRequest},
-    Handler, Message,
+    message::{Address, Id},
+    Message,
 };
 use futures::{
+    future::BoxFuture,
     stream::{FusedStream, FuturesUnordered},
-    Stream, StreamExt, TryFuture,
+    FutureExt, Stream, StreamExt, TryFutureExt,
 };
-use pin_project_lite::pin_project;
 use qi_value::Dynamic;
 use std::{
     future::Future,
-    marker::PhantomData,
     pin::Pin,
     task::{ready, Context, Poll, Waker},
 };
 
-pin_project! {
-    pub(super) struct Server<Handler, Future, T> {
-        handler: Handler,
-        #[pin]
-        call_futures: FuturesUnordered<CallFuture<Future>>,
-        ph: PhantomData<T>,
+pub(super) struct CallFutures<'a, T, E> {
+    call_futures: FuturesUnordered<CallFuture<'a, T, E>>,
+}
+
+impl<'a, T, E> Default for CallFutures<'a, T, E> {
+    fn default() -> Self {
+        Self {
+            call_futures: Default::default(),
+        }
     }
 }
 
-impl<H, T> Server<H, H::Future, T>
-where
-    H: Handler<T>,
-{
-    pub(super) fn new(handler: H) -> Self {
-        Self {
-            handler,
-            call_futures: FuturesUnordered::new(),
-            ph: PhantomData,
-        }
-    }
-
-    pub(super) fn call(&mut self, id: Id, address: Address, value: T) {
-        let call_future = self.handler.call(address, value);
+impl<'a, T, E> CallFutures<'a, T, E> {
+    pub(super) fn push<F>(&mut self, id: Id, address: Address, future: F)
+    where
+        F: Future<Output = Result<T, E>> + Send + 'a,
+    {
         self.call_futures
-            .push(CallFuture::new(id, address, call_future));
+            .push(CallFuture::new(id, address, future.boxed()));
     }
 
-    pub(super) fn oneway_request(&mut self, address: Address, request: OnewayRequest<T>) {
-        let _res = self.handler.oneway_request(address, request); // TODO: log ?
-    }
-
-    pub(crate) fn cancel(self: Pin<&mut Self>, id: &Id) {
-        for call_future in self.project().call_futures.iter_pin_mut() {
+    pub(crate) fn cancel(&mut self, id: &Id) {
+        for call_future in self.call_futures.iter_mut() {
             if &call_future.id == id {
                 call_future.cancel()
             }
@@ -55,40 +44,35 @@ where
     }
 }
 
-impl<H, T> Stream for Server<H, H::Future, T>
+impl<'a, T, E> Stream for CallFutures<'a, T, E>
 where
-    H: Handler<T>,
-    H::Error: std::string::ToString,
+    E: std::string::ToString,
 {
-    type Item = Message<H::Reply>;
+    type Item = Message<T>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.call_futures.poll_next_unpin(cx)
     }
 }
 
-impl<H, T> FusedStream for Server<H, H::Future, T>
+impl<'a, T, E> FusedStream for CallFutures<'a, T, E>
 where
-    H: Handler<T>,
-    H::Error: std::string::ToString,
+    E: std::string::ToString,
 {
     fn is_terminated(&self) -> bool {
         self.call_futures.is_terminated()
     }
 }
 
-pin_project! {
-    #[derive(Debug)]
-    struct CallFuture<F> {
-        id: Id,
-        address: Address,
-        #[pin]
-        state: CallResponseFutureState<F>,
-    }
+#[derive(Debug)]
+struct CallFuture<'a, T, E> {
+    id: Id,
+    address: Address,
+    state: CallResponseFutureState<'a, T, E>,
 }
 
-impl<F> CallFuture<F> {
-    fn new(id: Id, address: Address, inner: F) -> Self {
+impl<'a, T, E> CallFuture<'a, T, E> {
+    fn new(id: Id, address: Address, inner: BoxFuture<'a, Result<T, E>>) -> Self {
         Self {
             id,
             address,
@@ -96,51 +80,52 @@ impl<F> CallFuture<F> {
         }
     }
 
-    fn cancel(self: Pin<&mut Self>) {
-        let mut state = self.project().state;
-        if let CallResponseFutureStateProj::Running { waker, .. } = state.as_mut().project() {
+    fn cancel(&mut self) {
+        if let CallResponseFutureState::Running { ref mut waker, .. } = self.state {
             if let Some(waker) = waker.take() {
                 waker.wake();
             }
-            state.set(CallResponseFutureState::Canceled);
+            self.state = CallResponseFutureState::Canceled;
         }
     }
 }
 
-impl<F, T, E> Future for CallFuture<F>
+impl<'a, T, E> Future for CallFuture<'a, T, E>
 where
-    F: Future<Output = Result<T, E>>,
     E: std::string::ToString,
 {
     type Output = Message<T>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
-        let (id, address) = (*this.id, *this.address);
-        use CallResponseFutureStateProj as Proj;
-        match this.state.as_mut().project() {
-            Proj::Running { inner, waker } => {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.state {
+            CallResponseFutureState::Running {
+                ref mut inner,
+                ref mut waker,
+            } => {
                 *waker = Some(cx.waker().clone());
-                let call_result = ready!(inner.try_poll(cx));
-                this.state.set(CallResponseFutureState::Terminated);
+                let call_result = ready!(inner.try_poll_unpin(cx));
+                self.state = CallResponseFutureState::Terminated;
                 match call_result {
                     Ok(reply) => Poll::Ready(Message::Reply {
-                        id,
-                        address,
+                        id: self.id,
+                        address: self.address,
                         value: reply,
                     }),
                     Err(error) => Poll::Ready(Message::Error {
-                        id,
-                        address,
+                        id: self.id,
+                        address: self.address,
                         error: Dynamic(error.to_string()),
                     }),
                 }
             }
-            Proj::Canceled => {
-                this.state.set(CallResponseFutureState::Terminated);
-                Poll::Ready(Message::Canceled { id, address })
+            CallResponseFutureState::Canceled => {
+                self.state = CallResponseFutureState::Terminated;
+                Poll::Ready(Message::Canceled {
+                    id: self.id,
+                    address: self.address,
+                })
             }
-            Proj::Terminated => {
+            CallResponseFutureState::Terminated => {
                 debug_assert!(false, "polling a terminated future");
                 Poll::Pending
             }
@@ -148,16 +133,21 @@ where
     }
 }
 
-pin_project! {
-    #[project = CallResponseFutureStateProj]
-    #[derive(Debug)]
-    enum CallResponseFutureState<F> {
-        Running {
-            #[pin]
-            inner: F,
-            waker: Option<Waker>,
-        },
-        Canceled,
-        Terminated,
+enum CallResponseFutureState<'a, T, E> {
+    Running {
+        inner: BoxFuture<'a, Result<T, E>>,
+        waker: Option<Waker>,
+    },
+    Canceled,
+    Terminated,
+}
+
+impl<'a, T, E> std::fmt::Debug for CallResponseFutureState<'a, T, E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Running { waker, .. } => f.debug_struct("Running").field("waker", waker).finish(),
+            Self::Canceled => write!(f, "Canceled"),
+            Self::Terminated => write!(f, "Terminated"),
+        }
     }
 }

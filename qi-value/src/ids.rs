@@ -16,7 +16,7 @@
     derive_more::Into,
 )]
 #[serde(transparent)]
-#[qi(value = "crate", transparent)]
+#[qi(value(crate = "crate", transparent))]
 pub struct ServiceId(pub u32);
 
 impl ServiceId {
@@ -41,7 +41,7 @@ impl ServiceId {
     derive_more::Into,
 )]
 #[serde(transparent)]
-#[qi(value = "crate", transparent)]
+#[qi(value(crate = "crate", transparent))]
 pub struct ObjectId(pub u32);
 
 impl ObjectId {
@@ -66,7 +66,7 @@ impl ObjectId {
     derive_more::Into,
 )]
 #[serde(transparent)]
-#[qi(value = "crate", transparent)]
+#[qi(value(crate = "crate", transparent))]
 pub struct ActionId(pub u32);
 
 impl ActionId {

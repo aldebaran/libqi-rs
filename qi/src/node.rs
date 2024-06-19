@@ -1,60 +1,61 @@
-mod messaging_handler;
 mod server;
 mod service_map;
 mod session_factory;
 
-use self::{
-    server::Server,
-    service_map::{PendingServiceMap, ServiceMap},
-};
+use self::service_map::{PendingServiceMap, ServiceMap};
 use crate::{
-    object::{self, BoxObject, Object},
+    object::{self, Object},
     os::MachineId,
     service::{self, Info},
-    service_directory::ServiceDirectory,
+    service_directory::{self, ServiceDirectory},
     session::{
         self,
         authentication::{self, Authenticator, PermissiveAuthenticator},
     },
-    Error, Result, Space,
+    Address, Result, Space,
 };
-use async_trait::async_trait;
-use messaging_handler::MessagingHandler;
-use qi_messaging::Address;
+use futures::{future::FusedFuture, FutureExt};
 use session_factory::SessionFactory;
-use std::{future::Future, sync::Arc};
-use tokio::sync::Mutex;
-
-#[async_trait]
-pub trait Node {
-    async fn add_service<S, O>(&mut self, name: String, object: O) -> Result<()>
-    where
-        O: Object + Sync + Send + 'static;
-
-    async fn remove_service(&mut self, name: &str) -> Result<BoxObject>;
-}
+use std::{future::Future, pin::pin, sync::Arc};
+use tokio::{select, sync::Mutex};
 
 #[derive(Default, Debug)]
-pub struct Builder<Auth> {
+pub struct Builder<Auth, Method> {
+    uid: Uid,
     authenticator: Auth,
     bind_addresses: Vec<Address>,
-    services: PendingServiceMap,
+    pending_services: PendingServiceMap,
+    method: Method,
 }
 
-impl<Auth> Builder<Auth>
+impl Builder<PermissiveAuthenticator, UnsetSpaceMethod> {
+    pub fn new() -> Self {
+        Builder::default()
+    }
+}
+
+impl<Auth, M> Builder<Auth, M>
 where
     Auth: Authenticator + Send + Sync + Clone + 'static,
 {
-    pub fn new() -> Builder<PermissiveAuthenticator> {
-        Builder::default()
-    }
-
-    pub fn with_authenticator<A>(self, authenticator: A) -> Builder<A> {
+    pub fn with_authenticator<A>(self, authenticator: A) -> Builder<A, M> {
         Builder {
             authenticator,
+            uid: self.uid,
             bind_addresses: self.bind_addresses,
-            services: self.services,
+            pending_services: self.pending_services,
+            method: self.method,
         }
+    }
+
+    pub fn add_service<Name, O>(mut self, name: Name, object: O) -> Self
+    where
+        Name: ToString,
+        O: Object + Send + Sync + 'static,
+    {
+        self.pending_services
+            .add(name.to_string(), Box::new(object));
+        self
     }
 
     /// Bind the node to an address, accepting incoming connections on an
@@ -65,118 +66,147 @@ where
     }
 
     /// Attaches the node to the space hosted at the given address.
-    ///
-    /// All services added to this node are registered on the space. Any
-    /// connection or registration failure causes the attachment to stop.
-    pub async fn attach_to_space(
+    pub fn connect_to_space(
         self,
         address: Address,
-        authentication_parameters: authentication::Parameters<'_>,
-    ) -> Result<AttachedNode> {
-        todo!()
-        // let services = Arc::default();
-        // let handler = MessagingHandler::new(Arc::clone(&services));
-        // let (server, server_connection) =
-        //     server::Server::new(handler.clone(), handler, authenticator);
-        // (
-        //     Self {
-        //         server,
-        //         pending_services: Default::default(),
-        //         services,
-        //     },
-        //     server_connection,
-        // )
-
-        // let service = MessagingService::new(registered_services_receiver);
-        // let session_registry = session::Registry::new(self.service.clone());
-        // let sd_session = session_registry
-        //     .get(
-        //         service_directory::SERVICE_NAME,
-        //         parameters.session_references,
-        //         parameters.credentials,
-        //     )
-        //     .await?;
-        // let service_directory = service_directory::Client::new(sd_session);
-        // let endpoints = self
-        //     .endpoints()
-        //     .iter()
-        //     .copied()
-        //     .map(Into::into)
-        //     .collect::<Vec<_>>();
-        // for (name, object) in self.services {
-        //     let info = Info::process_local(
-        //         name.clone(),
-        //         ServiceId::default(),
-        //         endpoints.clone(),
-        //         service_directory.id(),
-        //         object.uid(),
-        //     );
-        //     let id = service_directory.register_service(&info).await?;
-        //     self.registered_services.send_modify(move |services| {
-        //         services.insert(
-        //             id,
-        //             (
-        //                 name,
-        //                 services::Objects::with_service_main_object(object.into()),
-        //             ),
-        //         );
-        //     });
-        //     service_directory.service_ready(id).await?;
-        // }
-        // Ok(Node {
-        //     service: self.service,
-        //     registered_services_sender: self.registered_services,
-        //     session_registry,
-        //     service_directory,
-        // })
+        credentials: Option<authentication::Parameters<'_>>,
+    ) -> Builder<Auth, SetSpaceMethod<'_>> {
+        Builder {
+            authenticator: self.authenticator,
+            uid: self.uid,
+            bind_addresses: self.bind_addresses,
+            pending_services: self.pending_services,
+            method: SetSpaceMethod(SpaceMethod::ConnectToSpace(
+                address,
+                credentials.unwrap_or_default(),
+            )),
+        }
     }
 
     /// Host a new space on this node.
-    fn host_space<A>(self, authenticator: A) -> AttachedNode {
-        todo!()
+    pub fn host_space<A>(self) -> Builder<Auth, SetSpaceMethod<'static>> {
+        Builder {
+            authenticator: self.authenticator,
+            uid: self.uid,
+            bind_addresses: self.bind_addresses,
+            pending_services: self.pending_services,
+            method: SetSpaceMethod(SpaceMethod::HostSpace),
+        }
     }
 }
 
-#[async_trait]
-impl<A> Node for Builder<A>
+impl<'a, Auth> Builder<Auth, SetSpaceMethod<'a>>
 where
-    A: Send,
+    Auth: Authenticator + Send + Sync + Clone + 'static,
 {
-    /// Add a named service to the node.
-    async fn add_service<S, O>(&mut self, name: String, object: O) -> Result<()>
-    where
-        O: Object + Sync + Send + 'static,
-    {
-        self.services.add(name, Box::new(object))
-    }
+    pub async fn start(self) -> Result<(Node, impl Future<Output = ()>)> {
+        let services = Arc::new(Mutex::new(ServiceMap::default()));
+        let handler = service_map::MessagingHandler::new(Arc::clone(&services));
+        let (mut server_endpoints, server_task) =
+            server::create(handler.clone(), self.authenticator, self.bind_addresses);
+        let (session_factory, session_connections) = SessionFactory::new(handler);
 
-    async fn remove_service(&mut self, name: &str) -> Result<BoxObject> {
-        self.services
-            .remove(name)
-            .ok_or_else(|| Error::ServiceNotFound(name.to_string()))
+        let service_directory: Arc<dyn ServiceDirectory + Send + Sync> = match self.method.0 {
+            SpaceMethod::ConnectToSpace(address, credentials) => {
+                let session = session_factory
+                    .establish(
+                        service_directory::SERVICE_NAME,
+                        [address.into()].iter(),
+                        credentials,
+                    )
+                    .await?;
+                Arc::new(service_directory::Client::new(session))
+            }
+            SpaceMethod::HostSpace => {
+                todo!()
+            }
+        };
+
+        let node = Node {
+            services: Arc::clone(&services),
+            session_factory,
+            service_directory: Arc::clone(&service_directory),
+        };
+
+        // Register each service to the directory, and mark them as ready.
+        for (service_name, service_object) in self.pending_services {
+            let mut info = service::Info::registrable(
+                service_name.clone(),
+                self.uid.clone(),
+                service_object.uid(),
+            );
+            // Registering the service to the directory gets us a service ID, that we can use to
+            // update the local service info. With it, we can also index the service to the
+            // messaging handler so that it can start treating requests for that service.
+            // Consequently, we can notify the service directory of the readiness of the service.
+            let service_id = service_directory.register_service(&info).await?;
+            info.id = service_id;
+            services
+                .lock()
+                .await
+                .insert(service_name, info, service_object);
+            service_directory.service_ready(service_id).await?;
+        }
+
+        let task = async move {
+            // Execute server, which polls from incoming connections and session connections, which
+            // receive messages and dispatch to messaging handlers and objects.
+            let mut server_task = server_task.fuse();
+            let mut session_connections = pin!(session_connections.fuse());
+            loop {
+                select! {
+                    () = &mut server_task, if !server_task.is_terminated() => {
+                        // server is terminated
+                    }
+                    () = &mut session_connections, if !session_connections.is_terminated() => {
+                        // sessions are stopped
+                    }
+                    // Also update services info to the service directory when the server endpoints change.
+                    Ok(()) = server_endpoints.changed() => {
+                        let endpoints = server_endpoints.borrow_and_update().values().flatten().map(|&address| address.into()).collect::<Vec<_>>();
+                        for service_info in services.lock().await.info_mut() {
+                            service_info.endpoints.clone_from(&endpoints);
+                            if let Err(_err) = service_directory.update_service_info(&*service_info).await {
+                                 // TODO: log the failure
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        Ok((node, task))
     }
 }
 
-pub struct AttachedNode {
+#[derive(Default, Debug, Clone, Copy)]
+pub struct UnsetSpaceMethod;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetSpaceMethod<'a>(SpaceMethod<'a>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SpaceMethod<'a> {
+    ConnectToSpace(Address, authentication::Parameters<'a>),
+    HostSpace,
+}
+
+pub struct Node {
+    services: Arc<Mutex<ServiceMap>>,
+    session_factory: SessionFactory<service_map::MessagingHandler>,
     service_directory: Arc<dyn ServiceDirectory + Send + Sync>,
-    services: ServiceMap,
-    session_factory: SessionFactory<MessagingHandler, MessagingHandler>,
-    server: Server,
 }
 
-impl std::fmt::Debug for AttachedNode {
+impl std::fmt::Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AttachedNode")
             .field("services", &self.services)
             .field("session_factory", &self.session_factory)
-            .field("server", &self.server)
             .finish()
     }
 }
 
-#[async_trait]
-impl Space for AttachedNode {
-    async fn service(&self, name: &str) -> Result<BoxObject> {
+impl Space for Node {
+    async fn service(&self, name: &str) -> Result<impl Object> {
         let service = self.service_directory.service(name).await?;
         let session = self
             .session_factory
@@ -194,7 +224,7 @@ impl Space for AttachedNode {
             session,
         )
         .await?;
-        Ok(Box::new(object))
+        Ok(object)
     }
 
     fn service_directory(&self) -> &dyn ServiceDirectory {
@@ -212,4 +242,32 @@ fn sort_service_endpoints(service: &Info) -> Vec<session::Reference> {
         )
     });
     endpoints
+}
+
+#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, qi_macros::Valuable)]
+#[qi(value(crate = "crate::value", transparent))]
+pub struct Uid(String);
+
+impl Uid {
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4().to_string())
+    }
+
+    pub fn from_string(id: String) -> Self {
+        Self(id)
+    }
+}
+
+impl std::fmt::Display for Uid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::str::FromStr for Uid {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Self::from_string(s.to_owned()))
+    }
 }

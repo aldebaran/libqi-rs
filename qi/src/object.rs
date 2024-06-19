@@ -1,14 +1,18 @@
-use crate::{error::Error, os, session};
-use async_trait::async_trait;
-use qi_messaging::message;
-pub use qi_value::{
-    object::{MemberAddress, MetaObject},
-    ObjectId as Id,
+pub use crate::value::ObjectId as Id;
+use crate::{
+    messaging::message,
+    os,
+    session::Session,
+    value::{
+        self, ActionId, Dynamic, FromValue, IntoValue, Reflect, RuntimeReflect, ServiceId, Value,
+    },
+    Error, Result,
 };
-use qi_value::{ActionId, Dynamic, FromValue, IntoValue, Reflect, ServiceId, Value};
+use async_trait::async_trait;
 use sealed::sealed;
 use sha1::{Digest, Sha1};
-use std::{borrow::Cow, sync::Arc};
+use std::borrow::Cow;
+pub use value::object::*;
 
 // const ACTION_ID_REGISTER_EVENT: ActionId = ActionId(0);
 // const ACTION_ID_UNREGISTER_EVENT: ActionId = ActionId(1);
@@ -22,13 +26,13 @@ pub const ACTION_START_ID: ActionId = ActionId(100);
 
 #[async_trait]
 pub trait Object {
-    fn meta(&self) -> MetaObject;
+    fn meta(&self) -> &MetaObject;
 
-    async fn meta_call(
-        &self,
-        address: MemberAddress,
-        args: Value<'_>,
-    ) -> Result<Value<'static>, Error>;
+    async fn meta_call(&self, address: MemberAddress, args: Value<'_>) -> Result<Value<'static>>;
+
+    async fn meta_post(&self, address: MemberAddress, value: Value<'_>) -> Result<()>;
+
+    async fn meta_event(&self, address: MemberAddress, value: Value<'_>) -> Result<()>;
 
     fn uid(&self) -> Uid {
         Uid::from_ptr(self)
@@ -36,12 +40,11 @@ pub trait Object {
 }
 
 pub type BoxObject = Box<dyn Object + Send + Sync>;
-pub type ArcObject = Arc<dyn Object + Send + Sync>;
 
 #[sealed]
 #[async_trait]
-pub trait ObjectExt: Object + Sync {
-    async fn call<'t, 'r, R, A, T>(&self, address: A, args: T) -> Result<R, Error>
+pub trait ObjectExt: Object {
+    async fn call<'t, 'r, R, A, T>(&self, address: A, args: T) -> Result<R>
     where
         A: Into<MemberAddress> + Send,
         T: IntoValue<'t> + Send,
@@ -53,7 +56,7 @@ pub trait ObjectExt: Object + Sync {
             .cast_into()?)
     }
 
-    async fn property<'r, A, R>(&self, address: A) -> Result<R, Error>
+    async fn property<'r, A, R>(&self, address: A) -> Result<R>
     where
         A: Into<MemberAddress> + Send,
         R: Reflect + FromValue<'r>,
@@ -61,7 +64,7 @@ pub trait ObjectExt: Object + Sync {
         self.call(ACTION_ID_PROPERTY, Dynamic(address.into())).await
     }
 
-    async fn set_property<'t, A, T>(&self, address: A, value: T) -> Result<(), Error>
+    async fn set_property<'t, A, T>(&self, address: A, value: T) -> Result<()>
     where
         A: Into<MemberAddress> + Send,
         T: IntoValue<'t> + Send,
@@ -73,12 +76,12 @@ pub trait ObjectExt: Object + Sync {
         .await
     }
 
-    async fn properties(&self) -> Result<Vec<String>, Error> {
+    async fn properties(&self) -> Result<Vec<String>> {
         Ok(self
             .meta()
             .properties
-            .into_iter()
-            .map(|(_uid, prop)| prop.name)
+            .iter()
+            .map(|(_uid, prop)| prop.name.clone())
             .collect())
     }
 }
@@ -138,7 +141,9 @@ impl<'a> qi_value::IntoValue<'a> for Uid {
 }
 
 impl<'a> qi_value::FromValue<'a> for Uid {
-    fn from_value(value: qi_value::Value<'a>) -> Result<Self, qi_value::FromValueError> {
+    fn from_value(
+        value: qi_value::Value<'a>,
+    ) -> std::result::Result<Self, qi_value::FromValueError> {
         let bytes =
             value
                 .as_string_bytes()
@@ -158,16 +163,16 @@ pub struct Client {
     id: Id,
     uid: Uid,
     meta: MetaObject,
-    session: session::Session,
+    session: Session,
 }
 
 impl Client {
-    pub(crate) fn new(
+    pub(super) fn new(
         service_id: ServiceId,
         id: Id,
         uid: Uid,
         meta: MetaObject,
-        session: session::Session,
+        session: Session,
     ) -> Self {
         Self {
             service_id,
@@ -177,12 +182,12 @@ impl Client {
             session,
         }
     }
-    pub(crate) async fn connect(
+    pub(super) async fn connect(
         service_id: ServiceId,
         id: Id,
         uid: Uid,
-        session: session::Session,
-    ) -> Result<Self, Error> {
+        session: Session,
+    ) -> Result<Self> {
         let meta = fetch_meta_object(&session, service_id, id).await?;
         Ok(Self {
             service_id,
@@ -192,48 +197,118 @@ impl Client {
             session,
         })
     }
-
-    pub fn id(&self) -> session::Uid {
-        self.session.uid()
-    }
 }
 
-pub(crate) async fn fetch_meta_object(
-    session: &session::Session,
+pub(super) async fn fetch_meta_object(
+    session: &Session,
     service_id: ServiceId,
     id: Id,
-) -> Result<MetaObject, Error> {
+) -> Result<MetaObject> {
     Ok(session
         .call(
             message::Address(service_id, id, ACTION_ID_METAOBJECT),
             0.into_value(), // unused
-            MetaObject::signature().into_type().as_ref(),
+            <MetaObject as value::Reflect>::signature()
+                .into_type()
+                .as_ref(),
         )
         .await?
         .cast_into()?)
 }
 
-#[async_trait]
-impl Object for Client {
-    fn meta(&self) -> MetaObject {
-        self.meta.clone()
+#[derive(Debug)]
+pub(super) enum PostTarget<'a> {
+    Method(&'a MetaMethod),
+    Signal(&'a MetaSignal),
+}
+
+impl<'a> PostTarget<'a> {
+    pub(super) fn get(meta: &'a MetaObject, address: &MemberAddress) -> Result<Self> {
+        meta.method(address)
+            .map(Self::Method)
+            .or_else(|| meta.signal(address).map(Self::Signal))
+            .ok_or_else(|| Error::SignalNotFound(address.clone()))
     }
 
-    async fn meta_call(
-        &self,
-        address: MemberAddress,
-        args: Value<'_>,
-    ) -> Result<Value<'static>, Error> {
+    fn action_id(&self) -> ActionId {
+        match self {
+            PostTarget::Method(method) => method.uid,
+            PostTarget::Signal(signal) => signal.uid,
+        }
+    }
+
+    pub(super) fn parameters_signature(&self) -> &value::Signature {
+        match self {
+            PostTarget::Method(method) => &method.parameters_signature,
+            PostTarget::Signal(signal) => &signal.signature,
+        }
+    }
+}
+
+#[async_trait]
+impl Object for Client {
+    fn meta(&self) -> &MetaObject {
+        &self.meta
+    }
+
+    async fn meta_call(&self, address: MemberAddress, args: Value<'_>) -> Result<Value<'static>> {
         let method = self
             .meta
             .method(&address)
             .ok_or_else(|| Error::MethodNotFound(address))?;
+        let args_signature = args.signature();
+        if args_signature != method.parameters_signature {
+            return Err(Error::BadValueSignature {
+                expected: method.parameters_signature.clone(),
+                actual: args_signature,
+            });
+        }
         Ok(self
             .session
             .call(
                 message::Address(self.service_id, self.id, method.uid),
                 args,
                 method.return_signature.to_type(),
+            )
+            .await?)
+    }
+
+    async fn meta_post(&self, address: MemberAddress, args: Value<'_>) -> Result<()> {
+        let target = PostTarget::get(&self.meta, &address)?;
+        let args_signature = args.signature();
+        let target_signature = target.parameters_signature();
+        if &args_signature != target_signature {
+            return Err(Error::BadValueSignature {
+                expected: target_signature.clone(),
+                actual: args_signature,
+            });
+        }
+        Ok(self
+            .session
+            .oneway(
+                message::Address(self.service_id, self.id, target.action_id()),
+                message::Oneway::Post(args),
+            )
+            .await?)
+    }
+
+    async fn meta_event(&self, address: MemberAddress, value: Value<'_>) -> Result<()> {
+        let signal = self
+            .meta
+            .signal(&address)
+            .ok_or_else(|| Error::SignalNotFound(address))?;
+        let args_signature = value.signature();
+        if args_signature != signal.signature {
+            return Err(Error::BadValueSignature {
+                expected: signal.signature.clone(),
+                actual: args_signature,
+            });
+        }
+        Ok(self
+            .session
+            .oneway(
+                message::Address(self.service_id, self.id, signal.uid),
+                message::Oneway::Event(value),
             )
             .await?)
     }
@@ -280,7 +355,7 @@ mod tests {
             self.a
         }
 
-        fn div(&mut self, b: i32) -> Result<i32, DivisionByZeroError> {
+        fn div(&mut self, b: i32) -> std::result::Result<i32, DivisionByZeroError> {
             if b == 0 {
                 Err(DivisionByZeroError)
             } else {
@@ -422,7 +497,7 @@ mod tests {
             })
         }
 
-        fn call(self, calc: &mut Calculator, args: Value<'_>) -> Result<Value<'static>, Error> {
+        fn call(self, calc: &mut Calculator, args: Value<'_>) -> Result<Value<'static>> {
             Ok(match &self {
                 Self::Add => {
                     let arg = args.cast_into()?;
@@ -456,18 +531,27 @@ mod tests {
 
     #[async_trait]
     impl Object for Mutex<Calculator> {
-        fn meta(&self) -> MetaObject {
-            Meta::get().object.clone()
+        fn meta(&self) -> &MetaObject {
+            &Meta::get().object
         }
 
         async fn meta_call(
             &self,
             address: MemberAddress,
             args: Value<'_>,
-        ) -> Result<Value<'static>, Error> {
+        ) -> Result<Value<'static>> {
             Method::from_address(&address)
                 .ok_or_else(|| Error::MethodNotFound(address))?
                 .call(&mut *self.lock().await, args)
+        }
+
+        async fn meta_post(&self, address: MemberAddress, args: Value<'_>) -> Result<()> {
+            self.meta_call(address, args).await?;
+            Ok(())
+        }
+
+        async fn meta_event(&self, address: MemberAddress, _value: Value<'_>) -> Result<()> {
+            Err(Error::SignalNotFound(address))
         }
     }
 
@@ -486,13 +570,13 @@ mod tests {
         assert_eq!(res, 128);
         let res: i32 = calc.call("clamp", (32, 127)).await.unwrap();
         assert_eq!(res, 127);
-        let res: Result<i32, _> = calc.call("div", 0).await;
+        let res: Result<i32> = calc.call("div", 0).await;
         assert_matches!(res,
             Err(Error::Other(err)) => {
                 assert_eq!(err.to_string(), "division by zero");
             }
         );
-        let res: Result<i32, _> = calc.call("log", 1).await;
+        let res: Result<i32> = calc.call("log", 1).await;
         assert_matches!(
             res,
             Err(Error::MethodNotFound(name)) => assert_eq!(name, "log")

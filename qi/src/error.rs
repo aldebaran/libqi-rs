@@ -1,7 +1,7 @@
-use crate::session;
-use qi_format as format;
-use qi_messaging as messaging;
-use qi_value::{object, FromValueError};
+use crate::{
+    format, messaging, session,
+    value::{self, object, FromValueError},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -14,8 +14,8 @@ pub enum Error {
     #[error("no reachable endpoint")]
     NoReachableEndpoint,
 
-    #[error("no available message handler for address {0}")]
-    NoMessageHandler(messaging::message::Address),
+    #[error("no available message handler for type {0} at address {1}")]
+    NoMessageHandler(messaging::message::Type, messaging::message::Address),
 
     #[error("method not found {0}")]
     MethodNotFound(object::MemberAddress),
@@ -25,6 +25,12 @@ pub enum Error {
 
     #[error("signal not found {0}")]
     SignalNotFound(object::MemberAddress),
+
+    #[error("bad value signature (expected \"{expected}\" but actual is \"{actual}\")")]
+    BadValueSignature {
+        expected: value::Signature,
+        actual: value::Signature,
+    },
 
     #[error("a service with the name \"{0}\" already exists on this node")]
     ServiceExists(String),

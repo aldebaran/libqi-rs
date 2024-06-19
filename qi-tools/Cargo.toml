@@ -5,11 +5,11 @@ description = ""
 license-file = "../LICENSE.txt"
 version = "0.1.0-dev"
 edition = "2021"
-rust-version = "1.68"
+rust-version = "1.75"
 
 [dependencies]
 anyhow = "1.0.69"
-clap = { version = "= 4.5.6", features = ["derive"] }
+clap = { version = "4.5.7", features = ["derive"] }
 colored = "2.0.0"
 qi = { path = "../qi" }
 tokio = { version = "1.38.0", features = ["rt-multi-thread", "macros"] }

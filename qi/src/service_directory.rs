@@ -25,12 +25,12 @@ pub trait ServiceDirectory {
 }
 
 #[derive(Clone, Debug)]
-pub struct Client {
+pub(super) struct Client {
     object: object::Client,
 }
 
 impl Client {
-    pub fn new(session: session::Session) -> Self {
+    pub(super) fn new(session: session::Session) -> Self {
         Self {
             object: object::Client::new(
                 SERVICE_ID,
@@ -40,10 +40,6 @@ impl Client {
                 session,
             ),
         }
-    }
-
-    pub fn id(&self) -> session::Uid {
-        self.object.id()
     }
 }
 

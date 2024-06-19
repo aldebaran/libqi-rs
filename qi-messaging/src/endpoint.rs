@@ -1,8 +1,8 @@
 use crate::{
     client,
     id_factory::SharedIdFactory,
-    message::{OnewayRequest, Response},
-    Client, Error, Handler, Message, Server,
+    message::{Oneway, Response},
+    server, Client, Error, Handler, Message,
 };
 use async_stream::stream;
 use futures::{stream::FusedStream, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
@@ -73,11 +73,10 @@ where
 {
     let messages = messages.into_stream().map_err(Error::other).fuse();
     let id_factory = SharedIdFactory::new();
-    let server = Server::new(handler);
     let (client, mut client_requests) = client::pair(id_factory, 1);
     let outgoing = stream! {
+        let mut server_calls = server::CallFutures::default();
         let mut messages = pin!(messages);
-        let mut server = pin!(server);
         loop {
             select! {
                 // Process and dispatch incoming messages.
@@ -85,19 +84,20 @@ where
                     match res_message {
                         Ok(message) => match message {
                             Message::Call { id, address, value } => {
-                                server.call(id, address, value);
+                                let call_future = handler.call(address, value);
+                                server_calls.push(id, address, call_future);
                             }
                             Message::Post { address, value, .. } => {
-                                server.oneway_request(address, OnewayRequest::Post(value));
+                                let _res: Result<_, _> = handler.oneway(address, Oneway::Post(value)).await;
                             }
                             Message::Event { address, value, .. } => {
-                                server.oneway_request(address, OnewayRequest::Event(value));
+                                let _res: Result<_, _> = handler.oneway(address, Oneway::Event(value)).await;
                             },
                             Message::Capabilities { address, capabilities, .. } => {
-                                server.oneway_request(address, OnewayRequest::Capabilities(capabilities));
+                                let _res: Result<_, _> = handler.oneway(address, Oneway::Capabilities(capabilities)).await;
                             },
                             Message::Cancel { call_id, .. } => {
-                                server.as_mut().cancel(&call_id);
+                                server_calls.cancel(&call_id);
                             },
                             Message::Reply { id, value, .. } => {
                                 client_requests.dispatch_response(id, Response::Reply(value));
@@ -112,7 +112,7 @@ where
                         Err(err) => yield Err(Error::other(err)),
                     }
                 }
-                Some(message) = server.next(), if !server.is_terminated() => {
+                Some(message) = server_calls.next(), if !server_calls.is_terminated() => {
                     yield Ok(message);
                 }
                 Some(message) = client_requests.next(), if !client_requests.is_terminated() => {

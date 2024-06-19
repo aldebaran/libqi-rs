@@ -14,7 +14,7 @@ use qi_value::{
     qi_macros::IntoValue,
     qi_macros::FromValue,
 )]
-#[qi(value = "qi_value")]
+#[qi(value(crate = "qi_value"))]
 #[allow(dead_code)]
 struct Basic {
     s: String,
@@ -161,11 +161,11 @@ fn test_basic_derive_from_value() {
     qi_macros::IntoValue,
     qi_macros::FromValue,
 )]
-#[qi(value = "qi_value")]
+#[qi(value(crate = "qi_value"))]
 #[allow(dead_code)]
 struct Borrows<'a, 'b> {
     s: &'a str,
-    #[qi(as_raw)]
+    #[qi(value(as_raw))]
     r: &'b [u8],
 }
 
@@ -255,7 +255,7 @@ fn test_borrows_derive_from_value() {
     qi_macros::IntoValue,
     qi_macros::FromValue,
 )]
-#[qi(value = "qi_value", transparent)]
+#[qi(value(crate = "qi_value", transparent))]
 #[allow(dead_code)]
 struct Transparent {
     s: String,
@@ -312,7 +312,7 @@ fn test_transparent_derive_from_value() {
     qi_macros::IntoValue,
     qi_macros::FromValue,
 )]
-#[qi(value = "qi_value", transparent)]
+#[qi(value(crate = "qi_value", transparent))]
 struct Empty;
 
 #[test]
@@ -358,26 +358,53 @@ fn test_empty_derive_from_value() {
 }
 
 #[derive(qi_macros::Reflect, qi_macros::ToValue, qi_macros::IntoValue, qi_macros::FromValue)]
-#[qi(value = "qi_value", rename_all = "camelCase")]
-struct RenameAll {
+#[qi(value(crate = "qi_value", case = "camelCase"))]
+struct Case {
     my_field_has_a_name_with_underscores: i32,
+    #[qi(value(case = "UPPER_SNAKE"))]
+    i_want_this_field_in_all_caps: i32,
 }
 
 #[test]
-fn test_derive_rename_all_reflect() {
+fn test_derive_case_reflect() {
     use qi_value::Reflect;
     assert_matches!(
-        RenameAll::ty(),
+        Case::ty(),
         Some(Type::Tuple(Tuple::Struct { name, fields })) => {
-            assert_eq!(name, "RenameAll");
-            assert_matches!(fields.as_slice(), [f] => {
-                assert_matches!(
-                    f,
-                    StructField {
-                        name,
-                        ty: Some(Type::Int32)
-                    } => assert_eq!(name, "myFieldHasANameWithUnderscores")
-                );
+            assert_eq!(name, "Case");
+            assert_matches!(fields.as_slice(), [StructField {
+                name: f1_name,
+                ty: Some(Type::Int32)
+            }, StructField {
+                name: f2_name,
+                ty: Some(Type::Int32)
+            }] => {
+                assert_eq!(f1_name, "myFieldHasANameWithUnderscores");
+                assert_eq!(f2_name, "I_WANT_THIS_FIELD_IN_ALL_CAPS");
+            });
+        }
+    );
+}
+
+#[derive(qi_macros::Reflect, qi_macros::ToValue, qi_macros::IntoValue, qi_macros::FromValue)]
+#[qi(value(crate = "qi_value"))]
+struct FieldRename {
+    #[qi(value(name = "b"))]
+    a: i32,
+}
+
+#[test]
+fn test_derive_rename_reflect() {
+    use qi_value::Reflect;
+    assert_matches!(
+        FieldRename::ty(),
+        Some(Type::Tuple(Tuple::Struct { name, fields })) => {
+            assert_eq!(name, "FieldRename");
+            assert_matches!(fields.as_slice(), [StructField {
+                name,
+                ty: Some(Type::Int32)
+            }] => {
+                assert_eq!(name, "b")
             });
         }
     );

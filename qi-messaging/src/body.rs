@@ -1,4 +1,3 @@
-use crate::value;
 use bytes::{Buf, Bytes};
 
 pub trait BodyBuf: Sized {
@@ -17,17 +16,4 @@ pub trait BodyBuf: Sized {
         T: serde::Serialize;
 
     fn deserializer(&mut self) -> Self::Deserializer<'_>;
-
-    fn deserialize_value<'v>(
-        &'v mut self,
-        ty: Option<&value::Type>,
-    ) -> Result<value::Value<'v>, Self::Error>
-    where
-        <Self::Deserializer<'v> as serde::Deserializer<'v>>::Error: Into<Self::Error>,
-    {
-        use serde::de::DeserializeSeed;
-        value::de::ValueOfType::new(ty)
-            .deserialize(self.deserializer())
-            .map_err(Into::into)
-    }
 }

@@ -12,6 +12,9 @@ pub enum Error {
     //------------------------------------------------------------------------
     // URL related errors.
     //------------------------------------------------------------------------
+    #[error(transparent)]
+    ParseUrl(#[from] url::ParseError),
+
     #[error("unsupported URL scheme \"{0}\"")]
     UnsupportedUrlScheme(String),
 
@@ -67,13 +70,5 @@ impl<T> From<tokio_util::sync::PollSendError<T>> for Error {
 impl From<tokio::sync::oneshot::error::RecvError> for Error {
     fn from(_err: tokio::sync::oneshot::error::RecvError) -> Self {
         Self::EndpointClosed
-    }
-}
-
-impl std::str::FromStr for Error {
-    type Err = std::convert::Infallible;
-
-    fn from_str(error: &str) -> Result<Self, Self::Err> {
-        Ok(Self::Other(error.into()))
     }
 }

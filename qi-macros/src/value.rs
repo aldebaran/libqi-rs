@@ -29,7 +29,7 @@ impl Derive {
                 if attrs.transparent {
                     ContainerData::new_struct_transparent(&name, data)
                 } else {
-                    ContainerData::new_struct(data, attrs.rename_all)
+                    ContainerData::new_struct(data, attrs.case)
                 }
             }
             Data::Enum(_) | Data::Union(_) => Err(Error::new_spanned(
@@ -412,30 +412,39 @@ impl<'a> ToTokens for WithValueLifetimeImplGenerics<'a> {
 struct DeriveAttributes {
     crate_path: Path,
     transparent: bool,
-    rename_all: Option<Case>,
+    case: Option<Case>,
 }
 
 impl DeriveAttributes {
     /// Parses attributes with syntax:
-    /// #[qi(value = "...", transparent, rename_all = "...")].
+    /// #[qi(value(X, ...) where X can be:
+    ///     - crate = "..."
+    ///     - transparent
+    ///     - case = "..."
     fn new(attrs: &[Attribute]) -> syn::Result<Self> {
         let mut crate_path = parse_quote!(::qi::value);
         let mut transparent = false;
-        let mut rename_all = None;
+        let mut case = None;
         for attr in attrs {
             if attr.path().is_ident("qi") {
                 attr.parse_nested_meta(|meta| {
                     if meta.path.is_ident("value") {
-                        let value = meta.value()?; // parses the '='
-                        let path_lit_str: LitStr = value.parse()?;
-                        crate_path = path_lit_str.parse()?;
-                        Ok(())
-                    } else if meta.path.is_ident("transparent") {
-                        transparent = true;
-                        Ok(())
-                    } else if meta.path.is_ident("rename_all") {
-                        rename_all = Some(parse_rename_attribute(&meta)?);
-                        Ok(())
+                        meta.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("crate") {
+                                let path = meta.value()?; // parses the '='
+                                let path_lit_str: LitStr = path.parse()?;
+                                crate_path = path_lit_str.parse()?;
+                                Ok(())
+                            } else if meta.path.is_ident("transparent") {
+                                transparent = true;
+                                Ok(())
+                            } else if meta.path.is_ident("case") {
+                                case = Some(parse_case_attribute(&meta)?);
+                                Ok(())
+                            } else {
+                                Err(meta.error("unknown attribute"))
+                            }
+                        })
                     } else {
                         Err(meta.error("unknown attribute"))
                     }
@@ -446,7 +455,7 @@ impl DeriveAttributes {
         Ok(Self {
             crate_path,
             transparent,
-            rename_all,
+            case,
         })
     }
 }
@@ -459,14 +468,14 @@ enum ContainerData {
 }
 
 impl ContainerData {
-    fn new_struct(data: DataStruct, rename_all: Option<Case>) -> syn::Result<Self> {
+    fn new_struct(data: DataStruct, case: Option<Case>) -> syn::Result<Self> {
         Ok(match data.fields {
             Fields::Named(fields) => {
                 let fields = fields
                     .named
                     .into_iter()
                     .enumerate()
-                    .map(|(idx, field)| Field::new(field, idx, rename_all))
+                    .map(|(idx, field)| Field::new(field, idx, case))
                     .collect::<syn::Result<_>>()?;
                 Self::Struct { fields }
             }
@@ -475,7 +484,7 @@ impl ContainerData {
                     .unnamed
                     .into_iter()
                     .enumerate()
-                    .map(|(idx, field)| Field::new(field, idx, rename_all))
+                    .map(|(idx, field)| Field::new(field, idx, case))
                     .collect::<syn::Result<_>>()?;
                 Self::TupleStruct { fields }
             }
@@ -549,12 +558,14 @@ impl Field {
     }
 
     fn name(&self) -> Option<String> {
-        self.src.ident.as_ref().map(|ident| {
-            let name = ident.to_string();
-            match self.attrs.rename {
-                Some(case) => name.to_case(case),
-                None => name,
-            }
+        self.attrs.name_override.clone().or_else(|| {
+            self.src.ident.as_ref().map(|ident| {
+                let name = ident.to_string();
+                match self.attrs.case {
+                    Some(case) => name.to_case(case),
+                    None => name,
+                }
+            })
         })
     }
 
@@ -590,30 +601,45 @@ impl Field {
 
 struct FieldAttributes {
     as_raw: bool,
-    rename: Option<Case>,
+    name_override: Option<String>,
+    case: Option<Case>,
 }
 
 impl FieldAttributes {
     /// Parses attributes with syntax:
-    /// #[qi(rename = "...", as_raw)].
-    fn new(mut rename: Option<Case>, attrs: &[Attribute]) -> syn::Result<Self> {
+    /// #[qi(value(case = "...", name = "...", as_raw))].
+    fn new(mut case: Option<Case>, attrs: &[Attribute]) -> syn::Result<Self> {
         let mut as_raw = false;
+        let mut name_override = None;
         for attr in attrs {
             if attr.path().is_ident("qi") {
                 attr.parse_nested_meta(|meta| {
-                    if meta.path.is_ident("rename") {
-                        rename = Some(parse_rename_attribute(&meta)?);
-                        Ok(())
-                    } else if meta.path.is_ident("as_raw") {
-                        as_raw = true;
-                        Ok(())
+                    if meta.path.is_ident("value") {
+                        meta.parse_nested_meta(|meta| {
+                            if meta.path.is_ident("case") {
+                                case = Some(parse_case_attribute(&meta)?);
+                                Ok(())
+                            } else if meta.path.is_ident("name") {
+                                name_override = Some(parse_name_attribute(&meta)?);
+                                Ok(())
+                            } else if meta.path.is_ident("as_raw") {
+                                as_raw = true;
+                                Ok(())
+                            } else {
+                                Err(meta.error("unknown attribute"))
+                            }
+                        })
                     } else {
                         Err(meta.error("unknown attribute"))
                     }
                 })?;
             }
         }
-        Ok(Self { as_raw, rename })
+        Ok(Self {
+            as_raw,
+            name_override,
+            case,
+        })
     }
 }
 
@@ -659,20 +685,34 @@ impl Reflect {
     }
 }
 
-fn parse_rename_attribute(meta: &syn::meta::ParseNestedMeta) -> syn::Result<Case> {
-    let value = meta.value()?; // parses the '='
+fn parse_name_attribute(meta: &syn::meta::ParseNestedMeta) -> syn::Result<String> {
+    let value = meta.value()?;
     let value_lit_str: LitStr = value.parse()?;
-    match value_lit_str.value().as_str() {
-        "lowercase" => Ok(Case::Lower),
-        "UPPERCASE" => Ok(Case::Upper),
-        "PascalCase" => Ok(Case::Pascal),
-        "camelCase" => Ok(Case::Camel),
-        "snake_case" => Ok(Case::Snake),
-        "SCREAMING_SNAKE_CASE" => Ok(Case::ScreamingSnake),
-        "kebab-case" => Ok(Case::Kebab),
-        "SCREAMING-KEBAB-CASE" => Ok(Case::UpperKebab),
-        _ => Err(meta.error("unknown \"rename_all\" value")),
-    }
+    Ok(value_lit_str.value())
+}
+
+fn parse_case_attribute(meta: &syn::meta::ParseNestedMeta) -> syn::Result<Case> {
+    const CASES: [(&str, Case); 9] = [
+        ("lowercase", Case::Lower),
+        ("UPPERCASE", Case::Upper),
+        ("PascalCase", Case::Pascal),
+        ("camelCase", Case::Camel),
+        ("snake_case", Case::Snake),
+        ("UPPER_SNAKE", Case::UpperSnake),
+        ("SCREAMING_SNAKE", Case::ScreamingSnake),
+        ("kebab-case", Case::Kebab),
+        ("SCREAMING-KEBAB-CASE", Case::UpperKebab),
+    ];
+    let value = meta.value()?.parse::<LitStr>()?.value();
+    CASES
+        .iter()
+        .find_map(|(ident, case)| (*ident == value).then_some(*case))
+        .ok_or_else(|| {
+            meta.error(format!(
+                "unknown casing value \"{value}\", possible values are [{:?}]",
+                CASES.iter().map(|(ident, _)| *ident).collect::<Vec<_>>()
+            ))
+        })
 }
 
 impl ToTokens for Field {

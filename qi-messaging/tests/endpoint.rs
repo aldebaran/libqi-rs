@@ -1,9 +1,9 @@
 use assert_matches::assert_matches;
-use futures::{channel::mpsc, future::BoxFuture, stream, FutureExt, StreamExt};
+use futures::{channel::mpsc, stream, FutureExt, StreamExt};
 use pin_project_lite::pin_project;
 use qi_messaging::{
     endpoint,
-    message::{self, Action, Address, Id, Object, OnewayRequest, Service},
+    message::{self, Action, Address, Id, Object, Oneway, Service},
     CapabilitiesMap, Error, Handler, Message,
 };
 use qi_value::{Dynamic, Value};
@@ -150,7 +150,7 @@ fn client_post() {
 
     let mut send = task::spawn(client.oneway(
         Address(Service(1), Object(2), Action(3)),
-        OnewayRequest::Post("Say hi to Bob for me".to_string()),
+        Oneway::Post("Say hi to Bob for me".to_string()),
     ));
     assert_ready_ok!(send.poll());
 
@@ -180,7 +180,7 @@ fn client_event() {
 
     let mut send = task::spawn(client.oneway(
         Address(Service(1), Object(2), Action(3)),
-        OnewayRequest::Event("Carol says hi by the way".to_string()),
+        Oneway::Event("Carol says hi by the way".to_string()),
     ));
     assert_ready_ok!(send.poll());
 
@@ -210,7 +210,7 @@ fn client_capabilities() {
 
     let mut send = task::spawn(client.oneway(
         Address(Service(1), Object(2), Action(3)),
-        OnewayRequest::Capabilities(CapabilitiesMap::from_iter([
+        Oneway::Capabilities(CapabilitiesMap::from_iter([
             ("SayHi".to_owned(), Dynamic(Value::Bool(true))),
             ("NotifyHi".to_owned(), Dynamic(Value::Int32(42))),
         ])),
@@ -401,7 +401,7 @@ fn handler_post() {
         oneway.poll_next(),
         Some((
             Address(Service(1), Object(2), Action(3)),
-            OnewayRequest::Post("Bob says hi back".to_string())
+            Oneway::Post("Bob says hi back".to_string())
         ))
     );
 }
@@ -432,7 +432,7 @@ fn handler_event() {
         oneway.poll_next(),
         Some((
             Address(Service(1), Object(2), Action(3)),
-            OnewayRequest::Event("Carol received your 'hi'".to_string())
+            Oneway::Event("Carol received your 'hi'".to_string())
         ))
     );
 }
@@ -466,7 +466,7 @@ fn handler_capabilities() {
         oneway.poll_next(),
         Some((
             Address(Service(1), Object(2), Action(3)),
-            OnewayRequest::Capabilities(CapabilitiesMap::from_iter([(
+            Oneway::Capabilities(CapabilitiesMap::from_iter([(
                 "SayHi".to_owned(),
                 Dynamic(Value::Bool(false)),
             )]))
@@ -578,16 +578,19 @@ impl CountedPendingHandler {
 impl<'a> Handler<()> for &'a CountedPendingHandler {
     type Reply = ();
     type Error = Error;
-    type Future = CountedPendingFuture<'a>;
 
-    fn call(&mut self, _address: message::Address, _: ()) -> Self::Future {
+    fn call(
+        &self,
+        _address: message::Address,
+        _: (),
+    ) -> impl Future<Output = Result<Self::Reply, Self::Error>> + Send {
         CountedPendingFuture::new(self.unblock.notified(), Arc::clone(&self.pending_calls))
     }
 
-    fn oneway_request(
-        &mut self,
+    async fn oneway(
+        &self,
         _address: message::Address,
-        _request: message::OnewayRequest<()>,
+        _request: message::Oneway<()>,
     ) -> Result<(), Self::Error> {
         unimplemented!()
     }
@@ -628,12 +631,12 @@ impl Drop for DecreaseCountDropGuard {
 }
 
 #[derive(Debug, Clone)]
-struct DummyHandler(mpsc::UnboundedSender<(message::Address, OnewayRequest<String>)>);
+struct DummyHandler(mpsc::UnboundedSender<(message::Address, Oneway<String>)>);
 
 impl DummyHandler {
     fn new() -> (
         Self,
-        mpsc::UnboundedReceiver<(message::Address, OnewayRequest<String>)>,
+        mpsc::UnboundedReceiver<(message::Address, Oneway<String>)>,
     ) {
         let (sender, receiver) = mpsc::unbounded();
         (Self(sender), receiver)
@@ -643,9 +646,12 @@ impl DummyHandler {
 impl Handler<String> for DummyHandler {
     type Error = Error;
     type Reply = String;
-    type Future = BoxFuture<'static, Result<String, Error>>;
 
-    fn call(&mut self, _address: message::Address, value: String) -> Self::Future {
+    fn call(
+        &self,
+        _address: message::Address,
+        value: String,
+    ) -> impl Future<Output = Result<Self::Reply, Self::Error>> + Send {
         async move {
             let name = value
                 .strip_prefix("My name is ")
@@ -655,10 +661,10 @@ impl Handler<String> for DummyHandler {
         .boxed()
     }
 
-    fn oneway_request(
-        &mut self,
+    async fn oneway(
+        &self,
         address: message::Address,
-        request: message::OnewayRequest<String>,
+        request: message::Oneway<String>,
     ) -> Result<(), Self::Error> {
         self.0
             .unbounded_send((address, request))

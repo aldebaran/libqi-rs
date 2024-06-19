@@ -5,17 +5,17 @@ description = "Values of the `qi` type system"
 license-file = "../LICENSE.txt"
 version = "0.1.0-dev"
 edition = "2021"
-rust-version = "1.68"
+rust-version = "1.75"
 
 [dependencies]
 qi-macros = { path = "../qi-macros" }
-derive_more = "0.99.17"
-serde = { version = "1.0.152", features = ["derive"] }
-thiserror = "1.0.39"
+derive_more = "0.99.18"
+serde = { version = "1.0.203", features = ["derive"] }
+thiserror = "1.0.61"
 seq-macro = "0.3.5"
-ordered-float = { version = "4.1.1", features = ["serde"] }
-bytes = { version = "1.5.0", features = ["serde"] }
-serde_with = "3.4.0"
+ordered-float = { version = "4.2.0", features = ["serde"] }
+bytes = { version = "1.6.0", features = ["serde"] }
+serde_with = "3.8.1"
 
 [dev-dependencies]
-serde_test = "1.0.152"
+serde_test = "1.0.176"

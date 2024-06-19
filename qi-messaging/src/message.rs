@@ -341,10 +341,31 @@ pub struct MetaData {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
-pub enum OnewayRequest<T> {
+pub enum Oneway<T> {
     Post(T),
     Event(T),
     Capabilities(CapabilitiesMap<'static>),
+}
+
+impl<T> Oneway<T> {
+    pub fn ty(&self) -> Type {
+        match self {
+            Self::Post(_) => Type::Post,
+            Self::Event(_) => Type::Event,
+            Self::Capabilities(_) => Type::Capabilities,
+        }
+    }
+
+    pub fn try_map<F, U, E>(self, f: F) -> Result<Oneway<U>, E>
+    where
+        F: FnOnce(T) -> Result<U, E>,
+    {
+        Ok(match self {
+            Self::Post(value) => Oneway::Post(f(value)?),
+            Self::Event(value) => Oneway::Event(f(value)?),
+            Self::Capabilities(capabilities) => Oneway::Capabilities(capabilities),
+        })
+    }
 }
 
 #[derive(

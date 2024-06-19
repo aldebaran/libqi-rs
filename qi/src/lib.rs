@@ -42,7 +42,6 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-mod binary_value;
 pub mod error;
 pub mod node;
 pub mod object;
@@ -52,16 +51,16 @@ pub mod service_directory;
 pub mod session;
 pub mod signal;
 pub mod space;
+pub mod value;
 
+use self::value::BinaryValue;
 pub use self::{
     error::{Error, Result},
     node::Node,
-    object::{ArcObject, BoxObject, Object, ObjectExt},
+    object::{BoxObject, Object, ObjectExt},
     space::Space,
     value::Value,
 };
-use binary_value::BinaryValue;
 pub use qi_format as format;
 pub use qi_macros::{object, FromValue, IntoValue, Reflect, ToValue, Valuable};
-pub use qi_messaging as messaging;
-pub use qi_value as value;
+pub use qi_messaging::{self as messaging, Address};

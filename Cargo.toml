@@ -11,3 +11,4 @@ members = [
     "tests-macros",
     # "qi-tools",
 ]
+resolver = "2"

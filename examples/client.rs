@@ -1,6 +1,6 @@
 use clap::Parser;
 use eyre::Result;
-use qi::{node::Node, Address, ObjectExt, Space};
+use qi::{ObjectExt, Space};
 use tracing::info;
 use tracing_subscriber::fmt;
 
@@ -10,7 +10,7 @@ mod audio;
 #[clap()]
 struct Args {
     #[clap(short, long, default_value = "tcp://::1:9559")]
-    address: Address,
+    address: qi::Address,
 
     #[clap(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
@@ -46,21 +46,14 @@ async fn main() -> Result<()> {
         .with_thread_names(true)
         .init();
 
-    let mut node = qi::node::create();
-
-    // You can add services to the node and make them accessible to other nodes of joined spaces.
-    node.add_service("AudioPlayer".to_owned(), audio::Player::new())
+    let (node, connection) = qi::node::Builder::new()
+        // You can add services to the node and make them accessible to other nodes of joined spaces.
+        .add_service("AudioPlayer", audio::Player::new())
+        // Connect the node to a space at the given address.
+        .connect_to_space(args.address, None)
+        .start()
         .await?;
-
-    // Connect the node to a space at the given address.
-    info!(address = %args.address, "connecting node to space");
-    let node = node
-        .attach_space(
-            qi::space::Parameters::builder()
-                .add_address(args.address)
-                .build(),
-        )
-        .await?;
+    tokio::spawn(connection);
 
     // You can access remote services and call methods on them.
     info!("getting \"Calculator\" service");

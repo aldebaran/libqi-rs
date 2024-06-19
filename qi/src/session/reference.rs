@@ -17,6 +17,7 @@ impl Reference {
         Self(Kind::Service(name.to_string()))
     }
 
+    #[cfg(test)]
     pub(crate) fn endpoint(address: Address) -> Self {
         Self(Kind::Endpoint(address))
     }
@@ -34,20 +35,6 @@ impl Reference {
 
     pub(crate) fn is_service_relative(&self) -> bool {
         matches!(self.0, Kind::Service { .. })
-    }
-
-    pub(super) fn as_service_relative(&self) -> Option<&String> {
-        match &self.0 {
-            Kind::Service(service) => Some(service),
-            _ => None,
-        }
-    }
-
-    pub(super) fn into_endpoint(self) -> Option<Address> {
-        match self.0 {
-            Kind::Endpoint(address) => Some(address),
-            _ => None,
-        }
     }
 
     pub(crate) fn is_machine_local(&self) -> bool {
@@ -146,19 +133,18 @@ pub(crate) enum Kind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::BinaryValue;
     use std::net::Ipv4Addr;
-    use value::FromValue;
 
     #[test]
-    fn test_addresses_deserialize() {
-        let input = [
+    fn references_from_binary_value() {
+        let mut binvalue = BinaryValue::from_static(&[
             0x02, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x71, 0x69, 0x3a, 0x43, 0x61, 0x6c,
             0x63, 0x75, 0x6c, 0x61, 0x74, 0x6f, 0x72, 0x15, 0x00, 0x00, 0x00, 0x74, 0x63, 0x70,
             0x3a, 0x2f, 0x2f, 0x31, 0x32, 0x37, 0x2e, 0x30, 0x2e, 0x30, 0x2e, 0x31, 0x3a, 0x34,
             0x31, 0x36, 0x38, 0x31,
-        ];
-        let endpoints =
-            Vec::<Reference>::from_value(qi_format::from_buf(input.as_slice()).unwrap()).unwrap();
+        ]);
+        let endpoints: Vec<Reference> = binvalue.deserialize_value().unwrap();
         assert_eq!(
             endpoints,
             [

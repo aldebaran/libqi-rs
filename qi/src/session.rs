@@ -17,43 +17,36 @@ use futures::{
 use qi_messaging::BodyBuf;
 use std::{future::Future, pin::pin};
 use tokio::{select, sync::watch};
-use tower::{Service, ServiceExt};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Session {
-    uid: Uid,
     capabilities: watch::Receiver<Option<CapabilitiesMap<'static>>>,
     client: messaging::Client<BinaryValue, BinaryValue>,
 }
 
 impl Session {
-    pub(crate) async fn connect<CallHandler, OnewaySink>(
+    pub(crate) async fn connect<Handler>(
         address: messaging::Address,
         credentials: authentication::Parameters<'_>,
-        call_handler: CallHandler,
-        oneway_sink: OnewaySink,
+        handler: Handler,
     ) -> Result<(Self, impl Future<Output = Result<()>>)>
     where
-        CallHandler:
-            tower::Service<(message::Address, BinaryValue), Error = Error, Response = BinaryValue>,
-        OnewaySink: Sink<(message::Address, message::OnewayRequest<BinaryValue>), Error = Error>,
+        Handler: messaging::Handler<BinaryValue, Error = Error, Reply = BinaryValue> + Sync,
     {
         let Control {
             controller,
             capabilities,
-            call_handler,
-            oneway_sink,
+            handler,
             ..
-        } = control::make(call_handler, oneway_sink, PermissiveAuthenticator, true);
+        } = control::make(handler, PermissiveAuthenticator, true);
         let (messages_stream, messages_sink) = messaging::channel::connect(address).await?;
         let (mut client, connection) =
-            messaging::endpoint::start(messages_stream, messages_sink, call_handler, oneway_sink);
+            messaging::endpoint::start(messages_stream, messages_sink, handler);
         controller
             .authenticate_to_remote(&mut client, credentials)
             .await?;
         Ok((
             Session {
-                uid: Uid::new(),
                 capabilities,
                 client,
             },
@@ -61,18 +54,14 @@ impl Session {
         ))
     }
 
-    pub(crate) async fn bind_server<Auth, CallHandler, OnewaySink>(
+    pub(crate) async fn bind_server<Auth, Handler>(
         address: messaging::Address,
         authenticator: Auth,
-        call_handler: CallHandler,
-        oneway_sink: OnewaySink,
+        handler: Handler,
     ) -> Result<(impl Future<Output = ()>, Vec<messaging::Address>)>
     where
         Auth: Authenticator + Clone + Send + Sync + 'static,
-        CallHandler: tower::Service<(message::Address, BinaryValue), Error = Error, Response = BinaryValue>
-            + Clone,
-        OnewaySink:
-            Sink<(message::Address, message::OnewayRequest<BinaryValue>), Error = Error> + Clone,
+        Handler: messaging::Handler<BinaryValue, Error = Error, Reply = BinaryValue> + Sync + Clone,
     {
         let (clients, endpoints) = messaging::channel::serve(address).await?;
         let server = async move {
@@ -81,7 +70,7 @@ impl Session {
             loop {
                 select! {
                     Some((messages_stream, messages_sink, _address)) = clients.next(), if !clients.is_terminated() => {
-                        sessions.push(Self::serve(messages_stream, messages_sink, authenticator.clone(), call_handler.clone(), oneway_sink.clone()));
+                        sessions.push(Self::serve(messages_stream, messages_sink, authenticator.clone(), handler.clone()));
                     }
                     _res = sessions.next(), if !sessions.is_terminated() => {
                         // nothing
@@ -95,30 +84,26 @@ impl Session {
         Ok((server, endpoints))
     }
 
-    async fn serve<Auth, MsgStream, MsgSink, CallHandler, OnewaySink>(
+    async fn serve<Auth, MsgStream, MsgSink, Handler>(
         messages_stream: MsgStream,
         messages_sink: MsgSink,
         authenticator: Auth,
-        call_handler: CallHandler,
-        oneway_sink: OnewaySink,
+        handler: Handler,
     ) where
         MsgStream:
             Stream<Item = std::result::Result<messaging::Message<BinaryValue>, messaging::Error>>,
         MsgSink: Sink<messaging::Message<BinaryValue>, Error = messaging::Error>,
         Auth: Authenticator + Send + Sync + 'static,
-        CallHandler:
-            tower::Service<(message::Address, BinaryValue), Error = Error, Response = BinaryValue>,
-        OnewaySink: Sink<(message::Address, message::OnewayRequest<BinaryValue>), Error = Error>,
+        Handler: messaging::Handler<BinaryValue, Error = Error, Reply = BinaryValue> + Sync,
     {
         let Control {
             capabilities,
             mut remote_authorized,
-            call_handler,
-            oneway_sink,
+            handler,
             ..
-        } = control::make(call_handler, oneway_sink, authenticator, true);
+        } = control::make(handler, authenticator, true);
         let (client, connection) =
-            messaging::endpoint::start(messages_stream, messages_sink, call_handler, oneway_sink);
+            messaging::endpoint::start(messages_stream, messages_sink, handler);
         let mut _session = None;
         let mut connection = pin!(connection);
         loop {
@@ -127,7 +112,6 @@ impl Session {
                     match authorized {
                         Ok(()) => if *remote_authorized.borrow_and_update() {
                             _session = Some(Self {
-                                uid: Uid::new(),
                                 capabilities: capabilities.clone(),
                                 client: client.clone(),
                             })
@@ -154,22 +138,24 @@ impl Session {
         return_type: Option<&value::Type>,
     ) -> Result<value::Value<'static>> {
         self.client
-            .clone()
-            .ready_oneshot()
+            .call(address, BinaryValue::serialize(&value)?)
             .await?
-            .call((address, BinaryValue::serialize(&value)?))
-            .await?
-            .deserialize_value(return_type)
+            .deserialize_value_of_type(return_type)
             .map(|value| value.into_owned())
     }
 
-    pub(crate) fn uid(&self) -> Uid {
-        self.uid.clone()
+    pub(crate) async fn oneway(
+        &self,
+        address: message::Address,
+        request: message::Oneway<value::Value<'_>>,
+    ) -> Result<()> {
+        let request = request.try_map(|value| BinaryValue::serialize(&value))?;
+        self.client.oneway(address, request).await?;
+        Ok(())
     }
 
     pub(crate) fn downgrade(&self) -> WeakSession {
         WeakSession {
-            uid: self.uid.clone(),
             capabilities: self.capabilities.clone(),
             client: self.client.downgrade(),
         }
@@ -178,7 +164,6 @@ impl Session {
 
 #[derive(Clone, Debug)]
 pub(crate) struct WeakSession {
-    uid: Uid,
     capabilities: watch::Receiver<Option<CapabilitiesMap<'static>>>,
     client: messaging::WeakClient<BinaryValue, BinaryValue>,
 }
@@ -186,37 +171,8 @@ pub(crate) struct WeakSession {
 impl WeakSession {
     pub(crate) fn upgrade(&self) -> Option<Session> {
         self.client.upgrade().map(|client| Session {
-            uid: self.uid.clone(),
             capabilities: self.capabilities.clone(),
             client,
         })
-    }
-}
-
-#[derive(Default, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, qi_macros::Valuable)]
-#[qi(value = "crate::value", transparent)]
-pub struct Uid(String);
-
-impl Uid {
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
-    }
-
-    pub fn from_string(id: String) -> Self {
-        Self(id)
-    }
-}
-
-impl std::fmt::Display for Uid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl std::str::FromStr for Uid {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(Self::from_string(s.to_owned()))
     }
 }

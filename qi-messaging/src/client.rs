@@ -1,6 +1,6 @@
 use crate::{
     id_factory::SharedIdFactory,
-    message::{Address, Id, OnewayRequest, Response},
+    message::{Address, Id, Oneway, Response},
     CapabilitiesMap, Error, Message,
 };
 use futures::{stream::FusedStream, Stream};
@@ -48,14 +48,14 @@ where
         response?
     }
 
-    pub async fn oneway(&self, address: Address, request: OnewayRequest<T>) -> Result<(), Error> {
+    pub async fn oneway(&self, address: Address, request: Oneway<T>) -> Result<(), Error> {
         let request = match request {
-            OnewayRequest::Capabilities(capabilities) => Request::Capababilities {
+            Oneway::Capabilities(capabilities) => Request::Capababilities {
                 address,
                 capabilities,
             },
-            OnewayRequest::Post(value) => Request::Post { address, value },
-            OnewayRequest::Event(value) => Request::Event { address, value },
+            Oneway::Post(value) => Request::Post { address, value },
+            Oneway::Event(value) => Request::Event { address, value },
         };
         self.requests.send(request).await.map_err(Into::into)
     }

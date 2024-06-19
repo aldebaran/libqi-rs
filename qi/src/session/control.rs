@@ -6,24 +6,18 @@ use crate::{
     messaging::{self, CapabilitiesMap},
     Error, Result,
 };
-use futures::{future, stream, FutureExt, Sink, SinkExt, StreamExt, TryFutureExt};
+use futures::{future, FutureExt, TryFutureExt};
 use messaging::message;
 use qi_value::{ActionId, Dynamic, ObjectId, ServiceId, Value};
 use serde::Deserialize;
-use std::{
-    collections::HashMap,
-    future::Future,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::{collections::HashMap, future::Future, sync::Arc};
 use tokio::sync::watch;
-use tower::{Service, ServiceExt};
 
 const SERVICE_ID: ServiceId = ServiceId(0);
 const OBJECT_ID: ObjectId = ObjectId(0);
 const AUTHENTICATE_ACTION_ID: ActionId = ActionId(8);
 
-fn is_addressed_by(address: message::Address) -> bool {
+fn is_control_address(address: message::Address) -> bool {
     address.service() == SERVICE_ID && address.object() == OBJECT_ID
 }
 
@@ -68,12 +62,10 @@ impl Controller {
                 .map(|(k, v)| (k, Dynamic(v.into_owned()))),
         );
         let mut authenticate_result = client
-            .ready()
-            .await?
-            .call((
+            .call(
                 AUTHENTICATE_ADDRESS,
                 T::serialize(&request).map_err(Into::into)?,
-            ))
+            )
             .await?;
         let mut shared_capabilities = Deserialize::deserialize(authenticate_result.deserializer())
             .map_err(Into::into)
@@ -94,23 +86,20 @@ impl std::fmt::Debug for Controller {
     }
 }
 
-pub(super) struct Control<H, S> {
+pub(super) struct Control<H> {
     pub(super) controller: Arc<Controller>,
     pub(super) capabilities: watch::Receiver<Option<CapabilitiesMap<'static>>>,
     pub(super) remote_authorized: watch::Receiver<bool>,
-    pub(super) call_handler: ControlledCallHandler<H>,
-    pub(super) oneway_sink: S,
+    pub(super) handler: ControlledHandler<H>,
 }
 
-pub(super) fn make<CallHandler, OnewaySink, Auth, In, Out>(
-    call_handler: CallHandler,
-    oneway_sink: OnewaySink,
+pub(super) fn make<Handler, Auth, In, Out>(
+    handler: Handler,
     authenticator: Auth,
     remote_authorized: bool,
-) -> Control<CallHandler, impl Sink<(message::Address, message::OnewayRequest<In>), Error = Error>>
+) -> Control<Handler>
 where
-    CallHandler: tower::Service<(message::Address, In), Response = Out, Error = Error>,
-    OnewaySink: Sink<(message::Address, message::OnewayRequest<In>), Error = Error>,
+    Handler: messaging::Handler<In, Reply = Out, Error = Error>,
     Auth: Authenticator + Send + Sync + 'static,
     In: messaging::BodyBuf<Error = Error>,
     Out: messaging::BodyBuf<Error = Error>,
@@ -122,60 +111,39 @@ where
         capabilities: capabilities_sender,
         remote_authorized: remote_authorized_sender,
     });
-    let controlled_call_handler = ControlledCallHandler {
-        inner: call_handler,
+    let controlled_handler = ControlledHandler {
+        inner: handler,
         controller: Arc::clone(&controller),
     };
-    let controlled_oneway_sink = oneway_sink.with_flat_map({
-        let controller = Arc::clone(&controller);
-        move |request| {
-            if *controller.remote_authorized.borrow() {
-                stream::once(async move { Ok(request) }).left_stream()
-            } else {
-                stream::empty().right_stream()
-            }
-        }
-    });
     Control {
         controller,
         capabilities: capabilities_receiver,
         remote_authorized: remote_authorized_receiver,
-        call_handler: controlled_call_handler,
-        oneway_sink: controlled_oneway_sink,
+        handler: controlled_handler,
     }
 }
 
-pub(super) struct ControlledCallHandler<H> {
+pub(super) struct ControlledHandler<H> {
     inner: H,
     controller: Arc<Controller>,
 }
 
-impl<H> ControlledCallHandler<H> {
-    pub(super) fn remote_authorized(&self) -> impl Future<Output = ()> {
-        let mut remote_authorized = self.controller.remote_authorized.subscribe();
-        async move {
-            remote_authorized.wait_for(|authorized| *authorized).await;
-        }
-    }
-}
-
-impl<S, In, Out> tower::Service<(message::Address, In)> for ControlledCallHandler<S>
+impl<S, In, Out> messaging::Handler<In> for ControlledHandler<S>
 where
-    S: tower::Service<(message::Address, In), Response = Out, Error = Error>,
-    In: messaging::BodyBuf<Error = Error>,
+    S: messaging::Handler<In, Reply = Out, Error = Error> + Sync,
+    In: messaging::BodyBuf<Error = Error> + Send,
     for<'de> <In::Deserializer<'de> as serde::Deserializer<'de>>::Error: Into<In::Error>,
-    Out: messaging::BodyBuf<Error = Error>,
+    Out: messaging::BodyBuf<Error = Error> + Send,
 {
-    type Response = Out;
+    type Reply = Out;
     type Error = Error;
-    type Future = ControlledCallFuture<Out, S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
-        self.inner.poll_ready(cx).map_err(Into::into)
-    }
-
-    fn call(&mut self, (address, mut value): (message::Address, In)) -> Self::Future {
-        if is_addressed_by(address) {
+    fn call(
+        &self,
+        address: message::Address,
+        mut value: In,
+    ) -> impl Future<Output = Result<Out>> + Send {
+        if is_control_address(address) {
             let controller = Arc::clone(&self.controller);
             future::ready(
                 Deserialize::deserialize(value.deserializer())
@@ -185,12 +153,20 @@ where
             )
             .left_future()
         } else if *self.controller.remote_authorized.borrow() {
-            self.inner.call((address, value)).err_into().right_future()
+            self.inner.call(address, value).err_into().right_future()
         } else {
-            future::err(Error::NoMessageHandler(address)).left_future()
+            future::err(Error::NoMessageHandler(message::Type::Call, address)).left_future()
+        }
+    }
+
+    async fn oneway(&self, address: message::Address, request: message::Oneway<In>) -> Result<()> {
+        if is_control_address(address) {
+            // TODO: Handle capabilities request ?
+            Ok(())
+        } else if *self.controller.remote_authorized.borrow() {
+            self.inner.oneway(address, request).await
+        } else {
+            Err(Error::NoMessageHandler(request.ty(), address))
         }
     }
 }
-
-type ControlledCallFuture<Out, F> =
-    future::Either<future::Ready<Result<Out>>, future::ErrInto<F, Error>>;

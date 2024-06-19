@@ -1,9 +1,8 @@
-use crate::{object::BoxObject, service_directory::ServiceDirectory, Error};
-use async_trait::async_trait;
+use crate::{service_directory::ServiceDirectory, Object, Result};
+use std::future::Future;
 
-#[async_trait]
 pub trait Space {
-    async fn service(&self, name: &str) -> Result<BoxObject, Error>;
+    fn service(&self, name: &str) -> impl Future<Output = Result<impl Object>> + Send;
 
     fn service_directory(&self) -> &dyn ServiceDirectory;
 }

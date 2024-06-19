@@ -1,8 +1,8 @@
 error[E0277]: the trait bound `F: Reflect` is not satisfied
- --> tests/value/fail_struct_field_not_impl.rs:3:10
+ --> tests/value/fail_struct_field_not_impl.rs:6:12
   |
-3 | #[derive(qi_macros::Reflect, qi_macros::ToValue, qi_macros::IntoValue, qi_macros::FromValue)]
-  |          ^^^^^^^^^^^^^^^^^^ the trait `Reflect` is not implemented for `F`
+6 |     pub f: F,
+  |            ^ the trait `Reflect` is not implemented for `F`
   |
   = help: the following other types implement trait `Reflect`:
             &T
@@ -14,7 +14,6 @@ error[E0277]: the trait bound `F: Reflect` is not satisfied
             (T0, T1, T2, T3)
             (T0, T1, T2, T3, T4)
           and $N others
-  = note: this error originates in the derive macro `qi_macros::Reflect` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `F: RuntimeReflect` is not satisfied
  --> tests/value/fail_struct_field_not_impl.rs:3:10

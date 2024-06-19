@@ -140,10 +140,10 @@ mod tests {
         #[derive(
             PartialEq, Debug, qi_macros::Reflect, qi_macros::ToValue, qi_macros::FromValue,
         )]
-        #[qi(value = "crate")]
+        #[qi(value(crate = "crate"))]
         struct MyStruct {
             an_int: i32,
-            #[qi(as_raw)]
+            #[qi(value(as_raw))]
             a_raw: Vec<u8>,
             an_option: Option<BTreeMap<String, Vec<bool>>>,
         }
