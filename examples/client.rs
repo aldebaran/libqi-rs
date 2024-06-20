@@ -9,7 +9,7 @@ mod audio;
 #[derive(Debug, clap::Parser)]
 #[clap()]
 struct Args {
-    #[clap(short, long, default_value = "tcp://::1:9559")]
+    #[clap(short, long, default_value = "tcp://[::1]:9559")]
     address: qi::Address,
 
     #[clap(short, long, action = clap::ArgAction::Count)]
