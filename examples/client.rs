@@ -1,6 +1,6 @@
 use clap::Parser;
 use eyre::Result;
-use qi::{ObjectExt, Space};
+use qi::ObjectExt;
 use tracing::info;
 use tracing_subscriber::fmt;
 

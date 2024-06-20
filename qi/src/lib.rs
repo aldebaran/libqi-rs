@@ -50,7 +50,6 @@ pub mod service;
 pub mod service_directory;
 pub mod session;
 pub mod signal;
-pub mod space;
 pub mod value;
 
 use self::value::BinaryValue;
@@ -58,7 +57,6 @@ pub use self::{
     error::{Error, Result},
     node::Node,
     object::{BoxObject, Object, ObjectExt},
-    space::Space,
     value::Value,
 };
 pub use qi_format as format;

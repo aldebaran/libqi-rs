@@ -12,7 +12,7 @@ use crate::{
         self,
         authentication::{self, Authenticator, PermissiveAuthenticator},
     },
-    Address, Result, Space,
+    Address, Result,
 };
 use futures::{future::FusedFuture, FutureExt};
 use session_factory::SessionFactory;
@@ -196,17 +196,8 @@ pub struct Node {
     service_directory: Arc<dyn ServiceDirectory + Send + Sync>,
 }
 
-impl std::fmt::Debug for Node {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AttachedNode")
-            .field("services", &self.services)
-            .field("session_factory", &self.session_factory)
-            .finish()
-    }
-}
-
-impl Space for Node {
-    async fn service(&self, name: &str) -> Result<impl Object> {
+impl Node {
+    pub async fn service(&self, name: &str) -> Result<impl Object> {
         let service = self.service_directory.service(name).await?;
         let session = self
             .session_factory
@@ -227,8 +218,17 @@ impl Space for Node {
         Ok(object)
     }
 
-    fn service_directory(&self) -> &dyn ServiceDirectory {
+    pub fn service_directory(&self) -> &dyn ServiceDirectory {
         self.service_directory.as_ref()
+    }
+}
+
+impl std::fmt::Debug for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AttachedNode")
+            .field("services", &self.services)
+            .field("session_factory", &self.session_factory)
+            .finish()
     }
 }
 
