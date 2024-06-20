@@ -7,7 +7,7 @@ use crate::{
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use qi_value::{
-    object::{MemberAddress, MetaMethod, MetaObject},
+    object::{MemberIdent, MetaMethod, MetaObject},
     ActionId, IntoValue, Reflect, ServiceId,
 };
 
@@ -48,7 +48,7 @@ impl ServiceDirectory for Client {
     async fn services(&self) -> Result<Vec<Info>, Error> {
         Ok(self
             .object
-            .meta_call(MemberAddress::Id(Meta::get().services), ().into_value())
+            .meta_call(MemberIdent::Id(Meta::get().services), ().into_value())
             .await?
             .cast_into()?)
     }
@@ -56,7 +56,7 @@ impl ServiceDirectory for Client {
     async fn service(&self, name: &str) -> Result<Info, Error> {
         Ok(self
             .object
-            .meta_call(MemberAddress::Id(Meta::get().service), name.into_value())
+            .meta_call(MemberIdent::Id(Meta::get().service), name.into_value())
             .await?
             .cast_into()?)
     }
@@ -65,7 +65,7 @@ impl ServiceDirectory for Client {
         Ok(self
             .object
             .meta_call(
-                MemberAddress::Id(Meta::get().register_service),
+                MemberIdent::Id(Meta::get().register_service),
                 info.into_value(),
             )
             .await?
@@ -76,7 +76,7 @@ impl ServiceDirectory for Client {
         Ok(self
             .object
             .meta_call(
-                MemberAddress::Id(Meta::get().unregister_service),
+                MemberIdent::Id(Meta::get().unregister_service),
                 id.into_value(),
             )
             .await?
@@ -87,7 +87,7 @@ impl ServiceDirectory for Client {
         Ok(self
             .object
             .meta_call(
-                MemberAddress::Id(Meta::get().service_ready),
+                MemberIdent::Id(Meta::get().service_ready),
                 id.into_value(),
             )
             .await?
@@ -98,7 +98,7 @@ impl ServiceDirectory for Client {
         Ok(self
             .object
             .meta_call(
-                MemberAddress::Id(Meta::get().update_service_info),
+                MemberIdent::Id(Meta::get().update_service_info),
                 info.into_value(),
             )
             .await?

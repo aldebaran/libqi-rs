@@ -17,14 +17,14 @@ pub enum Error {
     #[error("no available message handler for type {0} at address {1}")]
     NoMessageHandler(messaging::message::Type, messaging::message::Address),
 
-    #[error("method not found {0}")]
-    MethodNotFound(object::MemberAddress),
+    #[error("object method not found {0}")]
+    ObjectMethodNotFound(object::MemberIdent),
 
-    #[error("property not found {0}")]
-    PropertyNotFound(object::MemberAddress),
+    #[error("object property not found {0}")]
+    ObjectPropertyNotFound(object::MemberIdent),
 
-    #[error("signal not found {0}")]
-    SignalNotFound(object::MemberAddress),
+    #[error("object signal not found {0}")]
+    ObjectSignalNotFound(object::MemberIdent),
 
     #[error("bad value signature (expected \"{expected}\" but actual is \"{actual}\")")]
     BadValueSignature {

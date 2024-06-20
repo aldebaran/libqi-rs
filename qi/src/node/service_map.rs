@@ -5,7 +5,6 @@ use crate::{
     BoxObject, Error, Result,
 };
 use qi_messaging::BodyBuf;
-use qi_value::object::MemberAddress;
 use std::collections::{hash_map, HashMap};
 use std::{future::Future, sync::Arc};
 use tokio::sync::Mutex;
@@ -28,15 +27,15 @@ impl ServiceMap {
         address: message::Address,
         mut args: BinaryValue,
     ) -> Result<BinaryValue> {
-        let (object, address) = self.get_object(address)?;
+        let (object, ident) = self.get_object(address)?;
         // Get the targeted method, so that we can get the expected parameters type, and know what
         // type of value we're supposed to deserialize.
         let method = object
             .meta()
-            .method(&address)
-            .ok_or_else(|| Error::MethodNotFound(address.clone()))?;
+            .method(&ident)
+            .ok_or_else(|| Error::ObjectMethodNotFound(ident.clone()))?;
         let args = args.deserialize_value_of_type(method.parameters_signature.to_type())?;
-        let reply = object.meta_call(address, args).await?;
+        let reply = object.meta_call(ident, args).await?;
         BinaryValue::serialize(&reply)
     }
 
@@ -45,12 +44,12 @@ impl ServiceMap {
         address: message::Address,
         mut value: BinaryValue,
     ) -> Result<()> {
-        let (object, address) = self.get_object(address)?;
+        let (object, ident) = self.get_object(address)?;
         // Same as for "call", we need to know the type of parameters to know what to deserialize.
-        let target = object::PostTarget::get(object.meta(), &address)?;
+        let target = object::PostTarget::get(object.meta(), &ident)?;
         let target_signature = target.parameters_signature();
         let value = value.deserialize_value_of_type(target_signature.to_type())?;
-        object.meta_post(address, value).await
+        object.meta_post(ident, value).await
     }
 
     pub(super) async fn event(
@@ -58,16 +57,16 @@ impl ServiceMap {
         address: message::Address,
         mut value: BinaryValue,
     ) -> Result<()> {
-        let (object, address) = self.get_object(address)?;
+        let (object, ident) = self.get_object(address)?;
         let signal = object
             .meta()
-            .signal(&address)
-            .ok_or_else(|| Error::SignalNotFound(address.clone()))?;
+            .signal(&ident)
+            .ok_or_else(|| Error::ObjectSignalNotFound(ident.clone()))?;
         let value = value.deserialize_value_of_type(signal.signature.to_type())?;
-        object.meta_event(address, value).await
+        object.meta_event(ident, value).await
     }
 
-    fn get_object(&self, address: message::Address) -> Result<(&BoxObject, MemberAddress)> {
+    fn get_object(&self, address: message::Address) -> Result<(&BoxObject, object::MemberIdent)> {
         let message::Address(service_id, object_id, action_id) = address;
         let data = self
             .0

@@ -28,11 +28,11 @@ pub const ACTION_START_ID: ActionId = ActionId(100);
 pub trait Object {
     fn meta(&self) -> &MetaObject;
 
-    async fn meta_call(&self, address: MemberAddress, args: Value<'_>) -> Result<Value<'static>>;
+    async fn meta_call(&self, ident: MemberIdent, args: Value<'_>) -> Result<Value<'static>>;
 
-    async fn meta_post(&self, address: MemberAddress, value: Value<'_>) -> Result<()>;
+    async fn meta_post(&self, ident: MemberIdent, value: Value<'_>) -> Result<()>;
 
-    async fn meta_event(&self, address: MemberAddress, value: Value<'_>) -> Result<()>;
+    async fn meta_event(&self, ident: MemberIdent, value: Value<'_>) -> Result<()>;
 
     fn uid(&self) -> Uid {
         Uid::from_ptr(self)
@@ -44,34 +44,34 @@ pub type BoxObject = Box<dyn Object + Send + Sync>;
 #[sealed]
 #[async_trait]
 pub trait ObjectExt: Object {
-    async fn call<'t, 'r, R, A, T>(&self, address: A, args: T) -> Result<R>
+    async fn call<'t, 'r, R, Ident, T>(&self, ident: Ident, args: T) -> Result<R>
     where
-        A: Into<MemberAddress> + Send,
+        Ident: Into<MemberIdent> + Send,
         T: IntoValue<'t> + Send,
         R: FromValue<'r>,
     {
         Ok(self
-            .meta_call(address.into(), args.into_value())
+            .meta_call(ident.into(), args.into_value())
             .await?
             .cast_into()?)
     }
 
-    async fn property<'r, A, R>(&self, address: A) -> Result<R>
+    async fn property<'r, Ident, R>(&self, ident: Ident) -> Result<R>
     where
-        A: Into<MemberAddress> + Send,
+        Ident: Into<MemberIdent> + Send,
         R: Reflect + FromValue<'r>,
     {
-        self.call(ACTION_ID_PROPERTY, Dynamic(address.into())).await
+        self.call(ACTION_ID_PROPERTY, Dynamic(ident.into())).await
     }
 
-    async fn set_property<'t, A, T>(&self, address: A, value: T) -> Result<()>
+    async fn set_property<'t, Ident, T>(&self, ident: Ident, value: T) -> Result<()>
     where
-        A: Into<MemberAddress> + Send,
+        Ident: Into<MemberIdent> + Send,
         T: IntoValue<'t> + Send,
     {
         self.call(
             ACTION_ID_SET_PROPERTY,
-            (Dynamic(address.into()), Dynamic(value)),
+            (Dynamic(ident.into()), Dynamic(value)),
         )
         .await
     }
@@ -223,11 +223,11 @@ pub(super) enum PostTarget<'a> {
 }
 
 impl<'a> PostTarget<'a> {
-    pub(super) fn get(meta: &'a MetaObject, address: &MemberAddress) -> Result<Self> {
-        meta.method(address)
+    pub(super) fn get(meta: &'a MetaObject, ident: &MemberIdent) -> Result<Self> {
+        meta.method(ident)
             .map(Self::Method)
-            .or_else(|| meta.signal(address).map(Self::Signal))
-            .ok_or_else(|| Error::SignalNotFound(address.clone()))
+            .or_else(|| meta.signal(ident).map(Self::Signal))
+            .ok_or_else(|| Error::ObjectSignalNotFound(ident.clone()))
     }
 
     fn action_id(&self) -> ActionId {
@@ -251,11 +251,11 @@ impl Object for Client {
         &self.meta
     }
 
-    async fn meta_call(&self, address: MemberAddress, args: Value<'_>) -> Result<Value<'static>> {
+    async fn meta_call(&self, ident: MemberIdent, args: Value<'_>) -> Result<Value<'static>> {
         let method = self
             .meta
-            .method(&address)
-            .ok_or_else(|| Error::MethodNotFound(address))?;
+            .method(&ident)
+            .ok_or_else(|| Error::ObjectMethodNotFound(ident))?;
         let args_signature = args.signature();
         if args_signature != method.parameters_signature {
             return Err(Error::BadValueSignature {
@@ -273,8 +273,8 @@ impl Object for Client {
             .await?)
     }
 
-    async fn meta_post(&self, address: MemberAddress, args: Value<'_>) -> Result<()> {
-        let target = PostTarget::get(&self.meta, &address)?;
+    async fn meta_post(&self, ident: MemberIdent, args: Value<'_>) -> Result<()> {
+        let target = PostTarget::get(&self.meta, &ident)?;
         let args_signature = args.signature();
         let target_signature = target.parameters_signature();
         if &args_signature != target_signature {
@@ -292,11 +292,11 @@ impl Object for Client {
             .await?)
     }
 
-    async fn meta_event(&self, address: MemberAddress, value: Value<'_>) -> Result<()> {
+    async fn meta_event(&self, ident: MemberIdent, value: Value<'_>) -> Result<()> {
         let signal = self
             .meta
-            .signal(&address)
-            .ok_or_else(|| Error::SignalNotFound(address))?;
+            .signal(&ident)
+            .ok_or_else(|| Error::ObjectSignalNotFound(ident))?;
         let args_signature = value.signature();
         if args_signature != signal.signature {
             return Err(Error::BadValueSignature {
@@ -475,9 +475,9 @@ mod tests {
     }
 
     impl Method {
-        fn from_address(address: &MemberAddress) -> Option<Self> {
+        fn from_ident(ident: &MemberIdent) -> Option<Self> {
             let Meta { object, methods } = Meta::get();
-            object.method(address).and_then(|method| {
+            object.method(ident).and_then(|method| {
                 let id = method.uid;
                 if id == methods.add {
                     Some(Method::Add)
@@ -535,23 +535,19 @@ mod tests {
             &Meta::get().object
         }
 
-        async fn meta_call(
-            &self,
-            address: MemberAddress,
-            args: Value<'_>,
-        ) -> Result<Value<'static>> {
-            Method::from_address(&address)
-                .ok_or_else(|| Error::MethodNotFound(address))?
+        async fn meta_call(&self, ident: MemberIdent, args: Value<'_>) -> Result<Value<'static>> {
+            Method::from_ident(&ident)
+                .ok_or_else(|| Error::ObjectMethodNotFound(ident))?
                 .call(&mut *self.lock().await, args)
         }
 
-        async fn meta_post(&self, address: MemberAddress, args: Value<'_>) -> Result<()> {
-            self.meta_call(address, args).await?;
+        async fn meta_post(&self, ident: MemberIdent, args: Value<'_>) -> Result<()> {
+            self.meta_call(ident, args).await?;
             Ok(())
         }
 
-        async fn meta_event(&self, address: MemberAddress, _value: Value<'_>) -> Result<()> {
-            Err(Error::SignalNotFound(address))
+        async fn meta_event(&self, ident: MemberIdent, _value: Value<'_>) -> Result<()> {
+            Err(Error::ObjectSignalNotFound(ident))
         }
     }
 
@@ -579,7 +575,7 @@ mod tests {
         let res: Result<i32> = calc.call("log", 1).await;
         assert_matches!(
             res,
-            Err(Error::MethodNotFound(name)) => assert_eq!(name, "log")
+            Err(Error::ObjectMethodNotFound(ident)) => assert_eq!(ident, "log")
         );
         let res: i32 = calc.call("ans", ()).await.unwrap();
         assert_eq!(res, 127);

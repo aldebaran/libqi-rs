@@ -17,7 +17,7 @@ impl qi::Object for Player {
 
     async fn meta_call(
         &self,
-        address: qi::object::MemberAddress,
+        ident: qi::object::MemberIdent,
         args: qi::Value<'_>,
     ) -> qi::Result<qi::Value<'static>> {
         todo!()
@@ -25,7 +25,7 @@ impl qi::Object for Player {
 
     async fn meta_post(
         &self,
-        address: qi::object::MemberAddress,
+        ident: qi::object::MemberIdent,
         value: qi::Value<'_>,
     ) -> qi::Result<()> {
         todo!()
@@ -33,7 +33,7 @@ impl qi::Object for Player {
 
     async fn meta_event(
         &self,
-        address: qi::object::MemberAddress,
+        ident: qi::object::MemberIdent,
         value: qi::Value<'_>,
     ) -> qi::Result<()> {
         todo!()
