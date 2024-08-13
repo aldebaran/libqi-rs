@@ -3,30 +3,11 @@ pub enum Error {
     #[error("messaging endpoint has been closed")]
     EndpointClosed,
 
-    #[error(transparent)]
-    IO(#[from] std::io::Error),
-
+    // #[error(transparent)]
+    // IO(#[from] std::io::Error),
     #[error("operation has been canceled")]
     Canceled,
 
-    //------------------------------------------------------------------------
-    // URL related errors.
-    //------------------------------------------------------------------------
-    #[error(transparent)]
-    ParseUrl(#[from] url::ParseError),
-
-    #[error("unsupported URL scheme \"{0}\"")]
-    UnsupportedUrlScheme(String),
-
-    #[error("invalid URL host: {0}")]
-    InvalidUrlHost(String),
-
-    // #[error("invalid URL port: {0}")]
-    // InvalidUrlPort(String),
-
-    //------------------------------------------------------------------------
-    // Other
-    //------------------------------------------------------------------------
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
 }

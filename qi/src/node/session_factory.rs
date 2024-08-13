@@ -1,8 +1,7 @@
 use crate::{
-    messaging,
+    messaging::{self, Address},
     session::{self, authentication, Session, WeakSession},
     value::BinaryValue,
-    Error,
 };
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use std::{collections::HashMap, future::Future, sync::Arc};
@@ -70,11 +69,7 @@ impl<Handler> SessionFactory<Handler> {
 
 impl<Handler> SessionFactory<Handler>
 where
-    Handler: messaging::Handler<BinaryValue, Reply = BinaryValue, Error = Error>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    Handler: messaging::Handler<BinaryValue, Reply = BinaryValue> + Clone + Send + Sync + 'static,
 {
     /// Gets a session to the given references, using the service name to store
     /// any created session for further retrieval.
@@ -87,6 +82,11 @@ where
     where
         R: IntoIterator<Item = &'r session::Reference>,
     {
+        let references = references.into_iter();
+        let mut connection_errors = Vec::with_capacity({
+            let (lower_bound, upper_bound) = references.size_hint();
+            upper_bound.unwrap_or(lower_bound)
+        });
         for reference in references {
             match reference.kind() {
                 session::reference::Kind::Service(service) => {
@@ -95,16 +95,20 @@ where
                     }
                 }
                 session::reference::Kind::Endpoint(address) => {
-                    if let Ok(session) = self
+                    match self
                         .connect_service_session(service_name, *address, credentials.clone())
                         .await
                     {
-                        return Ok(session);
+                        Err(err) => connection_errors.push(ConnectionError {
+                            address: *address,
+                            source: err.into(),
+                        }),
+                        Ok(session) => return Ok(session),
                     }
                 }
             }
         }
-        Err(Error::NoReachableEndpoint)
+        Err(ServiceUnreachableError(connection_errors).into())
     }
 
     /// Opens a new channel to the address and connects a session client over
@@ -132,7 +136,43 @@ where
                 .boxed(),
             )
             .await
-            .map_err(|_err| Error::Messaging(messaging::Error::Canceled))?;
+            .map_err(|_err| Error::ExecutorShutdown)?;
         Ok(session)
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum Error {
+    #[error(transparent)]
+    ServiceUnreachable(#[from] ServiceUnreachableError),
+
+    #[error("the connection executor is shutting down")]
+    ExecutorShutdown,
+}
+
+#[derive(Debug)]
+struct ServiceUnreachableError(Vec<ConnectionError>);
+
+impl std::fmt::Display for ServiceUnreachableError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("could not reach service, ")?;
+        if self.0.is_empty() {
+            f.write_str("no connection was tried")
+        } else {
+            f.write_str("tried the following connections: [")?;
+            for error in &self.0 {
+                write!(f, "{} => {}", error.address, error.source);
+            }
+            f.write_str("]")
+        }
+    }
+}
+
+impl std::error::Error for ServiceUnreachableError {}
+
+#[derive(Debug, thiserror::Error)]
+#[error("could not connect to address \"{address}\"")]
+pub(super) struct ConnectionError {
+    address: Address,
+    source: Box<dyn std::error::Error + Send + Sync>,
 }

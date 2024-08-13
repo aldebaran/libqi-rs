@@ -42,7 +42,6 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
-pub mod error;
 pub mod node;
 pub mod object;
 pub mod os;
@@ -54,7 +53,6 @@ pub mod value;
 
 use self::value::BinaryValue;
 pub use self::{
-    error::{Error, Result},
     node::Node,
     object::{BoxObject, Object, ObjectExt},
     value::Value,

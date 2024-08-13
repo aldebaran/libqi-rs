@@ -69,16 +69,7 @@ impl Default for Capabilities {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
 #[error("expected key \"{0}\" to have value \"{1}\"")]
-pub(crate) struct ExpectedKeyValueError<T>(String, T);
-
-impl<T> From<ExpectedKeyValueError<T>> for crate::Error
-where
-    T: std::fmt::Display + std::fmt::Debug + Send + Sync + 'static,
-{
-    fn from(err: ExpectedKeyValueError<T>) -> Self {
-        Self::Other(err.into())
-    }
-}
+pub(crate) struct KeyValueExpectError<T>(String, T);
 
 /// Checks that the capabilities have the required values that are only supported by this implementation.
 ///
@@ -86,24 +77,24 @@ where
 /// ensures that the capabilities have the only values that are handle at the moment.
 pub(crate) fn check_required(
     map: &CapabilitiesMap,
-) -> Result<Capabilities, ExpectedKeyValueError<bool>> {
+) -> Result<Capabilities, KeyValueExpectError<bool>> {
     let capabilities = Capabilities::from_map(map);
 
     // TODO: Implement capabilities so that this function always succeeds, so that we may remove it.
     if !capabilities.remote_cancelable_calls {
-        return Err(ExpectedKeyValueError(
+        return Err(KeyValueExpectError(
             Capabilities::REMOTE_CANCELABLE_CALLS.into(),
             true,
         ));
     }
     if !capabilities.object_ptr_uid {
-        return Err(ExpectedKeyValueError(
+        return Err(KeyValueExpectError(
             Capabilities::OBJECT_PTR_UID.into(),
             true,
         ));
     }
     if !capabilities.relative_endpoint_uri {
-        return Err(ExpectedKeyValueError(
+        return Err(KeyValueExpectError(
             Capabilities::RELATIVE_ENDPOINT_URI.into(),
             true,
         ));

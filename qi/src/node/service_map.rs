@@ -2,7 +2,7 @@ use crate::{
     messaging::{self, message},
     object, service,
     value::BinaryValue,
-    BoxObject, Error, Result,
+    BoxObject,
 };
 use qi_messaging::BodyBuf;
 use std::collections::{hash_map, HashMap};

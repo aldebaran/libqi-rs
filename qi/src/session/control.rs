@@ -2,10 +2,7 @@ use super::{
     authentication::{self, Authenticator},
     capabilities,
 };
-use crate::{
-    messaging::{self, CapabilitiesMap},
-    Error, Result,
-};
+use crate::messaging::{self, CapabilitiesMap};
 use futures::{future, FutureExt, TryFutureExt};
 use messaging::message;
 use qi_value::{ActionId, Dynamic, ObjectId, ServiceId, Value};
@@ -31,7 +28,10 @@ pub(super) struct Controller {
 }
 
 impl Controller {
-    fn authenticate(&self, request: CapabilitiesMap<'_>) -> Result<CapabilitiesMap<'static>> {
+    fn authenticate(
+        &self,
+        request: CapabilitiesMap<'_>,
+    ) -> Result<CapabilitiesMap<'static>, Error> {
         let shared_capabilities = capabilities::shared_with_local(&request);
         capabilities::check_required(&shared_capabilities)?;
         let parameters = request.into_iter().map(|(k, v)| (k, v.0)).collect();
@@ -46,7 +46,7 @@ impl Controller {
         &self,
         client: &mut messaging::Client<T, R>,
         parameters: HashMap<String, Value<'_>>,
-    ) -> Result<()>
+    ) -> Result<(), Error>
     where
         T: messaging::BodyBuf + Send,
         T::Error: Into<Error>,
@@ -142,7 +142,7 @@ where
         &self,
         address: message::Address,
         mut value: In,
-    ) -> impl Future<Output = Result<Out>> + Send {
+    ) -> impl Future<Output = Result<Out, Error>> + Send {
         if is_control_address(address) {
             let controller = Arc::clone(&self.controller);
             future::ready(
@@ -159,7 +159,11 @@ where
         }
     }
 
-    async fn oneway(&self, address: message::Address, request: message::Oneway<In>) -> Result<()> {
+    async fn oneway(
+        &self,
+        address: message::Address,
+        request: message::Oneway<In>,
+    ) -> Result<(), Error> {
         if is_control_address(address) {
             // TODO: Handle capabilities request ?
             Ok(())
@@ -169,4 +173,9 @@ where
             Err(Error::NoMessageHandler(request.ty(), address))
         }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum Error {
+    
 }

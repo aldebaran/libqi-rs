@@ -188,20 +188,8 @@ pub enum DecodeError<E> {
     #[error("body conversion error")]
     BodyConversion(#[source] E),
 
-    #[error(transparent)]
-    IO(#[from] std::io::Error),
-}
-
-impl<E> From<DecodeError<E>> for Error
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn from(err: DecodeError<E>) -> Self {
-        match err {
-            DecodeError::IO(io_err) => io_err.into(),
-            _ => Error::other(err),
-        }
-    }
+    #[error("read error")]
+    Read(#[source] std::io::Error),
 }
 
 fn decode_header<ErrDeserBody>(

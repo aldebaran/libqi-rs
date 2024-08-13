@@ -1,4 +1,3 @@
-use crate::Error;
 use qi_messaging::Address;
 use qi_value as value;
 use std::str::FromStr;

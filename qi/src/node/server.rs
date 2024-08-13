@@ -2,7 +2,6 @@ use crate::{
     messaging::{self, Address},
     session::{authentication::Authenticator, Session},
     value::BinaryValue,
-    Error,
 };
 use futures::{stream, StreamExt};
 use std::{collections::HashMap, future::Future};
@@ -14,7 +13,7 @@ pub(super) fn create<Handler, Auth>(
     addresses: impl IntoIterator<Item = Address>,
 ) -> (EndpointsRx, impl Future<Output = ()>)
 where
-    Handler: messaging::Handler<BinaryValue, Reply = BinaryValue, Error = Error> + Sync + Clone,
+    Handler: messaging::Handler<BinaryValue, Reply = BinaryValue> + Sync + Clone,
     Auth: Authenticator + Clone + Send + Sync + 'static,
 {
     let (endpoints_sender, endpoints_receiver) = watch::channel(Default::default());

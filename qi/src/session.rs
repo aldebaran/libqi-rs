@@ -7,7 +7,7 @@ pub use self::reference::Reference;
 use crate::{
     messaging::{self, message, CapabilitiesMap},
     session::authentication::{Authenticator, PermissiveAuthenticator},
-    value, BinaryValue, Error, Result,
+    value, BinaryValue,
 };
 use control::Control;
 use futures::{

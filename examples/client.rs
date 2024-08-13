@@ -1,5 +1,5 @@
+use anyhow::Result;
 use clap::Parser;
-use eyre::Result;
 use qi::ObjectExt;
 use tracing::info;
 use tracing_subscriber::fmt;
@@ -52,7 +52,13 @@ async fn main() -> Result<()> {
         // Connect the node to a space at the given address.
         .connect_to_space(args.address, None)
         .start()
-        .await?;
+        .await
+        .wrap_err_with(|| {
+            format!(
+                "Failed to connect node to space at address {}",
+                args.address
+            )
+        })?;
     tokio::spawn(connection);
 
     // You can access remote services and call methods on them.

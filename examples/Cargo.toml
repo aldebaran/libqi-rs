@@ -7,12 +7,12 @@ edition = "2021"
 [dev-dependencies]
 qi = { path = "../qi" }
 tokio = { version = "1.38.0", features = ["rt", "signal"] }
-eyre = "0.6.12"
 clap = { version = "4.5.7", features = ["derive"] }
 tracing-subscriber = "0.3.18"
 tracing = "0.1.40"
 bytes = "1.6.0"
 async-trait = "0.1.80"
+anyhow = "1.0.86"
 
 [[example]]
 name = "client"

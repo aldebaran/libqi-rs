@@ -12,7 +12,7 @@ use crate::{
         self,
         authentication::{self, Authenticator, PermissiveAuthenticator},
     },
-    Address, Result,
+    Address,
 };
 use futures::{future::FusedFuture, FutureExt};
 use session_factory::SessionFactory;
@@ -100,7 +100,8 @@ where
     Auth: Authenticator + Send + Sync + Clone + 'static,
 {
     pub async fn start(self) -> Result<(Node, impl Future<Output = ()>)> {
-        let services = Arc::new(Mutex::new(ServiceMap::default()));
+        // TODO: Task a Spawn impl to spawn futures on an executor.
+        let services = Arc::default();
         let handler = service_map::MessagingHandler::new(Arc::clone(&services));
         let (mut server_endpoints, server_task) =
             server::create(handler.clone(), self.authenticator, self.bind_addresses);

@@ -1,4 +1,3 @@
-use crate::Error;
 use std::{net::SocketAddr, str::FromStr};
 use url::Url;
 
@@ -37,7 +36,7 @@ impl FromStr for Address {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_url(&s.parse()?)
+        Self::from_url(&s.parse().map_err(Error::InvalidUrl)?)
     }
 }
 
@@ -61,10 +60,11 @@ fn socket_addr_from_url(url: &Url) -> Result<SocketAddr, Error> {
     url.socket_addrs(|| match Scheme::from_str(url.scheme()) {
         Ok(Scheme::Tcp(_)) => Some(DEFAULT_PORT),
         Err(_) => None,
-    })?
+    })
+    .map_err(|err| Error::ResolveHost(Some(err)))?
     .first()
     .copied()
-    .ok_or_else(|| Error::InvalidUrlHost(url.to_string()))
+    .ok_or_else(|| Error::ResolveHost(None))
 }
 
 #[derive(Debug)]
@@ -90,4 +90,16 @@ pub enum SslKind {
     #[default]
     Simple,
     Mutual,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("address is not a valid URL")]
+    InvalidUrl(#[source] url::ParseError),
+
+    #[error("address URL scheme \"{0}\" is not supported")]
+    UnsupportedUrlScheme(String),
+
+    #[error("could not resolve address host")]
+    ResolveHost(#[source] Option<std::io::Error>),
 }
