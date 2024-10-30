@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use qi::ObjectExt;
 use tracing::info;
@@ -46,6 +46,7 @@ async fn main() -> Result<()> {
         .with_thread_names(true)
         .init();
 
+    info!("creating node");
     let (node, connection) = qi::node::Builder::new()
         // You can add services to the node and make them accessible to other nodes of joined spaces.
         .add_service("AudioPlayer", audio::Player::new())
@@ -53,7 +54,7 @@ async fn main() -> Result<()> {
         .connect_to_space(args.address, None)
         .start()
         .await
-        .wrap_err_with(|| {
+        .with_context(|| {
             format!(
                 "Failed to connect node to space at address {}",
                 args.address
@@ -64,11 +65,11 @@ async fn main() -> Result<()> {
     // You can access remote services and call methods on them.
     info!("getting \"Calculator\" service");
     let calculator = node.service("Calculator").await?;
-    calculator.call("reset", 3).await?; // => 3
-    calculator.call("add", 9).await?; // => 12
-    calculator.call("mul", 4).await?; // => 48
-    calculator.call("add", 80).await?; // => 128
-    calculator.call("div", 2).await?; // => 64
+    let () = calculator.call("reset", 3).await?; // => 3
+    let () = calculator.call("add", 9).await?; // => 12
+    let () = calculator.call("mul", 4).await?; // => 48
+    let () = calculator.call("add", 80).await?; // => 128
+    let () = calculator.call("div", 2).await?; // => 64
     let result: i32 = calculator.call("ans", ()).await?;
     info!(%result, "calculation is done"); // result = 64
 

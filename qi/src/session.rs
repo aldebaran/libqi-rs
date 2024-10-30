@@ -1,37 +1,43 @@
 pub mod authentication;
 mod capabilities;
 mod control;
-pub(crate) mod reference;
+mod map;
+mod target;
 
-pub use self::reference::Reference;
+pub(crate) use self::map::Map;
+pub use self::target::Target;
 use crate::{
+    error::{Error, FormatError},
     messaging::{self, message, CapabilitiesMap},
     session::authentication::{Authenticator, PermissiveAuthenticator},
-    value, BinaryValue,
+    value,
 };
 use control::Control;
 use futures::{
     stream::{FusedStream, FuturesUnordered},
-    Sink, Stream, StreamExt, TryFutureExt,
+    Sink, Stream, StreamExt,
 };
-use qi_messaging::BodyBuf;
 use std::{future::Future, pin::pin};
 use tokio::{select, sync::watch};
 
-#[derive(Clone, Debug)]
-pub(crate) struct Session {
+pub(crate) struct Session<Body> {
     capabilities: watch::Receiver<Option<CapabilitiesMap<'static>>>,
-    client: messaging::Client<BinaryValue, BinaryValue>,
+    client: messaging::Client<Body>,
 }
 
-impl Session {
+impl<Body> Session<Body>
+where
+    Body: messaging::Body + Send,
+    Body::Error: Send + Sync + 'static,
+{
     pub(crate) async fn connect<Handler>(
         address: messaging::Address,
         credentials: authentication::Parameters<'_>,
         handler: Handler,
-    ) -> Result<(Self, impl Future<Output = Result<()>>)>
+    ) -> Result<(Self, impl Future<Output = Result<(), messaging::Error>>), Error>
     where
-        Handler: messaging::Handler<BinaryValue, Error = Error, Reply = BinaryValue> + Sync,
+        Handler: messaging::Handler<Body> + Sync,
+        Handler::Error: std::error::Error + Send + Sync + 'static,
     {
         let Control {
             controller,
@@ -43,14 +49,14 @@ impl Session {
         let (mut client, connection) =
             messaging::endpoint::start(messages_stream, messages_sink, handler);
         controller
-            .authenticate_to_remote(&mut client, credentials)
+            .authenticate_to_server(&mut client, credentials)
             .await?;
         Ok((
             Session {
                 capabilities,
                 client,
             },
-            connection.map_err(Into::into),
+            connection,
         ))
     }
 
@@ -58,10 +64,11 @@ impl Session {
         address: messaging::Address,
         authenticator: Auth,
         handler: Handler,
-    ) -> Result<(impl Future<Output = ()>, Vec<messaging::Address>)>
+    ) -> Result<(impl Future<Output = ()>, Vec<messaging::Address>), messaging::Error>
     where
         Auth: Authenticator + Clone + Send + Sync + 'static,
-        Handler: messaging::Handler<BinaryValue, Error = Error, Reply = BinaryValue> + Sync + Clone,
+        Handler: messaging::Handler<Body> + Sync + Clone,
+        Handler::Error: std::error::Error + Send + Sync + 'static,
     {
         let (clients, endpoints) = messaging::channel::serve(address).await?;
         let server = async move {
@@ -90,11 +97,11 @@ impl Session {
         authenticator: Auth,
         handler: Handler,
     ) where
-        MsgStream:
-            Stream<Item = std::result::Result<messaging::Message<BinaryValue>, messaging::Error>>,
-        MsgSink: Sink<messaging::Message<BinaryValue>, Error = messaging::Error>,
+        MsgStream: Stream<Item = std::result::Result<messaging::Message<Body>, messaging::Error>>,
+        MsgSink: Sink<messaging::Message<Body>, Error = messaging::Error>,
         Auth: Authenticator + Send + Sync + 'static,
-        Handler: messaging::Handler<BinaryValue, Error = Error, Reply = BinaryValue> + Sync,
+        Handler: messaging::Handler<Body> + Sync,
+        Handler::Error: std::error::Error + Send + Sync + 'static,
     {
         let Control {
             capabilities,
@@ -136,25 +143,30 @@ impl Session {
         address: message::Address,
         value: value::Value<'_>,
         return_type: Option<&value::Type>,
-    ) -> Result<value::Value<'static>> {
-        self.client
-            .call(address, BinaryValue::serialize(&value)?)
+    ) -> Result<value::Value<'static>, Error> {
+        let args = Body::serialize(&value).map_err(FormatError::ArgumentsSerialization)?;
+        Ok(self
+            .client
+            .call(address, args)
             .await?
-            .deserialize_value_of_type(return_type)
-            .map(|value| value.into_owned())
+            .deserialize_seed(value::de::ValueOfType::new(return_type))
+            .map_err(FormatError::MethodReturnValueDeserialization)?
+            .into_owned())
     }
 
     pub(crate) async fn oneway(
         &self,
         address: message::Address,
         request: message::Oneway<value::Value<'_>>,
-    ) -> Result<()> {
-        let request = request.try_map(|value| BinaryValue::serialize(&value))?;
+    ) -> Result<(), Error> {
+        let request = request
+            .try_map(|value| Body::serialize(&value))
+            .map_err(FormatError::ArgumentsSerialization)?;
         self.client.oneway(address, request).await?;
         Ok(())
     }
 
-    pub(crate) fn downgrade(&self) -> WeakSession {
+    pub(crate) fn downgrade(&self) -> WeakSession<Body> {
         WeakSession {
             capabilities: self.capabilities.clone(),
             client: self.client.downgrade(),
@@ -162,17 +174,44 @@ impl Session {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct WeakSession {
-    capabilities: watch::Receiver<Option<CapabilitiesMap<'static>>>,
-    client: messaging::WeakClient<BinaryValue, BinaryValue>,
+impl<Body> Clone for Session<Body> {
+    fn clone(&self) -> Self {
+        Self {
+            capabilities: self.capabilities.clone(),
+            client: self.client.clone(),
+        }
+    }
 }
 
-impl WeakSession {
-    pub(crate) fn upgrade(&self) -> Option<Session> {
+impl<Body> std::fmt::Debug for Session<Body> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("capabilities", &self.capabilities)
+            .field("client", &self.client)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct WeakSession<Body> {
+    capabilities: watch::Receiver<Option<CapabilitiesMap<'static>>>,
+    client: messaging::WeakClient<Body>,
+}
+
+impl<Body> WeakSession<Body> {
+    pub(crate) fn upgrade(&self) -> Option<Session<Body>> {
         self.client.upgrade().map(|client| Session {
             capabilities: self.capabilities.clone(),
             client,
         })
+    }
+}
+
+impl<Body> std::fmt::Debug for WeakSession<Body> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WeakSession")
+            .field("capabilities", &self.capabilities)
+            .field("client", &self.client)
+            .finish()
     }
 }

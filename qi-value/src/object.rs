@@ -1,7 +1,11 @@
+use std::borrow::Cow;
+
 use crate::{
-    ty, ActionId, FromValue, FromValueError, IntoValue, Map, ObjectId, ServiceId, Signature, Type,
-    Value,
+    os, ty, ActionId, FromValue, FromValueError, IntoValue, Map, ObjectId, Reflect, RuntimeReflect,
+    ServiceId, Signature, ToValue, Type, Value,
 };
+use serde_with::serde_as;
+use sha1_smol::Sha1;
 
 #[derive(
     Clone,
@@ -19,7 +23,7 @@ pub struct Object {
     pub meta_object: MetaObject,
     pub service_id: ServiceId,
     pub object_id: ObjectId,
-    pub object_uid: ObjectUid,
+    pub object_uid: Uid,
 }
 
 impl<'a> IntoValue<'a> for Object {
@@ -46,6 +50,8 @@ impl std::fmt::Display for Object {
     }
 }
 
+/// ObjectUid are represented as strings containing pure binary data for compatibility reasons. They
+/// are therefore NOT UTF-8 valid strings or even contain printable characters.
 #[derive(
     Default,
     Clone,
@@ -56,38 +62,38 @@ impl std::fmt::Display for Object {
     Ord,
     Hash,
     Debug,
-    qi_macros::Valuable,
     serde::Serialize,
     serde::Deserialize,
     derive_more::From,
     derive_more::Into,
     derive_more::IntoIterator,
 )]
-#[qi(value(crate = "crate", transparent))]
-pub struct ObjectUid(
+#[into_iterator(owned, ref)]
+#[serde(transparent)]
+#[serde_as]
+pub struct Uid(
     // SHA-1 digest as bytes of Big Endian encoded sequence of 5 DWORD.
-    [u8; 20],
+    #[serde_as(as = "Bytes")] [u8; 20],
 );
 
-impl ObjectUid {
-    pub fn from_digest(digest: [u32; 5]) -> Self {
-        let mut bytes = <[u8; 20]>::default();
-        for (src, dst) in digest.iter().zip(bytes.chunks_exact_mut(4)) {
-            dst.copy_from_slice(&src.to_be_bytes())
-        }
-        Self(bytes)
-    }
-
-    pub fn from_bytes(bytes: [u8; 20]) -> Self {
-        Self(bytes)
-    }
-
+impl Uid {
     pub const fn bytes(&self) -> &[u8; 20] {
         &self.0
     }
+
+    pub fn from_ptr<T: ?Sized>(ptr: *const T) -> Self {
+        let machine_id = os::MachineId::default();
+        let process_uuid = os::process_uuid();
+        let ptr_addr = ptr.cast::<()>() as usize;
+        let mut hasher = Sha1::new();
+        hasher.update(machine_id.as_bytes());
+        hasher.update(process_uuid.as_bytes());
+        hasher.update(&ptr_addr.to_ne_bytes());
+        Self(hasher.digest().bytes())
+    }
 }
 
-impl std::fmt::Display for ObjectUid {
+impl std::fmt::Display for Uid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i, bytes) in self.0.chunks_exact(4).enumerate() {
             if i > 0 {
@@ -97,6 +103,55 @@ impl std::fmt::Display for ObjectUid {
             write!(f, "{dword:x}")?;
         }
         Ok(())
+    }
+}
+
+impl PartialEq<[u8; 20]> for Uid {
+    fn eq(&self, other: &[u8; 20]) -> bool {
+        &self.0 == other
+    }
+}
+
+impl PartialEq<Uid> for [u8; 20] {
+    fn eq(&self, other: &Uid) -> bool {
+        self == &other.0
+    }
+}
+
+impl Reflect for Uid {
+    fn ty() -> Option<Type> {
+        Some(Type::String)
+    }
+}
+
+impl RuntimeReflect for Uid {
+    fn ty(&self) -> Type {
+        Type::String
+    }
+}
+
+impl ToValue for Uid {
+    fn to_value(&self) -> Value<'_> {
+        Value::ByteString(Cow::Borrowed(&self.0))
+    }
+}
+
+impl<'a> IntoValue<'a> for Uid {
+    fn into_value(self) -> Value<'a> {
+        Value::ByteString(Cow::Owned(self.0.to_vec()))
+    }
+}
+
+impl<'a> FromValue<'a> for Uid {
+    fn from_value(value: Value<'a>) -> std::result::Result<Self, FromValueError> {
+        let bytes = value
+            .as_string_bytes()
+            .ok_or_else(|| FromValueError::TypeMismatch {
+                expected: "an Object UID".to_owned(),
+                actual: value.to_string(),
+            })?;
+        let bytes = <[u8; 20]>::try_from(bytes).map_err(|err| FromValueError::Other(err.into()))?;
+        Ok(Self(bytes))
     }
 }
 

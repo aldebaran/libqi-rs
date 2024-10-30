@@ -23,19 +23,11 @@ impl qi::Object for Player {
         todo!()
     }
 
-    async fn meta_post(
-        &self,
-        ident: qi::object::MemberIdent,
-        value: qi::Value<'_>,
-    ) -> qi::Result<()> {
+    async fn meta_post(&self, ident: qi::object::MemberIdent, value: qi::Value<'_>) {
         todo!()
     }
 
-    async fn meta_event(
-        &self,
-        ident: qi::object::MemberIdent,
-        value: qi::Value<'_>,
-    ) -> qi::Result<()> {
+    async fn meta_event(&self, ident: qi::object::MemberIdent, value: qi::Value<'_>) {
         todo!()
     }
 }

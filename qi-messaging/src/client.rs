@@ -12,28 +12,27 @@ use std::{
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone, Debug)]
-pub struct Client<T, R> {
-    requests: mpsc::Sender<Request<T, R>>,
+pub struct Client<Body> {
+    requests: mpsc::Sender<Request<Body>>,
 }
 
-impl<T, R> Client<T, R>
-where
-    T: Send,
-    R: Send,
-{
-    fn new(requests: mpsc::Sender<Request<T, R>>) -> Self {
+impl<Body> Client<Body> {
+    fn new(requests: mpsc::Sender<Request<Body>>) -> Self {
         Self { requests }
     }
 
-    pub fn downgrade(&self) -> WeakClient<T, R> {
+    pub fn downgrade(&self) -> WeakClient<Body> {
         WeakClient {
             requests: self.requests.downgrade(),
         }
     }
 
-    pub async fn call(&self, address: Address, value: T) -> Result<R, Error> {
-        let request_permit = self.requests.reserve().await?;
+    pub async fn call(&self, address: Address, value: Body) -> Result<Body, Error> {
+        let request_permit = self
+            .requests
+            .reserve()
+            .await
+            .map_err(client_dissociated_with_endpoint_error)?;
         let (response_sender, response_receiver) = oneshot::channel();
         let cancel_token = CancellationToken::new();
         let drop_guard = cancel_token.clone().drop_guard();
@@ -43,12 +42,14 @@ where
             cancel_token,
             response_sender,
         });
-        let response = response_receiver.await;
+        let response = response_receiver
+            .await
+            .map_err(client_dissociated_with_endpoint_error);
         drop_guard.disarm();
         response?
     }
 
-    pub async fn oneway(&self, address: Address, request: Oneway<T>) -> Result<(), Error> {
+    pub async fn oneway(&self, address: Address, request: Oneway<Body>) -> Result<(), Error> {
         let request = match request {
             Oneway::Capabilities(capabilities) => Request::Capababilities {
                 address,
@@ -57,46 +58,65 @@ where
             Oneway::Post(value) => Request::Post { address, value },
             Oneway::Event(value) => Request::Event { address, value },
         };
-        self.requests.send(request).await.map_err(Into::into)
+        self.requests
+            .send(request)
+            .await
+            .map_err(client_dissociated_with_endpoint_error)
+    }
+}
+
+fn client_dissociated_with_endpoint_error<E>(_err: E) -> Error {
+    Error::LinkLost("the client has been dissociated with the messaging loop".into())
+}
+
+impl<Body> Clone for Client<Body> {
+    fn clone(&self) -> Self {
+        Self {
+            requests: self.requests.clone(),
+        }
+    }
+}
+
+impl<Body> std::fmt::Debug for Client<Body> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("requests", &self.requests)
+            .finish()
     }
 }
 
 #[derive(Clone)]
-pub struct WeakClient<T, R> {
-    requests: mpsc::WeakSender<Request<T, R>>,
+pub struct WeakClient<Body> {
+    requests: mpsc::WeakSender<Request<Body>>,
 }
 
-impl<T, R> WeakClient<T, R>
-where
-    T: Send,
-    R: Send,
-{
-    pub fn upgrade(&self) -> Option<Client<T, R>> {
+impl<Body> WeakClient<Body> {
+    pub fn upgrade(&self) -> Option<Client<Body>> {
         self.requests.upgrade().map(Client::new)
     }
 }
 
-impl<T, R> std::fmt::Debug for WeakClient<T, R> {
+impl<Body> std::fmt::Debug for WeakClient<Body> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("WeakClient")
     }
 }
 
 #[derive(Debug)]
-enum Request<T, R> {
+enum Request<Body> {
     Call {
         address: Address,
-        value: T,
+        value: Body,
         cancel_token: CancellationToken,
-        response_sender: oneshot::Sender<Result<R, Error>>,
+        response_sender: oneshot::Sender<Result<Body, Error>>,
     },
     Post {
         address: Address,
-        value: T,
+        value: Body,
     },
     Event {
         address: Address,
-        value: T,
+        value: Body,
     },
     Capababilities {
         address: Address,
@@ -104,14 +124,14 @@ enum Request<T, R> {
     },
 }
 
-pub(crate) struct Requests<T, R> {
+pub(crate) struct Requests<Body> {
     id: SharedIdFactory,
-    receiver: Option<mpsc::Receiver<Request<T, R>>>,
-    running_calls: HashMap<Id, CallState<R>>,
+    receiver: Option<mpsc::Receiver<Request<Body>>>,
+    running_calls: HashMap<Id, CallState<Body>>,
 }
 
-impl<T, R> Requests<T, R> {
-    fn new(id: SharedIdFactory, receiver: mpsc::Receiver<Request<T, R>>) -> Self {
+impl<Body> Requests<Body> {
+    fn new(id: SharedIdFactory, receiver: mpsc::Receiver<Request<Body>>) -> Self {
         Self {
             id,
             receiver: Some(receiver),
@@ -119,24 +139,24 @@ impl<T, R> Requests<T, R> {
         }
     }
 
-    pub(super) fn dispatch_response(&mut self, id: Id, response: Response<R>) {
+    pub(super) fn dispatch_response(&mut self, id: Id, response: Response<Body>) {
         if let Some(CallState {
             response_sender, ..
         }) = self.running_calls.remove(&id)
         {
             let _res = response_sender.send(match response {
                 Response::Reply(value) => Ok(value),
-                Response::Error(error) => Err(Error::other(error)),
-                Response::Canceled => Err(Error::Canceled),
+                Response::Error(error) => Err(Error::CallError(error)),
+                Response::Canceled => Err(Error::CallCanceled),
             });
         }
     }
 }
 
-impl<T, R> Unpin for Requests<T, R> {}
+impl<Body> Unpin for Requests<Body> {}
 
-impl<T, R> Stream for Requests<T, R> {
-    type Item = Message<T>;
+impl<Body> Stream for Requests<Body> {
+    type Item = Message<Body>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // Check if any call has been canceled.
@@ -204,17 +224,13 @@ impl<T, R> Stream for Requests<T, R> {
     }
 }
 
-impl<T, R> FusedStream for Requests<T, R> {
+impl<Body> FusedStream for Requests<Body> {
     fn is_terminated(&self) -> bool {
         self.receiver.is_none()
     }
 }
 
-pub(crate) fn pair<T, R>(id: SharedIdFactory, capacity: usize) -> (Client<T, R>, Requests<T, R>)
-where
-    T: Send,
-    R: Send,
-{
+pub(crate) fn pair<Body>(id: SharedIdFactory, capacity: usize) -> (Client<Body>, Requests<Body>) {
     let (sender, receiver) = mpsc::channel(capacity);
     (Client::new(sender), Requests::new(id, receiver))
 }

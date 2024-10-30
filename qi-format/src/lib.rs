@@ -12,11 +12,11 @@ mod write;
 
 pub mod ser;
 #[doc(inline)]
-pub use ser::{to_bytes, Serializer};
+pub use ser::{to_bytes, BytesSerializer};
 
 pub mod de;
 #[doc(inline)]
-pub use de::{from_buf, Deserializer};
+pub use de::{from_slice, SliceDeserializer};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -26,20 +26,35 @@ pub enum Error {
     #[error("the value '{0}' is not a `bool` value")]
     NotABoolValue(u8),
 
-    #[error("cannot deserialize any data, the type information of the expected value is required (the `qi` format is not self-describing)")]
-    CannotDeserializeAny,
+    #[error("unknown element")]
+    UnknownElement,
 
-    #[error("size conversion error")]
+    #[error("failure to convert size")]
     SizeConversionError(std::num::TryFromIntError),
 
     #[error("list and maps size must be known to be serialized")]
-    UnspecifiedListMapSize,
+    MissingSequenceSize,
 
     #[error("expected {0} elements, got one more")]
     UnexpectedElement(usize),
 
     #[error("string data is not valid UTF-8")]
     InvalidStringUtf8(#[from] std::str::Utf8Error),
+
+    #[error("failure to process sequence size")]
+    SequenceSize(#[source] Box<Error>),
+
+    #[error("failure to process a sequence item at {name}")]
+    SequenceElement { name: String, source: Box<Error> },
+
+    #[error("failure to process a map element key at index {index}")]
+    MapKey { index: usize, source: Box<Error> },
+
+    #[error("failure to process a map element value at index {index}")]
+    MapValue { index: usize, source: Box<Error> },
+
+    #[error("failure to process a variant index")]
+    VariantIndex(#[source] Box<Error>),
 
     #[error("{0}")]
     Custom(std::string::String),

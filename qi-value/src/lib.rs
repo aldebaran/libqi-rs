@@ -47,6 +47,7 @@ pub mod dynamic;
 mod ids;
 pub mod map;
 pub mod object;
+pub mod os;
 mod reflect;
 mod signature;
 pub mod ty;

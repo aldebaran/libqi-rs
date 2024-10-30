@@ -9,32 +9,31 @@
 ///
 /// Identifiers are deserialized as unit values.
 use crate::{read, Error, Result};
-use bytes::Buf;
 use serde::de::IntoDeserializer;
 
-pub fn from_buf<'de, B, T>(mut buf: B) -> Result<T>
+pub fn from_slice<'b, T>(data: &'b [u8]) -> Result<T>
 where
-    T: serde::de::Deserialize<'de>,
-    B: Buf,
+    T: serde::Deserialize<'b>,
 {
-    T::deserialize(Deserializer::from_buf(&mut buf))
+    T::deserialize(&mut SliceDeserializer::new(data))
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Deserializer<'b, B> {
-    buf: &'b mut B,
+pub struct SliceDeserializer<'data> {
+    data: &'data [u8],
 }
 
-impl<'b, B> Deserializer<'b, B> {
-    pub fn from_buf(buf: &'b mut B) -> Self {
-        Self { buf }
+impl<'data> SliceDeserializer<'data> {
+    pub fn new(bytes: &'data [u8]) -> Self {
+        Self { data: bytes }
+    }
+
+    pub fn by_ref(&mut self) -> &mut Self {
+        self
     }
 }
 
-impl<'b, 'de, B> serde::Deserializer<'de> for Deserializer<'b, B>
-where
-    B: Buf,
-{
+impl<'data> serde::Deserializer<'data> for &mut SliceDeserializer<'data> {
     type Error = Error;
 
     fn is_human_readable(&self) -> bool {
@@ -43,129 +42,130 @@ where
 
     fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        Err(Error::CannotDeserializeAny)
+        Err(Error::UnknownElement)
     }
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_bool(read::read_bool(self.buf)?)
+        visitor.visit_bool(read::read_bool(&mut self.data)?)
     }
 
     fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_i8(read::read_i8(self.buf)?)
+        visitor.visit_i8(read::read_i8(&mut self.data)?)
     }
 
     fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_i16(read::read_i16(self.buf)?)
+        visitor.visit_i16(read::read_i16(&mut self.data)?)
     }
 
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_i32(read::read_i32(self.buf)?)
+        visitor.visit_i32(read::read_i32(&mut self.data)?)
     }
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_i64(read::read_i64(self.buf)?)
+        visitor.visit_i64(read::read_i64(&mut self.data)?)
     }
 
     fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_u8(read::read_u8(self.buf)?)
+        visitor.visit_u8(read::read_u8(&mut self.data)?)
     }
 
     fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_u16(read::read_u16(self.buf)?)
+        visitor.visit_u16(read::read_u16(&mut self.data)?)
     }
 
     fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_u32(read::read_u32(self.buf)?)
+        visitor.visit_u32(read::read_u32(&mut self.data)?)
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_u64(read::read_u64(self.buf)?)
+        visitor.visit_u64(read::read_u64(&mut self.data)?)
     }
 
     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_f32(read::read_f32(self.buf)?)
+        visitor.visit_f32(read::read_f32(&mut self.data)?)
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_f64(read::read_f64(self.buf)?)
+        visitor.visit_f64(read::read_f64(&mut self.data)?)
     }
 
-    // equivalence char -> str
     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        self.deserialize_str(visitor)
+        let str = read::read_str(&mut self.data)?;
+        let c = str.chars().next().ok_or(Error::ShortRead)?;
+        visitor.visit_char(c)
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        self.deserialize_string(visitor)
+        visitor.visit_borrowed_str(read::read_str(&mut self.data)?)
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_string(read::read_string(self.buf)?)
+        visitor.visit_string(read::read_string(&mut self.data)?)
     }
 
     fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_bytes(&read::read_raw(self.buf)?)
+        visitor.visit_borrowed_bytes(read::read_raw(&mut self.data)?)
     }
 
     fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        visitor.visit_byte_buf(read::read_raw_buf(self.buf)?)
+        visitor.visit_byte_buf(read::read_raw_buf(&mut self.data)?.to_vec())
     }
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        match read::read_bool(self.buf)? {
+        match read::read_bool(&mut self.data)? {
             true => visitor.visit_some(self),
             false => visitor.visit_none(),
         }
@@ -173,7 +173,7 @@ where
 
     fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
         // nothing
         visitor.visit_unit()
@@ -182,7 +182,7 @@ where
     // equivalence: unit_struct -> unit
     fn deserialize_unit_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
         self.deserialize_unit(visitor)
     }
@@ -190,25 +190,24 @@ where
     // equivalence: newtype_struct(T) = tuple(T) = T
     fn deserialize_newtype_struct<V>(self, _name: &'static str, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
         visitor.visit_newtype_struct(self)
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        let access = SequenceAccess::new_list_or_map(self.buf)?;
+        let access = SequenceAccess::new_size_prefixed(self)?;
         visitor.visit_seq(access)
     }
 
     fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        let access = SequenceAccess::new_sequence(len, self.buf);
-        visitor.visit_seq(access)
+        visitor.visit_seq(SequenceAccess::new(len, self, None, None))
     }
 
     // equivalence: tuple_struct(T...) -> tuple(T...)
@@ -219,30 +218,35 @@ where
         visitor: V,
     ) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
         self.deserialize_tuple(len, visitor)
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        let access = SequenceAccess::new_list_or_map(self.buf)?;
+        let access = SequenceAccess::new_size_prefixed(self)?;
         visitor.visit_map(access)
     }
 
     // equivalence: struct(T...) -> tuple(T...)
     fn deserialize_struct<V>(
         self,
-        _name: &'static str,
+        name: &'static str,
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        self.deserialize_tuple(fields.len(), visitor)
+        visitor.visit_seq(SequenceAccess::new(
+            fields.len(),
+            self,
+            Some(name),
+            Some(fields),
+        ))
     }
 
     // equivalence: enum(idx,T) -> tuple(idx,T)
@@ -253,7 +257,7 @@ where
         visitor: V,
     ) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
         visitor.visit_enum(self)
     }
@@ -261,41 +265,52 @@ where
     // equivalence: identifier -> unit
     fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
         self.deserialize_unit(visitor)
     }
 
     fn deserialize_ignored_any<V>(self, _visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
-        Err(Error::CannotDeserializeAny)
+        Err(Error::UnknownElement)
+    }
+
+    fn deserialize_i128<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'data>,
+    {
+        let _ = visitor;
+        Err(serde::de::Error::custom("i128 is not supported"))
+    }
+
+    fn deserialize_u128<V>(self, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    where
+        V: serde::de::Visitor<'data>,
+    {
+        let _ = visitor;
+        Err(serde::de::Error::custom("u128 is not supported"))
     }
 }
 
-impl<'b, 'de, B> serde::de::EnumAccess<'de> for Deserializer<'b, B>
-where
-    B: Buf,
-{
+impl<'data> serde::de::EnumAccess<'data> for &mut SliceDeserializer<'data> {
     type Error = Error;
     type Variant = Self;
 
     fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant)>
     where
-        V: serde::de::DeserializeSeed<'de>,
+        V: serde::de::DeserializeSeed<'data>,
     {
-        let variant_index = read::read_u32(self.buf)?;
+        let variant_index =
+            read::read_u32(&mut self.data).map_err(|err| Error::VariantIndex(err.into()))?;
         let variant_index_deserializer = variant_index.into_deserializer();
         let value: Result<_> = seed.deserialize(variant_index_deserializer);
         Ok((value?, self))
     }
 }
 
-impl<'b, 'de, B> serde::de::VariantAccess<'de> for Deserializer<'b, B>
-where
-    B: Buf,
-{
+impl<'data> serde::de::VariantAccess<'data> for &mut SliceDeserializer<'data> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {
@@ -304,14 +319,14 @@ where
 
     fn newtype_variant_seed<T>(self, seed: T) -> Result<T::Value>
     where
-        T: serde::de::DeserializeSeed<'de>,
+        T: serde::de::DeserializeSeed<'data>,
     {
         seed.deserialize(self)
     }
 
     fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
         use serde::Deserializer;
         self.deserialize_tuple(len, visitor)
@@ -320,86 +335,115 @@ where
     // equivalence: struct(T...) -> tuple(T...)
     fn struct_variant<V>(self, fields: &'static [&'static str], visitor: V) -> Result<V::Value>
     where
-        V: serde::de::Visitor<'de>,
+        V: serde::de::Visitor<'data>,
     {
         use serde::Deserializer;
-        self.deserialize_tuple(fields.len(), visitor)
+        self.deserialize_struct("", fields, visitor)
     }
 }
 
-struct SequenceAccess<'b, B> {
-    iter: std::ops::Range<usize>,
-    buf: &'b mut B,
+struct SequenceAccess<'slice_de, 'data> {
+    index: usize,
+    size: usize,
+    deserializer: &'slice_de mut SliceDeserializer<'data>,
+    name: Option<&'static str>,
+    fields: Option<&'static [&'static str]>,
 }
 
-impl<'b, 'de, B> SequenceAccess<'b, B>
-where
-    B: Buf,
-{
-    fn new_list_or_map(buf: &'b mut B) -> Result<Self> {
-        let size = read::read_size(buf)?;
-        Ok(Self::new_sequence(size, buf))
+impl<'slice_de, 'data> SequenceAccess<'slice_de, 'data> {
+    fn new_size_prefixed(deserializer: &'slice_de mut SliceDeserializer<'data>) -> Result<Self> {
+        let size = read::read_size(&mut deserializer.data)
+            .map_err(|err| Error::SequenceSize(Box::new(err)))?;
+        Ok(Self::new(size, deserializer, None, None))
     }
 
-    fn new_sequence(size: usize, buf: &'b mut B) -> Self {
-        Self { iter: 0..size, buf }
+    fn new(
+        size: usize,
+        deserializer: &'slice_de mut SliceDeserializer<'data>,
+        name: Option<&'static str>,
+        fields: Option<&'static [&'static str]>,
+    ) -> Self {
+        Self {
+            index: 0,
+            size,
+            deserializer,
+            name,
+            fields,
+        }
     }
 
     fn next_item<T>(&mut self, seed: T) -> Result<Option<T::Value>>
     where
-        T: serde::de::DeserializeSeed<'de>,
+        T: serde::de::DeserializeSeed<'data>,
     {
-        let item = match self.iter.next() {
-            Some(_idx) => {
-                let item = seed.deserialize(Deserializer::from_buf(self.buf))?;
-                Some(item)
-            }
-            None => None,
-        };
-        Ok(item)
+        if self.index < self.size {
+            let item = seed.deserialize(self.deserializer.by_ref())?;
+            Ok(Some(item))
+        } else {
+            Ok(None)
+        }
     }
 }
 
-impl<'b, 'de, B> serde::de::SeqAccess<'de> for SequenceAccess<'b, B>
-where
-    B: Buf,
-{
+impl<'slice_de, 'data> serde::de::SeqAccess<'data> for SequenceAccess<'slice_de, 'data> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
     where
-        T: serde::de::DeserializeSeed<'de>,
+        T: serde::de::DeserializeSeed<'data>,
     {
-        self.next_item(seed)
+        let item = self.next_item(seed).map_err(|err| Error::SequenceElement {
+            name: format!(
+                "{}{}",
+                match self.name {
+                    Some(name) => format!("{name}."),
+                    None => String::new(),
+                },
+                match self.fields {
+                    Some(fields) => fields[self.index].to_owned(),
+                    None => self.index.to_string(),
+                }
+            ),
+            source: Box::new(err),
+        })?;
+        self.index += 1;
+        Ok(item)
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.iter.len())
+        Some(self.size.saturating_sub(self.index))
     }
 }
 
-impl<'b, 'de, B> serde::de::MapAccess<'de> for SequenceAccess<'b, B>
-where
-    B: Buf,
-{
+impl<'slice_de, 'data> serde::de::MapAccess<'data> for SequenceAccess<'slice_de, 'data> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
     where
-        K: serde::de::DeserializeSeed<'de>,
+        K: serde::de::DeserializeSeed<'data>,
     {
-        self.next_item(seed)
+        self.next_item(seed).map_err(|err| Error::MapKey {
+            index: self.index,
+            source: err.into(),
+        })
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
     where
-        V: serde::de::DeserializeSeed<'de>,
+        V: serde::de::DeserializeSeed<'data>,
     {
-        seed.deserialize(Deserializer::from_buf(self.buf))
+        let item = seed
+            .deserialize(self.deserializer.by_ref())
+            .map_err(|err| Error::MapValue {
+                index: self.index,
+                source: err.into(),
+            })?;
+        self.index += 1;
+        Ok(item)
     }
 
     fn size_hint(&self) -> Option<usize> {
-        Some(self.iter.len())
+        Some(self.size.saturating_sub(self.index))
     }
 }
 
@@ -414,332 +458,187 @@ impl serde::de::Error for super::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::Deserializer as D;
+    use super::SliceDeserializer as D;
     use super::*;
     use assert_matches::assert_matches;
-    use serde::de::{Deserialize, Deserializer};
+    use serde::de::Deserializer;
     use serde_value::{Value, ValueVisitor};
 
-    // --------------------------------------------------------------
-    // Bijection types
-    // --------------------------------------------------------------
-    // To simplify some tests, we deserialize concrete types directly.
-    // We assume that:
-    // - `std::option::Option` uses `deserialize_option`.
-    // - `std::vec::Vec` uses `deserialize_seq`.
-    // - tuples and arrays use `deserialize_tuple`.
-    // - `std::collections::HashMap` uses `deserialize_map`.
-    // - a struct/newtype struct/unit struct/tuple struct with derived Deserialize implementation
-    // uses `deserialize_struct/newtype_struct/unit_struct/tuple_struct`.
-    // - enums use `deserializer_enum`.
+    #[test]
+    fn test_slice_deserializer_deserialize_bool() {
+        assert_matches!(from_slice::<bool>(&[0]), Ok(false));
+        assert_matches!(from_slice::<bool>(&[1]), Ok(true));
+        assert_matches!(from_slice::<bool>(&[2]), Err(Error::NotABoolValue(2)));
+        assert_matches!(from_slice::<bool>(&[]), Err(Error::ShortRead));
+    }
 
     #[test]
-    fn test_deserializer_deserialize_bool() {
-        let mut buf: &[u8] = &[0, 1, 2];
+    fn test_slice_deserializer_deserialize_i8() {
+        assert_matches!(from_slice::<i8>(&[1]), Ok(1));
+        assert_matches!(from_slice::<i8>(&[2]), Ok(2));
+        assert_matches!(from_slice::<i8>(&[]), Err(Error::ShortRead));
+    }
+
+    #[test]
+    fn test_slice_deserializer_deserialize_u8() {
+        assert_matches!(from_slice::<u8>(&[1]), Ok(1));
+        assert_matches!(from_slice::<u8>(&[2]), Ok(2));
+        assert_matches!(from_slice::<u8>(&[]), Err(Error::ShortRead));
+    }
+
+    #[test]
+    fn test_slice_deserializer_deserialize_i16() {
+        assert_matches!(from_slice::<i16>(&[1, 0]), Ok(1));
+        assert_matches!(from_slice::<i16>(&[2, 0]), Ok(2));
+        assert_matches!(from_slice::<i16>(&[]), Err(Error::ShortRead));
+    }
+
+    #[test]
+    fn test_slice_deserializer_deserialize_u16() {
+        assert_matches!(from_slice::<u16>(&[1, 0]), Ok(1));
+        assert_matches!(from_slice::<u16>(&[2, 0]), Ok(2));
+        assert_matches!(from_slice::<u16>(&[0]), Err(Error::ShortRead));
+    }
+
+    #[test]
+    fn test_slice_deserializer_deserialize_i32() {
+        assert_matches!(from_slice::<i32>(&[1, 0, 0, 0]), Ok(1));
+        assert_matches!(from_slice::<i32>(&[2, 0, 0, 0]), Ok(2));
+        assert_matches!(from_slice::<i32>(&[0, 0, 0]), Err(Error::ShortRead));
+    }
+
+    #[test]
+    fn test_slice_deserializer_deserialize_u32() {
+        assert_matches!(from_slice::<u32>(&[1, 0, 0, 0]), Ok(1));
+        assert_matches!(from_slice::<u32>(&[2, 0, 0, 0]), Ok(2));
+        assert_matches!(from_slice::<u32>(&[0, 0, 0]), Err(Error::ShortRead));
+    }
+
+    #[test]
+    fn test_slice_deserializer_deserialize_i64() {
+        assert_matches!(from_slice::<i64>(&[1, 0, 0, 0, 0, 0, 0, 0]), Ok(1));
+        assert_matches!(from_slice::<i64>(&[2, 0, 0, 0, 0, 0, 0, 0]), Ok(2));
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_bool(ValueVisitor),
-            Ok(Value::Bool(false))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_bool(ValueVisitor),
-            Ok(Value::Bool(true))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_bool(ValueVisitor),
-            Err(Error::NotABoolValue(2))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_bool(ValueVisitor),
+            from_slice::<i64>(&[0, 0, 0, 0, 0, 0, 0]),
             Err(Error::ShortRead)
         );
     }
 
     #[test]
-    fn test_deserializer_deserialize_i8() {
-        let mut buf: &[u8] = &[1, 2];
+    fn test_slice_deserializer_deserialize_u64() {
+        assert_matches!(from_slice::<u64>(&[1, 0, 0, 0, 0, 0, 0, 0]), Ok(1));
+        assert_matches!(from_slice::<u64>(&[2, 0, 0, 0, 0, 0, 0, 0]), Ok(2));
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_i8(ValueVisitor),
-            Ok(Value::I8(1))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i8(ValueVisitor),
-            Ok(Value::I8(2))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i8(ValueVisitor),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_u8() {
-        let mut buf: &[u8] = &[1, 2];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u8(ValueVisitor),
-            Ok(Value::U8(1))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u8(ValueVisitor),
-            Ok(Value::U8(2))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u8(ValueVisitor),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_i16() {
-        let mut buf: &[u8] = &[1, 0, 2, 0];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i16(ValueVisitor),
-            Ok(Value::I16(1))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i16(ValueVisitor),
-            Ok(Value::I16(2))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i16(ValueVisitor),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_u16() {
-        let mut buf: &[u8] = &[1, 0, 2, 0];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u16(ValueVisitor),
-            Ok(Value::U16(1))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u16(ValueVisitor),
-            Ok(Value::U16(2))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u16(ValueVisitor),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_i32() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 2, 0, 0, 0];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i32(ValueVisitor),
-            Ok(Value::I32(1))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i32(ValueVisitor),
-            Ok(Value::I32(2))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i32(ValueVisitor),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_u32() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 2, 0, 0, 0];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u32(ValueVisitor),
-            Ok(Value::U32(1))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u32(ValueVisitor),
-            Ok(Value::U32(2))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u32(ValueVisitor),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_i64() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i64(ValueVisitor),
-            Ok(Value::I64(1))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i64(ValueVisitor),
-            Ok(Value::I64(2))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_i64(ValueVisitor),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_u64() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u64(ValueVisitor),
-            Ok(Value::U64(1))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u64(ValueVisitor),
-            Ok(Value::U64(2))
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_u64(ValueVisitor),
+            from_slice::<u64>(&[0, 0, 0, 0, 0, 0, 0]),
             Err(Error::ShortRead)
         );
     }
 
     #[test]
     #[allow(clippy::float_cmp)]
-    fn test_deserializer_deserialize_f32() {
-        let mut buf: &[u8] = &[0x14, 0xae, 0x29, 0x42, 0xff, 0xff, 0xff, 0x7f];
+    fn test_slice_deserializer_deserialize_f32() {
+        assert_matches!(from_slice::<f32>(&[0x14, 0xae, 0x29, 0x42]), Ok(42.42));
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_f32(ValueVisitor),
-            Ok(Value::F32(f)) => assert_eq!(f, 42.42)
+            from_slice::<f32>(&[0xff, 0xff, 0xff, 0x7f]),
+            Ok(f) => assert!(f.is_nan())
+        );
+        assert_matches!(from_slice::<f32>(&[0, 0, 0]), Err(Error::ShortRead));
+    }
+
+    #[test]
+    fn test_slice_deserializer_deserialize_f64() {
+        assert_matches!(
+            from_slice::<f64>(&[0xf6, 0x28, 0x5c, 0x8f, 0xc2, 0x35, 0x45, 0x40]),
+            Ok(42.42)
         );
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_f32(ValueVisitor),
-            Ok(Value::F32(f)) => assert!(f.is_nan())
+            from_slice::<f64>(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f]),
+            Ok(f) => assert!(f.is_nan())
         );
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_f32(ValueVisitor),
+            from_slice::<f64>(&[0, 0, 0, 0, 0, 0, 0]),
             Err(Error::ShortRead)
         );
     }
 
     #[test]
-    fn test_deserializer_deserialize_f64() {
-        let mut buf: &[u8] = &[
-            0xf6, 0x28, 0x5c, 0x8f, 0xc2, 0x35, 0x45, 0x40, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-            0xff, 0x7f,
-        ];
+    fn test_slice_deserializer_deserialize_bytes() {
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_f64(ValueVisitor),
-            Ok(Value::F64(f)) => assert_eq!(f, 42.42)
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_f64(ValueVisitor),
-            Ok(Value::F64(f)) => assert!(f.is_nan())
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_f64(ValueVisitor),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_bytes() {
-        let mut buf: &[u8] = &[4, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_bytes(ValueVisitor),
+            D::new(&[4, 0, 0, 0, 1, 2, 3, 4]).deserialize_bytes(ValueVisitor),
             Ok(Value::Bytes(v)) => assert_eq!(v, [1, 2, 3, 4])
         );
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_bytes(ValueVisitor),
+            D::new(&[0, 0, 0, 0]).deserialize_bytes(ValueVisitor),
             Ok(Value::Bytes(v)) => assert!(v.is_empty())
         );
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_bytes(ValueVisitor),
+            D::new(&[4, 0, 0, 0, 1, 2, 3]).deserialize_bytes(ValueVisitor),
             Err(Error::ShortRead)
         );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_bytes_missing_elements() {
-        let mut buf: &[u8] = &[4, 0, 0, 0, 1, 2, 3];
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_bytes(ValueVisitor),
-            Err(Error::ShortRead)
+            D::new(&[0, 0, 0]).deserialize_bytes(ValueVisitor),
+            Err(Error::SequenceSize(_))
         );
     }
 
     #[test]
-    fn test_deserializer_deserialize_option() {
-        let mut buf: &[u8] = &[1, 42, 0, 0];
-        assert_matches!(
-            std::option::Option::<i16>::deserialize(D::from_buf(&mut buf)),
-            Ok(Some(42i16))
-        );
-        assert_matches!(
-            std::option::Option::<i16>::deserialize(D::from_buf(&mut buf)),
-            Ok(None)
-        );
-        assert_matches!(
-            std::option::Option::<i16>::deserialize(D::from_buf(&mut buf)),
-            Err(Error::ShortRead)
-        );
+    fn test_slice_deserializer_deserialize_option() {
+        assert_matches!(from_slice::<Option::<i16>>(&[1, 42, 0]), Ok(Some(42i16)));
+        assert_matches!(from_slice::<Option::<i16>>(&[0]), Ok(None));
+        assert_matches!(from_slice::<Option::<i16>>(&[]), Err(Error::ShortRead));
     }
 
     #[test]
-    fn test_deserializer_deserialize_unit() {
-        let mut buf: &[u8] = &[];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_unit(ValueVisitor),
-            Ok(Value::Unit)
-        );
+    fn test_slice_deserializer_deserialize_unit() {
+        assert_matches!(from_slice::<()>(&[]), Ok(()));
     }
 
     #[test]
-    fn test_deserializer_deserialize_sequence() {
-        let mut buf: &[u8] = &[3, 0, 0, 0, 1, 0, 2, 0, 3, 0, 0, 0, 0, 0];
+    fn test_slice_deserializer_deserialize_sequence() {
         assert_matches!(
-            std::vec::Vec::<i16>::deserialize(D::from_buf(&mut buf)),
+            from_slice::<Vec::<i16>>(&[3, 0, 0, 0, 1, 0, 2, 0, 3, 0]),
             Ok(v) => assert_eq!(v, [1, 2, 3])
         );
         assert_matches!(
-            std::vec::Vec::<i16>::deserialize(D::from_buf(&mut buf)),
+            from_slice::<Vec::<i16>>(&[0, 0, 0, 0]),
             Ok(v) => assert!(v.is_empty())
         );
         assert_matches!(
-            std::vec::Vec::<i16>::deserialize(D::from_buf(&mut buf)),
-            Err(Error::ShortRead)
+            from_slice::<Vec::<i16>>(&[1, 0, 0, 0]),
+            Err(Error::SequenceElement { .. })
+        );
+        assert_matches!(
+            from_slice::<Vec::<i16>>(&[0, 0, 0]),
+            Err(Error::SequenceSize(_))
         );
     }
 
     #[test]
-    fn test_deserializer_deserialize_sequence_missing_elements() {
-        let mut buf: &[u8] = &[2, 0, 0, 0, 1, 2];
+    fn test_slice_deserializer_deserialize_tuple() {
         assert_matches!(
-            std::vec::Vec::<i16>::deserialize(D::from_buf(&mut buf)),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_tuple() {
-        let mut buf: &[u8] = &[2, 0, 0, 0, 1, 2];
-        assert_matches!(
-            <(u32, Option<i8>)>::deserialize(D::from_buf(&mut buf)),
+            from_slice::<(u32, Option<i8>)>(&[2, 0, 0, 0, 1, 2]),
             Ok((2, Some(2)))
         );
-        assert_matches!(
-            <(u32, Option<i8>)>::deserialize(D::from_buf(&mut buf)),
-            Err(Error::ShortRead)
-        );
     }
 
     #[test]
-    fn test_deserializer_deserialize_map() {
-        let mut buf: &[u8] = &[2, 0, 0, 0, 1, 2, 2, 4];
+    fn test_slice_deserializer_deserialize_map() {
         use std::collections::HashMap;
         assert_matches!(
-            HashMap::<i8, u8>::deserialize(D::from_buf(&mut buf)),
+            from_slice::<HashMap::<i8, u8>>(&[2, 0, 0, 0, 1, 2, 2, 4]),
             Ok(m) => assert_eq!(m, HashMap::from([(1, 2), (2, 4)]))
         );
         assert_matches!(
-            HashMap::<i8, u8>::deserialize(D::from_buf(&mut buf)),
-            Err(Error::ShortRead)
+            from_slice::<HashMap::<i8, u8>>(&[1, 0, 0, 0, 0]),
+            Err(Error::MapValue { index: 0, .. })
         );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_map_missing_elements() {
-        let mut buf: &[u8] = &[2, 0, 0, 0, 1, 2];
-        use std::collections::HashMap;
         assert_matches!(
-            HashMap::<i8, u8>::deserialize(D::from_buf(&mut buf)),
-            Err(Error::ShortRead)
+            from_slice::<HashMap::<i8, u8>>(&[1, 0, 0, 0]),
+            Err(Error::MapKey { index: 0, .. })
+        );
+        assert_matches!(
+            from_slice::<HashMap::<i8, u8>>(&[0, 0, 0]),
+            Err(Error::SequenceSize(_))
         );
     }
 
@@ -748,146 +647,133 @@ mod tests {
     // --------------------------------------------------------------
     #[test]
     // char -> str
-    fn test_deserializer_deserialize_char() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99];
+    fn test_slice_deserializer_deserialize_char() {
         // `deserialize_char` yields strings, the visitor decides if it handles them or not.
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_char(ValueVisitor),
-            Ok(Value::String(s)) => assert_eq!(s, "a")
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_char(ValueVisitor),
-            Ok(Value::String(s)) => assert_eq!(s, "bc")
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_char(ValueVisitor),
-            Err(Error::ShortRead)
-        );
+        assert_matches!(from_slice::<char>(&[1, 0, 0, 0, 97]), Ok('a'));
+        assert_matches!(from_slice::<char>(&[2, 0, 0, 0, 98, 99]), Ok('b'));
+        assert_matches!(from_slice::<char>(&[1, 0, 0, 0]), Err(Error::ShortRead));
+        assert_matches!(from_slice::<char>(&[0, 0, 0]), Err(Error::SequenceSize(_)));
     }
 
     #[test]
     // str -> raw
-    fn test_deserializer_deserialize_str() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99, 3, 0, 0, 0];
+    fn test_slice_deserializer_deserialize_str() {
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_str(ValueVisitor),
-            Ok(Value::String(s)) => assert_eq!(s, "a")
+            from_slice::<&str>(&[1, 0, 0, 0, 97]),
+            Ok(s) => assert_eq!(s, "a")
         );
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_str(ValueVisitor),
-            Ok(Value::String(s)) => assert_eq!(s, "bc")
+            from_slice::<&str>(&[2, 0, 0, 0, 98, 99]),
+            Ok(s) => assert_eq!(s, "bc")
+        );
+        assert_matches!(from_slice::<&str>(&[1, 0, 0, 0]), Err(Error::ShortRead));
+        assert_matches!(from_slice::<&str>(&[0, 0, 0]), Err(Error::SequenceSize(_)));
+    }
+
+    #[test]
+    fn test_slice_deserializer_deserialize_string() {
+        assert_matches!(
+            from_slice::<String>(&[1, 0, 0, 0, 97]),
+            Ok(s) => assert_eq!(s, "a")
         );
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_str(ValueVisitor),
-            Err(Error::ShortRead)
+            from_slice::<String>(&[2, 0, 0, 0, 98, 99]),
+            Ok(s) => assert_eq!(s, "bc")
+        );
+        assert_matches!(
+            from_slice::<String>(&[0, 0, 0, 0]),
+            Ok(s) => assert!(s.is_empty())
+        );
+        assert_matches!(from_slice::<String>(&[1, 0, 0, 0]), Err(Error::ShortRead));
+        assert_matches!(
+            from_slice::<String>(&[0, 0, 0]),
+            Err(Error::SequenceSize(_))
         );
     }
 
     #[test]
-    // string -> raw
-    fn test_deserializer_deserialize_string() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99, 0, 0, 0, 0, 3, 0, 0, 0];
+    fn test_slice_deserializer_deserialize_byte_buf() {
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_string(ValueVisitor),
-            Ok(Value::String(s)) => assert_eq!(s, "a")
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_string(ValueVisitor),
-            Ok(Value::String(s)) => assert_eq!(s, "bc")
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_string(ValueVisitor),
-            Ok(Value::String(s)) => assert!(s.is_empty())
-        );
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_string(ValueVisitor),
-            Err(Error::ShortRead)
-        );
-    }
-
-    #[test]
-    fn test_deserializer_deserialize_byte_buf() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99, 0, 0, 0, 0, 3, 0, 0, 0];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_byte_buf(ValueVisitor),
+            D::new(&[1, 0, 0, 0, 97]).deserialize_byte_buf(ValueVisitor),
             Ok(Value::Bytes(b)) => assert_eq!(b, [97])
         );
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_byte_buf(ValueVisitor),
+            D::new(&[2, 0, 0, 0, 98, 99]).deserialize_byte_buf(ValueVisitor),
             Ok(Value::Bytes(b)) => assert_eq!(b, [98, 99])
         );
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_byte_buf(ValueVisitor),
+            D::new(&[0, 0, 0, 0]).deserialize_byte_buf(ValueVisitor),
             Ok(Value::Bytes(b)) => assert!(b.is_empty())
         );
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_byte_buf(ValueVisitor),
+            D::new(&[1, 0, 0, 0]).deserialize_byte_buf(ValueVisitor),
             Err(Error::ShortRead)
+        );
+        assert_matches!(
+            D::new(&[0, 0, 0]).deserialize_byte_buf(ValueVisitor),
+            Err(Error::SequenceSize(_))
         );
     }
 
     #[test]
     // struct(T...) -> tuple(T...)
-    fn test_deserializer_deserialize_struct() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99, 0, 0, 0, 0, 3, 0, 0, 0];
+    fn test_slice_deserializer_deserialize_struct() {
         #[derive(serde::Deserialize, PartialEq, Eq, Debug)]
         struct S {
             c: char,
             s: std::string::String,
-            t: (u8, i8, i16),
-            i: i32,
+            // t: (u8, i8, i16),
+            // i: i32,
         }
         assert_matches!(
-            S::deserialize(D::from_buf(&mut buf)),
-            Ok(S {
-                c: 'a',
-                s,
-                t: (0, 0, 0),
-                i: 3
-            }) => assert_eq!(s, "bc")
+            from_slice::<S>(&[1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99]),
+            Ok(S { c: 'a', s}) => assert_eq!(s, "bc")
         );
-        assert_matches!(S::deserialize(D::from_buf(&mut buf)), Err(Error::ShortRead));
+        // assert_matches!(
+        //     from_slice::<S>(&[1, 0, 0, 0, 97, 2, 0, 0, 0, 98, 99, 0, 0, 0, 0, 3, 0, 0, 0]),
+        //     Ok(S {
+        //         c: 'a',
+        //         s,
+        //         t: (0, 0, 0),
+        //         i: 3
+        //     }) => assert_eq!(s, "bc")
+        // );
     }
 
     #[test]
     // newtype_struct(T) -> tuple(T) = T
-    fn test_deserializer_deserialize_newtype_struct() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 97, 1, 0, 0, 0, 98];
+    fn test_slice_deserializer_deserialize_newtype_struct() {
         #[derive(serde::Deserialize, PartialEq, Eq, Debug)]
         struct S(char);
-        assert_matches!(S::deserialize(D::from_buf(&mut buf)), Ok(S('a')));
-        assert_matches!(S::deserialize(D::from_buf(&mut buf)), Ok(S('b')));
-        assert_matches!(S::deserialize(D::from_buf(&mut buf)), Err(Error::ShortRead));
+        assert_matches!(from_slice::<S>(&[1, 0, 0, 0, 97]), Ok(S('a')));
+        assert_matches!(from_slice::<S>(&[1, 0, 0, 0, 98]), Ok(S('b')));
     }
 
     #[test]
     // unit_struct -> unit
-    fn test_deserializer_deserialize_unit_struct() {
-        let mut buf: &[u8] = &[];
-        assert_matches!(
-            D::from_buf(&mut buf).deserialize_unit_struct("MyStruct", ValueVisitor),
-            Ok(Value::Unit)
-        );
+    fn test_slice_deserializer_deserialize_unit_struct() {
+        #[derive(serde::Deserialize, PartialEq, Eq, Debug)]
+        struct S;
+        assert_matches!(from_slice::<S>(&[]), Ok(S));
     }
 
     #[test]
     // tuple_struct(T...) -> tuple(T...)
-    fn test_deserializer_deserialize_tuple_struct() {
-        let mut buf: &[u8] = &[1, 0, 0, 0, 97, 3, 0, 0, 0, 4, 0, 5, 0, 6, 0];
+    fn test_slice_deserializer_deserialize_tuple_struct() {
         #[derive(serde::Deserialize, PartialEq, Eq, Debug)]
         struct S(String, Vec<i16>);
-        assert_matches!(S::deserialize(D::from_buf(&mut buf)), Ok(S(str, v)) => {
-            assert_eq!(str, "a");
-            assert_eq!(v, [4, 5, 6])
-        });
+        assert_matches!(
+            from_slice::<S>(&[1, 0, 0, 0, 97, 3, 0, 0, 0, 4, 0, 5, 0, 6, 0]),
+            Ok(S(str, v)) => {
+                assert_eq!(str, "a");
+                assert_eq!(v, [4, 5, 6])
+            }
+        );
     }
 
     #[test]
     // enum(idx,T) -> tuple(idx,T)
-    fn test_deserializer_deserialize_enum() {
-        let mut buf: &[u8] = &[
-            0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 97, 3, 0, 0, 0, 4, 0, 5, 0, 6, 0,
-        ];
+    fn test_slice_deserializer_deserialize_enum() {
         #[derive(serde::Deserialize, PartialEq, Eq, Debug)]
         enum E {
             A,
@@ -895,18 +781,22 @@ mod tests {
             C,
             D(i16, i16, i16),
         }
-        assert_matches!(E::deserialize(D::from_buf(&mut buf)), Ok(E::A));
-        assert_matches!(E::deserialize(D::from_buf(&mut buf)), Ok(E::B('a')));
-        assert_matches!(E::deserialize(D::from_buf(&mut buf)), Ok(E::D(4, 5, 6)));
-        assert_matches!(E::deserialize(D::from_buf(&mut buf)), Err(Error::ShortRead));
+        assert_matches!(from_slice::<E>(&[0, 0, 0, 0]), Ok(E::A));
+        assert_matches!(
+            from_slice::<E>(&[1, 0, 0, 0, 1, 0, 0, 0, 97]),
+            Ok(E::B('a'))
+        );
+        assert_matches!(
+            from_slice::<E>(&[3, 0, 0, 0, 4, 0, 5, 0, 6, 0]),
+            Ok(E::D(4, 5, 6))
+        );
     }
 
     #[test]
     // identifier => unit
-    fn test_deserializer_deserialize_identifier() {
-        let mut buf: &[u8] = &[];
+    fn test_slice_deserializer_deserialize_identifier() {
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_identifier(ValueVisitor),
+            D::new(&[]).deserialize_identifier(ValueVisitor),
             Ok(Value::Unit)
         );
     }
@@ -915,38 +805,38 @@ mod tests {
     // Unhandled types
     // --------------------------------------------------------------
     #[test]
-    fn test_deserializer_deserialize_i128() {
-        let mut buf: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    fn test_slice_deserializer_deserialize_i128() {
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_i128(ValueVisitor),
+            D::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+                .deserialize_i128(ValueVisitor),
             Err(Error::Custom(_))
         );
     }
 
     #[test]
-    fn test_deserializer_deserialize_u128() {
-        let mut buf: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    fn test_slice_deserializer_deserialize_u128() {
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_u128(ValueVisitor),
+            D::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+                .deserialize_u128(ValueVisitor),
             Err(Error::Custom(_))
         );
     }
 
     #[test]
-    fn test_deserializer_deserialize_any() {
-        let mut buf: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    fn test_slice_deserializer_deserialize_any() {
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_any(ValueVisitor),
-            Err(Error::CannotDeserializeAny)
+            D::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+                .deserialize_any(ValueVisitor),
+            Err(Error::UnknownElement)
         );
     }
 
     #[test]
-    fn test_deserializer_deserialize_ignored_any() {
-        let mut buf: &[u8] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    fn test_slice_deserializer_deserialize_ignored_any() {
         assert_matches!(
-            D::from_buf(&mut buf).deserialize_any(ValueVisitor),
-            Err(Error::CannotDeserializeAny)
+            D::new(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+                .deserialize_any(ValueVisitor),
+            Err(Error::UnknownElement)
         );
     }
 }

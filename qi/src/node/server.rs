@@ -1,20 +1,22 @@
 use crate::{
     messaging::{self, Address},
     session::{authentication::Authenticator, Session},
-    value::BinaryValue,
 };
 use futures::{stream, StreamExt};
 use std::{collections::HashMap, future::Future};
 use tokio::sync::watch;
 
-pub(super) fn create<Handler, Auth>(
+pub(super) fn create<Handler, Auth, Body>(
     handler: Handler,
     authenticator: Auth,
     addresses: impl IntoIterator<Item = Address>,
 ) -> (EndpointsRx, impl Future<Output = ()>)
 where
-    Handler: messaging::Handler<BinaryValue, Reply = BinaryValue> + Sync + Clone,
+    Handler: messaging::Handler<Body> + Sync + Clone,
+    Handler::Error: std::error::Error + Send + Sync + 'static,
     Auth: Authenticator + Clone + Send + Sync + 'static,
+    Body: messaging::Body + Send,
+    Body::Error: Send + Sync + 'static,
 {
     let (endpoints_sender, endpoints_receiver) = watch::channel(Default::default());
     (

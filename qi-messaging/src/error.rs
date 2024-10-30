@@ -1,55 +1,20 @@
+// TODO: Make an Error trait that allows checking if an error type is "canceled" so that we may send
+// back a canceled message to a client instead of an error.
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("messaging endpoint has been closed")]
-    EndpointClosed,
+    #[error("messaging link has been lost")]
+    LinkLost(#[source] Box<dyn std::error::Error + Send + Sync>),
 
-    // #[error(transparent)]
-    // IO(#[from] std::io::Error),
-    #[error("operation has been canceled")]
-    Canceled,
+    #[error("{0}")]
+    CallError(String),
 
-    #[error(transparent)]
-    Other(#[from] Box<dyn std::error::Error + Send + Sync>),
+    #[error("the call request has been canceled")]
+    CallCanceled,
 }
 
-impl Error {
-    pub fn other<E>(err: E) -> Self
-    where
-        E: Into<Box<dyn std::error::Error + Send + Sync>>,
-    {
-        Self::Other(err.into())
-    }
-
-    pub fn is_disconnection(&self) -> bool {
-        matches!(
-            self,
-            Self::IO(io_err)
-                if matches!(
-                    io_err.kind(),
-                    std::io::ErrorKind::PermissionDenied
-                        | std::io::ErrorKind::ConnectionRefused
-                        | std::io::ErrorKind::ConnectionReset
-                        | std::io::ErrorKind::ConnectionAborted
-                        | std::io::ErrorKind::NotConnected
-                        | std::io::ErrorKind::BrokenPipe
-                        | std::io::ErrorKind::TimedOut))
-    }
-}
-
-impl<T> From<tokio::sync::mpsc::error::SendError<T>> for Error {
-    fn from(_err: tokio::sync::mpsc::error::SendError<T>) -> Self {
-        Self::EndpointClosed
-    }
-}
-
-impl<T> From<tokio_util::sync::PollSendError<T>> for Error {
-    fn from(_err: tokio_util::sync::PollSendError<T>) -> Self {
-        Self::EndpointClosed
-    }
-}
-
-impl From<tokio::sync::oneshot::error::RecvError> for Error {
-    fn from(_err: tokio::sync::oneshot::error::RecvError) -> Self {
-        Self::EndpointClosed
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Self::LinkLost(err.into())
     }
 }

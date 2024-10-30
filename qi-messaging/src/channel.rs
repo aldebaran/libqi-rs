@@ -1,4 +1,4 @@
-use crate::{address::Address, binary_codec, BodyBuf, Error, Message};
+use crate::{address::Address, binary_codec, Error, Message};
 use async_stream::stream;
 use futures::{Sink, SinkExt, Stream, TryStreamExt};
 use tokio::{
@@ -7,22 +7,18 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-pub async fn connect<ReadBody, WriteBody>(
+pub async fn connect<Body>(
     address: Address,
 ) -> Result<
     (
-        impl Stream<Item = Result<Message<ReadBody>, Error>>,
-        impl Sink<Message<WriteBody>, Error = Error>,
+        impl Stream<Item = Result<Message<Body>, Error>>,
+        impl Sink<Message<Body>, Error = Error>,
     ),
-    Error,
+    std::io::Error,
 >
 where
-    ReadBody: BodyBuf,
-    ReadBody::Error: std::error::Error + Sync + Send + 'static,
-    for<'de> <ReadBody::Deserializer<'de> as serde::Deserializer<'de>>::Error:
-        Into<ReadBody::Error>,
-    WriteBody: BodyBuf,
-    WriteBody::Error: std::error::Error + Send + Sync + 'static,
+    Body: crate::Body,
+    Body::Error: std::error::Error + Sync + Send + 'static,
 {
     let (read, write) = match address {
         Address::Tcp { address, ssl: None } => {
@@ -34,28 +30,24 @@ where
     Ok(rw_to_messages_stream_sink(read, write))
 }
 
-pub async fn serve<ReadBody, WriteBody>(
+pub async fn serve<Body>(
     address: Address,
 ) -> Result<
     (
         impl Stream<
             Item = (
-                impl Stream<Item = Result<Message<ReadBody>, Error>>,
-                impl Sink<Message<WriteBody>, Error = Error>,
+                impl Stream<Item = Result<Message<Body>, Error>>,
+                impl Sink<Message<Body>, Error = Error>,
                 Address,
             ),
         >,
         Vec<Address>,
     ),
-    Error,
+    std::io::Error,
 >
 where
-    ReadBody: BodyBuf,
-    ReadBody::Error: std::error::Error + Sync + Send + 'static,
-    for<'de> <ReadBody::Deserializer<'de> as serde::Deserializer<'de>>::Error:
-        Into<ReadBody::Error>,
-    WriteBody: BodyBuf,
-    WriteBody::Error: std::error::Error + Send + Sync + 'static,
+    Body: crate::Body,
+    Body::Error: std::error::Error + Sync + Send + 'static,
 {
     match address {
         Address::Tcp { address, ssl } => {
@@ -84,22 +76,18 @@ where
     }
 }
 
-fn rw_to_messages_stream_sink<R, W, ReadBody, WriteBody>(
+fn rw_to_messages_stream_sink<R, W, Body>(
     read: R,
     write: W,
 ) -> (
-    impl Stream<Item = Result<Message<ReadBody>, Error>>,
-    impl Sink<Message<WriteBody>, Error = Error>,
+    impl Stream<Item = Result<Message<Body>, Error>>,
+    impl Sink<Message<Body>, Error = Error>,
 )
 where
     R: AsyncRead,
     W: AsyncWrite,
-    ReadBody: BodyBuf,
-    ReadBody::Error: std::error::Error + Sync + Send + 'static,
-    for<'de> <ReadBody::Deserializer<'de> as serde::Deserializer<'de>>::Error:
-        Into<ReadBody::Error>,
-    WriteBody: BodyBuf,
-    WriteBody::Error: std::error::Error + Send + Sync + 'static,
+    Body: crate::Body,
+    Body::Error: std::error::Error + Sync + Send + 'static,
 {
     (
         FramedRead::new(read, binary_codec::Decoder::new()).err_into(),

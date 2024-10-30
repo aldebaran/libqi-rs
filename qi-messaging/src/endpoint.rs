@@ -56,22 +56,23 @@ use tokio::select;
 //               │   Outgoing Messages   │
 //               │                       │
 //               └───────────────────────┘
-pub fn dispatch<MsgStream, H, InBody, OutBody>(
+pub fn dispatch<MsgStream, H, Body>(
     messages: MsgStream,
     handler: H,
 ) -> (
-    Client<OutBody, InBody>,
-    impl Stream<Item = Result<Message<OutBody>, Error>>,
+    Client<Body>,
+    impl Stream<Item = Result<Message<Body>, Error>>,
 )
 where
-    MsgStream: TryStream<Ok = Message<InBody>>,
-    MsgStream::Error: std::error::Error + Sync + Send + 'static,
-    H: Handler<InBody, Reply = OutBody>,
-    H::Error: std::error::Error + Sync + Send + 'static,
-    InBody: Send,
-    OutBody: Send,
+    MsgStream: TryStream<Ok = Message<Body>>,
+    MsgStream::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
+    H: Handler<Body>,
+    H::Error: std::string::ToString,
 {
-    let messages = messages.into_stream().map_err(Error::other).fuse();
+    let messages = messages
+        .into_stream()
+        .map_err(|err| Error::LinkLost(err.into()))
+        .fuse();
     let id_factory = SharedIdFactory::new();
     let (client, mut client_requests) = client::pair(id_factory, 1);
     let outgoing = stream! {
@@ -88,13 +89,13 @@ where
                                 server_calls.push(id, address, call_future);
                             }
                             Message::Post { address, value, .. } => {
-                                let _res: Result<_, _> = handler.oneway(address, Oneway::Post(value)).await;
+                                handler.oneway(address, Oneway::Post(value)).await;
                             }
                             Message::Event { address, value, .. } => {
-                                let _res: Result<_, _> = handler.oneway(address, Oneway::Event(value)).await;
+                                handler.oneway(address, Oneway::Event(value)).await;
                             },
                             Message::Capabilities { address, capabilities, .. } => {
-                                let _res: Result<_, _> = handler.oneway(address, Oneway::Capabilities(capabilities)).await;
+                                handler.oneway(address, Oneway::Capabilities(capabilities)).await;
                             },
                             Message::Cancel { call_id, .. } => {
                                 server_calls.cancel(&call_id);
@@ -109,7 +110,7 @@ where
                                 client_requests.dispatch_response(id, Response::Canceled);
                             },
                         },
-                        Err(err) => yield Err(Error::other(err)),
+                        Err(err) => yield Err(err),
                     }
                 }
                 Some(message) = server_calls.next(), if !server_calls.is_terminated() => {
@@ -127,21 +128,17 @@ where
     (client, outgoing)
 }
 
-pub fn start<MsgStream, MsgSink, H, ReadBody, WriteBody>(
+pub fn start<MsgStream, MsgSink, H, Body>(
     messages_stream: MsgStream,
     messages_sink: MsgSink,
     handler: H,
-) -> (
-    Client<WriteBody, ReadBody>,
-    impl Future<Output = Result<(), Error>>,
-)
+) -> (Client<Body>, impl Future<Output = Result<(), Error>>)
 where
-    MsgStream: Stream<Item = Result<Message<ReadBody>, Error>>,
-    MsgSink: Sink<Message<WriteBody>, Error = Error>,
-    H: Handler<ReadBody, Reply = WriteBody>,
-    H::Error: std::error::Error + Sync + Send + 'static,
-    ReadBody: Send,
-    WriteBody: Send,
+    MsgStream: TryStream<Ok = Message<Body>>,
+    MsgStream::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
+    MsgSink: Sink<Message<Body>, Error = Error>,
+    H: Handler<Body>,
+    H::Error: std::string::ToString,
 {
     let (client, outgoing_messages) = dispatch(messages_stream, handler);
     let connection = outgoing_messages.forward(messages_sink.sink_err_into());

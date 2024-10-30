@@ -1,108 +1,114 @@
 use crate::{
     error::Error,
-    object::{self, Object},
-    service::{self, Info},
-    session,
+    messaging,
+    object::{self, Object, ObjectExt},
+    service, session,
+    value::{
+        object::{MetaMethod, MetaObject},
+        ActionId, Reflect, ServiceId, Value,
+    },
 };
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
-use qi_value::{
-    object::{MemberIdent, MetaMethod, MetaObject},
-    ActionId, IntoValue, Reflect, ServiceId,
-};
 
 pub(super) const SERVICE_NAME: &str = "ServiceDirectory";
 const SERVICE_ID: ServiceId = ServiceId(1);
 
 #[async_trait]
-pub trait ServiceDirectory {
-    async fn services(&self) -> Result<Vec<Info>, Error>;
-    async fn service(&self, name: &str) -> Result<Info, Error>;
-    async fn register_service(&self, info: &Info) -> Result<ServiceId, Error>;
+pub trait ServiceDirectory: Object {
+    async fn services(&self) -> Result<Vec<service::Info>, Error>;
+    async fn service(&self, name: &str) -> Result<service::Info, Error>;
+    async fn register_service(&self, info: &service::Info) -> Result<ServiceId, Error>;
     async fn unregister_service(&self, id: ServiceId) -> Result<(), Error>;
     async fn service_ready(&self, id: ServiceId) -> Result<(), Error>;
-    async fn update_service_info(&self, info: &Info) -> Result<(), Error>;
+    async fn update_service_info(&self, info: &service::Info) -> Result<(), Error>;
 }
 
-#[derive(Clone, Debug)]
-pub(super) struct Client {
-    object: object::Client,
+pub struct Client<Body>(object::Client<Body>);
+
+impl<Body> Client<Body> {
+    pub(super) fn new(session: session::Session<Body>) -> Self {
+        Self(object::Client::new(
+            SERVICE_ID,
+            service::MAIN_OBJECT_ID,
+            object::Uid::default(),
+            Meta::get().object.clone(),
+            session,
+        ))
+    }
 }
 
-impl Client {
-    pub(super) fn new(session: session::Session) -> Self {
-        Self {
-            object: object::Client::new(
-                SERVICE_ID,
-                service::MAIN_OBJECT_ID,
-                object::Uid::default(),
-                Meta::get().object.clone(),
-                session,
-            ),
-        }
+impl<Body> Clone for Client<Body> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<Body> std::fmt::Debug for Client<Body> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Client").field(&self.0).finish()
     }
 }
 
 #[async_trait]
-impl ServiceDirectory for Client {
-    async fn services(&self) -> Result<Vec<Info>, Error> {
-        Ok(self
-            .object
-            .meta_call(MemberIdent::Id(Meta::get().services), ().into_value())
-            .await?
-            .cast_into()?)
+impl<Body> Object for Client<Body>
+where
+    Body: messaging::Body + Send,
+    Body::Error: Send + Sync + 'static,
+{
+    fn meta(&self) -> &MetaObject {
+        self.0.meta()
     }
 
-    async fn service(&self, name: &str) -> Result<Info, Error> {
-        Ok(self
-            .object
-            .meta_call(MemberIdent::Id(Meta::get().service), name.into_value())
-            .await?
-            .cast_into()?)
+    async fn meta_call(
+        &self,
+        ident: object::MemberIdent,
+        args: Value<'_>,
+    ) -> Result<Value<'static>, Error> {
+        self.0.meta_call(ident, args).await
     }
 
-    async fn register_service(&self, info: &Info) -> Result<ServiceId, Error> {
-        Ok(self
-            .object
-            .meta_call(
-                MemberIdent::Id(Meta::get().register_service),
-                info.into_value(),
-            )
-            .await?
-            .cast_into()?)
+    async fn meta_post(&self, ident: object::MemberIdent, value: Value<'_>) {
+        self.0.meta_post(ident, value).await
+    }
+
+    async fn meta_event(&self, ident: object::MemberIdent, value: Value<'_>) {
+        self.0.meta_event(ident, value).await
+    }
+
+    fn uid(&self) -> object::Uid {
+        self.0.uid()
+    }
+}
+
+#[async_trait]
+impl<Body> ServiceDirectory for Client<Body>
+where
+    Body: messaging::Body + Send,
+    Body::Error: Send + Sync + 'static,
+{
+    async fn services(&self) -> Result<Vec<service::Info>, Error> {
+        self.0.call(Meta::get().services, ()).await
+    }
+
+    async fn service(&self, name: &str) -> Result<service::Info, Error> {
+        self.0.call(Meta::get().service, name).await
+    }
+
+    async fn register_service(&self, info: &service::Info) -> Result<ServiceId, Error> {
+        self.0.call(Meta::get().register_service, info).await
     }
 
     async fn unregister_service(&self, id: ServiceId) -> Result<(), Error> {
-        Ok(self
-            .object
-            .meta_call(
-                MemberIdent::Id(Meta::get().unregister_service),
-                id.into_value(),
-            )
-            .await?
-            .cast_into()?)
+        self.0.call(Meta::get().unregister_service, id).await
     }
 
     async fn service_ready(&self, id: ServiceId) -> Result<(), Error> {
-        Ok(self
-            .object
-            .meta_call(
-                MemberIdent::Id(Meta::get().service_ready),
-                id.into_value(),
-            )
-            .await?
-            .cast_into()?)
+        self.0.call(Meta::get().service_ready, id).await
     }
 
-    async fn update_service_info(&self, info: &Info) -> Result<(), Error> {
-        Ok(self
-            .object
-            .meta_call(
-                MemberIdent::Id(Meta::get().update_service_info),
-                info.into_value(),
-            )
-            .await?
-            .cast_into()?)
+    async fn update_service_info(&self, info: &service::Info) -> Result<(), Error> {
+        self.0.call(Meta::get().update_service_info, info).await
     }
 }
 
@@ -134,7 +140,7 @@ impl Meta {
                 let mut builder = MetaMethod::builder(service);
                 builder.set_name("service");
                 builder.parameter(0).set_type(<&str>::ty());
-                builder.return_value().set_type(Info::ty());
+                builder.return_value().set_type(service::Info::ty());
                 builder.build()
             });
             // Method: services
@@ -142,7 +148,7 @@ impl Meta {
                 services = method_id.next().unwrap();
                 let mut builder = MetaMethod::builder(services);
                 builder.set_name("services");
-                builder.return_value().set_type(Vec::<Info>::ty());
+                builder.return_value().set_type(Vec::<service::Info>::ty());
                 builder.build()
             });
             // Method: register_service
@@ -150,7 +156,7 @@ impl Meta {
                 register_service = method_id.next().unwrap();
                 let mut builder = MetaMethod::builder(register_service);
                 builder.set_name("registerService");
-                builder.parameter(0).set_type(Info::ty());
+                builder.parameter(0).set_type(service::Info::ty());
                 builder.return_value().set_type(ServiceId::ty());
                 builder.build()
             });
@@ -175,7 +181,7 @@ impl Meta {
                 update_service_info = method_id.next().unwrap();
                 let mut builder = MetaMethod::builder(update_service_info);
                 builder.set_name("updateServiceInfo");
-                builder.parameter(0).set_type(Info::ty());
+                builder.parameter(0).set_type(service::Info::ty());
                 builder.build()
             });
             let object = builder.build();

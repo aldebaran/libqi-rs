@@ -69,15 +69,13 @@ impl Default for Capabilities {
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, thiserror::Error)]
 #[error("expected key \"{0}\" to have value \"{1}\"")]
-pub(crate) struct KeyValueExpectError<T>(String, T);
+pub(crate) struct KeyValueExpectError(String, bool);
 
 /// Checks that the capabilities have the required values that are only supported by this implementation.
 ///
 /// This implementation does not yet handle all the possible effects of each capability cases. This function
 /// ensures that the capabilities have the only values that are handle at the moment.
-pub(crate) fn check_required(
-    map: &CapabilitiesMap,
-) -> Result<Capabilities, KeyValueExpectError<bool>> {
+pub(crate) fn check_required(map: &CapabilitiesMap) -> Result<Capabilities, KeyValueExpectError> {
     let capabilities = Capabilities::from_map(map);
 
     // TODO: Implement capabilities so that this function always succeeds, so that we may remove it.

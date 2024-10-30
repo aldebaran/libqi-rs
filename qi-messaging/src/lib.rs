@@ -54,8 +54,8 @@ pub mod message;
 mod server;
 
 pub use self::{
-    address::Address,
-    body::BodyBuf,
+    address::{Address, Error as AddressError},
+    body::Body,
     client::{Client, WeakClient},
     error::Error,
     handler::Handler,

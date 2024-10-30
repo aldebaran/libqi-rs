@@ -46,17 +46,14 @@ pub(super) fn state_done_map(mut capabilities: CapabilitiesMap) -> CapabilitiesM
     capabilities
 }
 
-pub(super) fn extract_state_result(capabilities: &mut CapabilitiesMap) -> Result<(), Error> {
+pub(super) fn extract_state_result(capabilities: &mut CapabilitiesMap) -> Result<(), StateError> {
     let Dynamic(state) = capabilities
         .remove(STATE_KEY)
-        .ok_or_else(|| Error::StateValue("missing".to_owned()))?
+        .ok_or_else(|| StateError::Missing)?
         .clone();
     match state {
         Value::UInt32(STATE_DONE) => Ok(()),
-        _ => Err(Error::StateValue(format!(
-            "expected a \"Done\" state value of \"{}u32\", found \"{}\" instead",
-            STATE_DONE, state
-        ))),
+        _ => Err(StateError::UnknownValue(state.into_owned())),
     }
 }
 
@@ -68,14 +65,23 @@ pub enum Error {
     #[error("token value error: {0}")]
     TokenValue(String),
 
-    #[error("state value error: {0}")]
-    StateValue(String),
-
     #[error("the authentication attempt must be continued, but authentication continuation is unsupported")]
     UnsupportedContinue,
 
     #[error("the authentication attempt was refused, reason is: {0}")]
     Refused(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum StateError {
+    #[error("the state value is missing")]
+    Missing,
+
+    #[error(
+        "expected a \"Done\" state value of \"{}u32\", found \"{0}\" instead",
+        STATE_DONE
+    )]
+    UnknownValue(Value<'static>),
 }
 
 macro_rules! declare_prefixed_key {

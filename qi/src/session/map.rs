@@ -1,7 +1,7 @@
 use crate::{
     messaging::{self, Address},
-    session::{self, authentication, Session, WeakSession},
-    value::BinaryValue,
+    session::{self, authentication, target::Kind, Session, WeakSession},
+    Error,
 };
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use std::{collections::HashMap, future::Future, sync::Arc};
@@ -10,23 +10,22 @@ use tokio::{
     sync::{mpsc, Mutex},
 };
 
-/// A session cache that handles session references and keeps track of existing
+/// A session map that handles session targets and keeps track of existing
 /// sessions to a space services.
 ///
 /// It creates new sessions that are associated with services and register them
-/// for further retrieval, enabling usage of service session references.
-#[derive(Debug)]
-pub(super) struct SessionFactory<Handler> {
+/// for further retrieval, enabling usage of service session targets.
+pub(crate) struct Map<Body, Handler> {
     handler: Handler,
 
     connections: mpsc::Sender<BoxFuture<'static, String>>,
 
     /// The list of existing sessions with the associated service name.
-    sessions: Arc<Mutex<HashMap<String, WeakSession>>>,
+    sessions: Arc<Mutex<HashMap<String, WeakSession<Body>>>>,
 }
 
-impl<Handler> SessionFactory<Handler> {
-    pub(super) fn new(handler: Handler) -> (Self, impl Future<Output = ()>) {
+impl<Body, Handler> Map<Body, Handler> {
+    pub(crate) fn new(handler: Handler) -> (Self, impl Future<Output = ()>) {
         let sessions = Default::default();
         let (connections_sender, mut connections_receiver) = mpsc::channel(1);
         (
@@ -52,7 +51,7 @@ impl<Handler> SessionFactory<Handler> {
         )
     }
 
-    async fn existing_service_session(&self, name: &str) -> Option<Session> {
+    async fn get(&self, name: &str) -> Option<Session<Body>> {
         let mut sessions = self.sessions.lock().await;
         match sessions.get(name) {
             Some(weak) => {
@@ -67,36 +66,39 @@ impl<Handler> SessionFactory<Handler> {
     }
 }
 
-impl<Handler> SessionFactory<Handler>
+impl<Body, Handler> Map<Body, Handler>
 where
-    Handler: messaging::Handler<BinaryValue, Reply = BinaryValue> + Clone + Send + Sync + 'static,
+    Handler: messaging::Handler<Body> + Clone + Send + Sync + 'static,
+    Handler::Error: std::error::Error + Send + Sync + 'static,
+    Body: messaging::Body + Send + 'static,
+    Body::Error: Send + Sync + 'static,
 {
-    /// Gets a session to the given references, using the service name to store
+    /// Gets a session to the given targets, using the service name to store
     /// any created session for further retrieval.
-    pub(super) async fn establish<'r, R>(
+    pub(crate) async fn get_or_create<Targets>(
         &self,
         service_name: &str,
-        references: R,
+        targets: Targets,
         credentials: authentication::Parameters<'_>,
-    ) -> Result<Session, Error>
+    ) -> Result<Session<Body>, Error>
     where
-        R: IntoIterator<Item = &'r session::Reference>,
+        for<'t> &'t Targets: IntoIterator<Item = &'t session::Target>,
     {
-        let references = references.into_iter();
+        let targets = targets.into_iter();
         let mut connection_errors = Vec::with_capacity({
-            let (lower_bound, upper_bound) = references.size_hint();
+            let (lower_bound, upper_bound) = targets.size_hint();
             upper_bound.unwrap_or(lower_bound)
         });
-        for reference in references {
-            match reference.kind() {
-                session::reference::Kind::Service(service) => {
-                    if let Some(session) = self.existing_service_session(service).await {
+        for target in targets {
+            match target.kind() {
+                Kind::Service(service) => {
+                    if let Some(session) = self.get(service).await {
                         return Ok(session);
                     }
                 }
-                session::reference::Kind::Endpoint(address) => {
+                Kind::Endpoint(address) => {
                     match self
-                        .connect_service_session(service_name, *address, credentials.clone())
+                        .create(service_name, *address, credentials.clone())
                         .await
                     {
                         Err(err) => connection_errors.push(ConnectionError {
@@ -108,18 +110,18 @@ where
                 }
             }
         }
-        Err(ServiceUnreachableError(connection_errors).into())
+        Err(UnreachableServiceError(service_name.to_owned(), connection_errors).into())
     }
 
     /// Opens a new channel to the address and connects a session client over
     /// it. The service name is used to register the session for this service,
-    /// so that it may be reused for future service relative session references.
-    async fn connect_service_session(
+    /// so that it may be reused for future service relative session targets.
+    async fn create(
         &self,
         service_name: &str,
         address: messaging::Address,
         credentials: authentication::Parameters<'_>,
-    ) -> Result<Session, Error> {
+    ) -> Result<Session<Body>, Error> {
         let (session, connection) =
             Session::connect(address, credentials, self.handler.clone()).await?;
         let service_name = service_name.to_owned();
@@ -127,7 +129,8 @@ where
             .lock()
             .await
             .insert(service_name.clone(), session.downgrade());
-        self.connections
+        let _res = self
+            .connections
             .send(
                 async move {
                     let _res = connection.await;
@@ -135,40 +138,49 @@ where
                 }
                 .boxed(),
             )
-            .await
-            .map_err(|_err| Error::ExecutorShutdown)?;
+            .await;
         Ok(session)
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub(super) enum Error {
-    #[error(transparent)]
-    ServiceUnreachable(#[from] ServiceUnreachableError),
-
-    #[error("the connection executor is shutting down")]
-    ExecutorShutdown,
+impl<Body, Handler> std::fmt::Debug for Map<Body, Handler>
+where
+    Handler: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Map")
+            .field("handler", &self.handler)
+            .field("connections", &self.connections)
+            .field("sessions", &self.sessions)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
-struct ServiceUnreachableError(Vec<ConnectionError>);
+struct UnreachableServiceError(String, Vec<ConnectionError>);
 
-impl std::fmt::Display for ServiceUnreachableError {
+impl std::fmt::Display for UnreachableServiceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("could not reach service, ")?;
+        write!(f, "could not reach service \"{}\", ", self.0)?;
         if self.0.is_empty() {
             f.write_str("no connection was tried")
         } else {
             f.write_str("tried the following connections: [")?;
-            for error in &self.0 {
-                write!(f, "{} => {}", error.address, error.source);
+            for error in &self.1 {
+                write!(f, "{} => {}", error.address, error.source)?;
             }
             f.write_str("]")
         }
     }
 }
 
-impl std::error::Error for ServiceUnreachableError {}
+impl std::error::Error for UnreachableServiceError {}
+
+impl From<UnreachableServiceError> for Error {
+    fn from(err: UnreachableServiceError) -> Self {
+        Self::Other(err.into())
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("could not connect to address \"{address}\"")]

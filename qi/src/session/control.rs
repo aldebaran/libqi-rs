@@ -2,11 +2,14 @@ use super::{
     authentication::{self, Authenticator},
     capabilities,
 };
-use crate::messaging::{self, CapabilitiesMap};
+use crate::{
+    error::{FormatError, NoHandlerError},
+    messaging::{self, CapabilitiesMap},
+    Error,
+};
 use futures::{future, FutureExt, TryFutureExt};
 use messaging::message;
 use qi_value::{ActionId, Dynamic, ObjectId, ServiceId, Value};
-use serde::Deserialize;
 use std::{collections::HashMap, future::Future, sync::Arc};
 use tokio::sync::watch;
 
@@ -31,28 +34,27 @@ impl Controller {
     fn authenticate(
         &self,
         request: CapabilitiesMap<'_>,
-    ) -> Result<CapabilitiesMap<'static>, Error> {
+    ) -> Result<CapabilitiesMap<'static>, AuthenticateClientError> {
         let shared_capabilities = capabilities::shared_with_local(&request);
         capabilities::check_required(&shared_capabilities)?;
         let parameters = request.into_iter().map(|(k, v)| (k, v.0)).collect();
-        self.authenticator.verify(parameters)?;
+        self.authenticator
+            .verify(parameters)
+            .map_err(AuthenticateClientError::AuthenticationVerification)?;
         self.capabilities
             .send_replace(Some(shared_capabilities.clone()));
         self.remote_authorized.send_replace(true);
         Ok(authentication::state_done_map(shared_capabilities))
     }
 
-    pub(super) async fn authenticate_to_remote<T, R>(
+    pub(super) async fn authenticate_to_server<'r, Body>(
         &self,
-        client: &mut messaging::Client<T, R>,
+        client: &mut messaging::Client<Body>,
         parameters: HashMap<String, Value<'_>>,
     ) -> Result<(), Error>
     where
-        T: messaging::BodyBuf + Send,
-        T::Error: Into<Error>,
-        R: messaging::BodyBuf + Send,
-        R::Error: Into<Error>,
-        for<'de> <R::Deserializer<'de> as serde::Deserializer<'de>>::Error: Into<R::Error>,
+        Body: messaging::Body + Send,
+        Body::Error: Send + Sync + 'static,
     {
         self.capabilities.send_replace(None); // Reset the capabilities
         let mut request = capabilities::local_map().clone();
@@ -61,17 +63,19 @@ impl Controller {
                 .into_iter()
                 .map(|(k, v)| (k, Dynamic(v.into_owned()))),
         );
-        let mut authenticate_result = client
+        let authenticate_result = client
             .call(
                 AUTHENTICATE_ADDRESS,
-                T::serialize(&request).map_err(Into::into)?,
+                Body::serialize(&request).map_err(FormatError::ArgumentsSerialization)?,
             )
             .await?;
-        let mut shared_capabilities = Deserialize::deserialize(authenticate_result.deserializer())
-            .map_err(Into::into)
-            .map_err(Into::into)?;
-        authentication::extract_state_result(&mut shared_capabilities)?;
-        capabilities::check_required(&shared_capabilities)?;
+        let mut shared_capabilities = authenticate_result
+            .deserialize()
+            .map_err(FormatError::MethodReturnValueDeserialization)?;
+        authentication::extract_state_result(&mut shared_capabilities)
+            .map_err(AuthenticateToServerError::ResultState)?;
+        capabilities::check_required(&shared_capabilities)
+            .map_err(AuthenticateToServerError::UnexpectedServerCapabilityValue)?;
         self.capabilities.send_replace(Some(shared_capabilities));
         Ok(())
     }
@@ -93,16 +97,15 @@ pub(super) struct Control<H> {
     pub(super) handler: ControlledHandler<H>,
 }
 
-pub(super) fn make<Handler, Auth, In, Out>(
+pub(super) fn make<Handler, Auth, Body>(
     handler: Handler,
     authenticator: Auth,
     remote_authorized: bool,
 ) -> Control<Handler>
 where
-    Handler: messaging::Handler<In, Reply = Out, Error = Error>,
+    Handler: messaging::Handler<Body>,
     Auth: Authenticator + Send + Sync + 'static,
-    In: messaging::BodyBuf<Error = Error>,
-    Out: messaging::BodyBuf<Error = Error>,
+    Body: messaging::Body,
 {
     let (capabilities_sender, capabilities_receiver) = watch::channel(Default::default());
     let (remote_authorized_sender, remote_authorized_receiver) = watch::channel(remote_authorized);
@@ -128,54 +131,81 @@ pub(super) struct ControlledHandler<H> {
     controller: Arc<Controller>,
 }
 
-impl<S, In, Out> messaging::Handler<In> for ControlledHandler<S>
+impl<Handler, Body> messaging::Handler<Body> for ControlledHandler<Handler>
 where
-    S: messaging::Handler<In, Reply = Out, Error = Error> + Sync,
-    In: messaging::BodyBuf<Error = Error> + Send,
-    for<'de> <In::Deserializer<'de> as serde::Deserializer<'de>>::Error: Into<In::Error>,
-    Out: messaging::BodyBuf<Error = Error> + Send,
+    Handler: messaging::Handler<Body> + Sync,
+    Handler::Error: std::error::Error + Send + Sync + 'static,
+    Body: messaging::Body + Send,
+    Body::Error: Send + Sync + 'static,
 {
-    type Reply = Out;
     type Error = Error;
 
     fn call(
         &self,
         address: message::Address,
-        mut value: In,
-    ) -> impl Future<Output = Result<Out, Error>> + Send {
+        value: Body,
+    ) -> impl Future<Output = Result<Body, Self::Error>> + Send {
         if is_control_address(address) {
             let controller = Arc::clone(&self.controller);
             future::ready(
-                Deserialize::deserialize(value.deserializer())
+                value
+                    .deserialize()
+                    .map_err(FormatError::ArgumentsDeserialization)
                     .map_err(Into::into)
-                    .and_then(|request| controller.authenticate(request))
-                    .and_then(|result| Out::serialize(&result)),
+                    .and_then(move |request| controller.authenticate(request).map_err(Into::into))
+                    .and_then(|result| {
+                        Body::serialize(&result)
+                            .map_err(FormatError::MethodReturnValueSerialization)
+                            .map_err(Into::into)
+                    }),
             )
             .left_future()
         } else if *self.controller.remote_authorized.borrow() {
-            self.inner.call(address, value).err_into().right_future()
+            self.inner
+                .call(address, value)
+                .map_err(Into::into)
+                .map_err(Error::Other)
+                .right_future()
         } else {
-            future::err(Error::NoMessageHandler(message::Type::Call, address)).left_future()
+            future::err(NoHandlerError(message::Type::Call, address).into()).left_future()
         }
     }
 
-    async fn oneway(
-        &self,
-        address: message::Address,
-        request: message::Oneway<In>,
-    ) -> Result<(), Error> {
+    async fn oneway(&self, address: message::Address, request: message::Oneway<Body>) {
         if is_control_address(address) {
             // TODO: Handle capabilities request ?
-            Ok(())
         } else if *self.controller.remote_authorized.borrow() {
             self.inner.oneway(address, request).await
-        } else {
-            Err(Error::NoMessageHandler(request.ty(), address))
         }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(super) enum Error {
-    
+pub(super) enum AuthenticateClientError {
+    #[error("unexpected capability value")]
+    UnexpectedclientCapabilityValue(#[from] capabilities::KeyValueExpectError),
+
+    #[error("failure to verify authentication request")]
+    AuthenticationVerification(#[source] authentication::Error),
+}
+
+impl From<AuthenticateClientError> for Error {
+    fn from(err: AuthenticateClientError) -> Self {
+        Error::Other(err.into())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum AuthenticateToServerError {
+    #[error("the authentication state sent back by the server is invalid")]
+    ResultState(#[from] authentication::StateError),
+
+    #[error("the server sent an unexpected capability value")]
+    UnexpectedServerCapabilityValue(#[from] capabilities::KeyValueExpectError),
+}
+
+impl From<AuthenticateToServerError> for Error {
+    fn from(err: AuthenticateToServerError) -> Self {
+        Error::Other(err.into())
+    }
 }

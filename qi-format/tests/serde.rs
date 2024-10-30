@@ -1,17 +1,18 @@
-use bytes::Bytes;
 use pretty_assertions::assert_eq;
-use qi_format::{from_buf, to_bytes};
+use qi_format::{from_slice, to_bytes};
 use qi_value::{
-    object::{MetaMethod, MetaObject, MetaProperty, MetaSignal, Object, ObjectUid},
-    ty, ActionId, Dynamic, Map, ObjectId, Reflect, ServiceId, Signature, Type,
+    object::{MetaMethod, MetaObject, MetaProperty, MetaSignal, Object},
+    os, ty, ActionId, Dynamic, Map, ObjectId, Reflect, ServiceId, Signature, Type,
 };
-use std::collections::BTreeMap;
+use serde_with::serde_as;
+use std::{collections::BTreeMap, str::FromStr};
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+#[serde_as]
 struct S0 {
     u: (),
     t: (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64),
-    #[serde(with = "serde_bytes")]
+    #[serde_as(as = "Bytes")]
     r: Vec<u8>,
     o: std::option::Option<bool>,
     s: S1,
@@ -26,22 +27,8 @@ struct S1(std::string::String, std::string::String);
 struct Serializable(S0);
 
 #[test]
-fn test_to_from_value_serializable() {
-    let sample_in = Serializable(S0 {
-        u: (),
-        t: (-8, 8, -16, 16, -32, 32, -64, 64, 32.32, 64.64),
-        r: vec![51, 52, 53, 54],
-        o: Some(false),
-        s: S1("bananas".to_string(), "oranges".to_string()),
-        l: vec!["cookies".to_string(), "muffins".to_string()],
-        m: {
-            let mut m = BTreeMap::new();
-            m.insert(1, "hello".to_string());
-            m.insert(2, "world".to_string());
-            m
-        },
-    });
-    let expected_value = Bytes::from_static(&[
+fn test_serializable() {
+    let value_in = &[
         0xf8, 0x08, 0xf0, 0xff, 0x10, 0x00, 0xe0, 0xff, 0xff, 0xff, 0x20, 0x00, 0x00, 0x00, 0xc0,
         0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0xae, 0x47, 0x01, 0x42, 0x29, 0x5c, 0x8f, 0xc2, 0xf5, 0x28, 0x50, 0x40, // t
@@ -53,30 +40,46 @@ fn test_to_from_value_serializable() {
         b'f', b'f', b'i', b'n', b's', // l
         2, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, b'h', b'e', b'l', b'l', b'o', 2, 0, 0, 0, 5, 0, 0, 0,
         b'w', b'o', b'r', b'l', b'd', // m
-    ]);
-    let actual_value = to_bytes(&sample_in).unwrap();
-    assert_eq!(actual_value, expected_value);
-    let sample_out: Serializable = from_buf(actual_value).unwrap();
-    assert_eq!(sample_in, sample_out);
+    ][..];
+    let s: Serializable = from_slice(value_in).unwrap();
+    assert_eq!(
+        s,
+        Serializable(S0 {
+            u: (),
+            t: (-8, 8, -16, 16, -32, 32, -64, 64, 32.32, 64.64),
+            r: vec![51, 52, 53, 54],
+            o: Some(false),
+            s: S1("bananas".to_string(), "oranges".to_string()),
+            l: vec!["cookies".to_string(), "muffins".to_string()],
+            m: {
+                let mut m = BTreeMap::new();
+                m.insert(1, "hello".to_string());
+                m.insert(2, "world".to_string());
+                m
+            },
+        })
+    );
+    let value_out = to_bytes(&s).unwrap();
+    assert_eq!(value_in, value_out);
 }
 
 #[test]
-fn test_dynamic_to_from_value() {
-    let value_in = Bytes::from_static(&[
+fn test_dynamic() {
+    let value_in = &[
         0x01, 0x00, 0x00, 0x00, 0x73, 0x1a, 0x00, 0x00, 0x00, 0x54, 0x68, 0x65, 0x20, 0x72, 0x6f,
         0x62, 0x6f, 0x74, 0x20, 0x69, 0x73, 0x20, 0x6e, 0x6f, 0x74, 0x20, 0x6c, 0x6f, 0x63, 0x61,
         0x6c, 0x69, 0x7a, 0x65, 0x64,
-    ]);
-    let dynamic: Dynamic<String> = from_buf(value_in.as_ref()).unwrap();
+    ][..];
+    let dynamic: Dynamic<String> = from_slice(value_in).unwrap();
     assert_eq!(dynamic, Dynamic("The robot is not localized".to_owned()));
     let value_out = to_bytes(&dynamic).unwrap();
     assert_eq!(value_in, value_out);
 }
 
 #[test]
-fn test_object_to_from_value() {
+fn test_object() {
     // An Object taken from a TCP dump of libqi tests.
-    let value_in = Bytes::from_static(&[
+    let value_in = &[
         0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
         0x00, 0x4c, 0x0d, 0x00, 0x00, 0x00, 0x72, 0x65, 0x67, 0x69, 0x73, 0x74, 0x65, 0x72, 0x45,
         0x76, 0x65, 0x6e, 0x74, 0x05, 0x00, 0x00, 0x00, 0x28, 0x49, 0x49, 0x4c, 0x29, 0x00, 0x00,
@@ -180,12 +183,12 @@ fn test_object_to_from_value() {
         0x00, 0x00, 0x00, 0x00, // metaobject
         0x02, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x0b, 0xf8, 0xf7, 0x86, 0x6b, 0x07, 0x04,
         0x05, 0xd6, 0x3f, 0xe4, 0x39, 0xf9, 0x47, 0x7e, 0x96, 0xfc, 0x2f, 0x2c, 0x3d,
-    ]);
+    ][..];
 
-    let object_in: Object = from_buf(value_in).unwrap();
+    let object: Object = from_slice(value_in).unwrap();
 
     assert_eq!(
-        object_in,
+        object,
         Object {
             meta_object: MetaObject {
                 methods: Map::from_iter([
@@ -477,11 +480,29 @@ fn test_object_to_from_value() {
             },
             service_id: ServiceId(2),
             object_id: ObjectId(4),
-            object_uid: ObjectUid::from_digest([
-                0x0bf8f786, 0x6b070405, 0xd63fe439, 0xf9477e96, 0xfc2f2c3d,
-            ]),
+            object_uid: [
+                0x0b, 0xf8, 0xf7, 0x86, 0x6b, 0x07, 0x04, 0x05, 0xd6, 0x3f, 0xe4, 0x39, 0xf9, 0x47,
+                0x7e, 0x96, 0xfc, 0x2f, 0x2c, 0x3d
+            ]
+            .into(),
         }
     );
-    let object_out = from_buf(to_bytes(&object_in).unwrap()).unwrap();
-    assert_eq!(object_in, object_out);
+    let value_out = to_bytes(&object).unwrap();
+    assert_eq!(value_in, value_out);
+}
+
+#[test]
+fn test_machine_id() {
+    let value_in = &[
+        0x24, 0x00, 0x00, 0x00, 0x39, 0x61, 0x36, 0x35, 0x62, 0x35, 0x36, 0x65, 0x2d, 0x63, 0x33,
+        0x64, 0x33, 0x2d, 0x34, 0x34, 0x38, 0x35, 0x2d, 0x38, 0x39, 0x32, 0x34, 0x2d, 0x36, 0x36,
+        0x31, 0x62, 0x30, 0x33, 0x36, 0x32, 0x30, 0x32, 0x62, 0x33,
+    ][..];
+    let machine_id: os::MachineId = from_slice(value_in).unwrap();
+    assert_eq!(
+        machine_id,
+        os::MachineId::from_str("9a65b56e-c3d3-4485-8924-661b036202b3").unwrap(),
+    );
+    let value_out = to_bytes(&machine_id).unwrap();
+    assert_eq!(value_out, value_in);
 }

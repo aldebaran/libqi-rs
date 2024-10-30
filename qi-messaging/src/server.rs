@@ -111,6 +111,8 @@ where
                         address: self.address,
                         value: reply,
                     }),
+                    // TODO: Check if error corresponds to a "cancelled" request, so that we may
+                    // make a Canceled message instead.
                     Err(error) => Poll::Ready(Message::Error {
                         id: self.id,
                         address: self.address,

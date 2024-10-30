@@ -42,21 +42,26 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
+mod error;
+mod never;
 pub mod node;
 pub mod object;
-pub mod os;
 pub mod service;
-pub mod service_directory;
+pub(crate) mod service_directory;
 pub mod session;
 pub mod signal;
 pub mod value;
 
-use self::value::BinaryValue;
 pub use self::{
+    error::{BoxError, Error},
+    never::Never,
     node::Node,
-    object::{BoxObject, Object, ObjectExt},
+    object::{Object, ObjectExt},
+    service_directory::ServiceDirectory,
     value::Value,
 };
 pub use qi_format as format;
 pub use qi_macros::{object, FromValue, IntoValue, Reflect, ToValue, Valuable};
 pub use qi_messaging::{self as messaging, Address};
+
+pub type Result<T> = std::result::Result<T, Error>;

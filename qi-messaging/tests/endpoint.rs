@@ -100,8 +100,8 @@ fn client_call_error() {
 
     assert!(call.is_woken());
     let err = assert_ready_err!(call.poll());
-    assert_matches!(err, Error::Other(err) => {
-        assert_eq!(err.to_string(), "I don't know anyone named Alice");
+    assert_matches!(err, Error::CallError(err) => {
+        assert_eq!(err, "I don't know anyone named Alice");
     });
 }
 
@@ -137,7 +137,7 @@ fn client_call_canceled() {
 
     assert!(call.is_woken());
     let err = assert_ready_err!(call.poll());
-    assert_matches!(err, Error::Canceled);
+    assert_matches!(err, Error::CallCanceled);
 }
 
 #[test]
@@ -492,7 +492,7 @@ fn incoming_messages_error() {
     let err = assert_ready!(outgoing.poll_next())
         .expect("missing error")
         .unwrap_err();
-    assert_matches!(err, Error::Other(err) => {
+    assert_matches!(err, Error::LinkLost(err) => {
         assert_eq!(err.to_string(), "This is a incoming error");
     })
 }
@@ -576,24 +576,17 @@ impl CountedPendingHandler {
 }
 
 impl<'a> Handler<()> for &'a CountedPendingHandler {
-    type Reply = ();
     type Error = Error;
 
     fn call(
         &self,
         _address: message::Address,
         _: (),
-    ) -> impl Future<Output = Result<Self::Reply, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         CountedPendingFuture::new(self.unblock.notified(), Arc::clone(&self.pending_calls))
     }
 
-    async fn oneway(
-        &self,
-        _address: message::Address,
-        _request: message::Oneway<()>,
-    ) -> Result<(), Self::Error> {
-        unimplemented!()
-    }
+    async fn oneway(&self, _address: message::Address, _request: message::Oneway<()>) {}
 }
 
 pin_project! {
@@ -645,29 +638,22 @@ impl DummyHandler {
 
 impl Handler<String> for DummyHandler {
     type Error = Error;
-    type Reply = String;
 
     fn call(
         &self,
         _address: message::Address,
         value: String,
-    ) -> impl Future<Output = Result<Self::Reply, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<String, Self::Error>> + Send {
         async move {
             let name = value
                 .strip_prefix("My name is ")
-                .ok_or(Error::other("not a hello request"))?;
+                .ok_or(Error::CallError("not a hello request".to_string()))?;
             Ok(format!("Hello {name}"))
         }
         .boxed()
     }
 
-    async fn oneway(
-        &self,
-        address: message::Address,
-        request: message::Oneway<String>,
-    ) -> Result<(), Self::Error> {
-        self.0
-            .unbounded_send((address, request))
-            .map_err(Error::other)
+    async fn oneway(&self, address: message::Address, request: message::Oneway<String>) {
+        self.0.unbounded_send((address, request)).unwrap()
     }
 }

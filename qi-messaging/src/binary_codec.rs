@@ -43,7 +43,6 @@
 //!  The total header size is therefore 28 bytes.
 
 use crate::{
-    body::BodyBuf,
     message::{Address, Id, Message, MetaData, Type, Version},
     Error,
 };
@@ -54,14 +53,14 @@ use tracing::instrument;
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub struct Encoder;
 
-impl<T> tokio_util::codec::Encoder<Message<T>> for Encoder
+impl<Body> tokio_util::codec::Encoder<Message<Body>> for Encoder
 where
-    T: BodyBuf,
+    Body: crate::Body,
 {
-    type Error = EncodeError<T::Error>;
+    type Error = EncodeError<Body::Error>;
 
     #[instrument(level = "trace", skip_all, err)]
-    fn encode(&mut self, msg: Message<T>, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, msg: Message<Body>, dst: &mut BytesMut) -> Result<(), Self::Error> {
         let (meta, body) = msg.into_parts().map_err(EncodeError::BodyConversion)?;
         let body_data = body.into_data().map_err(EncodeError::BodyConversion)?;
         let body_size = body_data.remaining();
@@ -79,13 +78,13 @@ pub enum EncodeError<E> {
         "message body size {0} cannot be represented as an u32 (the maximum for this system is {})",
         u32::MAX
     )]
-    BodySizeCannotBeRepresentedAsU32Error(usize),
+    BodySizeCannotBeRepresentedAsU32(usize),
 
     #[error("body conversion error")]
     BodyConversion(#[source] E),
 
     #[error(transparent)]
-    IO(#[from] std::io::Error),
+    Write(#[from] std::io::Error),
 }
 
 impl<E> From<EncodeError<E>> for Error
@@ -93,10 +92,7 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     fn from(err: EncodeError<E>) -> Self {
-        match err {
-            EncodeError::IO(io_err) => io_err.into(),
-            _ => Error::other(err),
-        }
+        Self::LinkLost(err.into())
     }
 }
 
@@ -106,10 +102,9 @@ pub struct Decoder<T> {
     phantom: PhantomData<fn() -> T>,
 }
 
-impl<T> Decoder<T>
+impl<Body> Decoder<Body>
 where
-    T: BodyBuf,
-    for<'de> <T::Deserializer<'de> as serde::Deserializer<'de>>::Error: Into<T::Error>,
+    Body: crate::Body,
 {
     pub fn new() -> Self {
         Self {
@@ -123,26 +118,25 @@ where
         meta: &MetaData,
         body_size: usize,
         src: &mut BytesMut,
-    ) -> Result<Option<Message<T>>, DecodeError<T::Error>> {
+    ) -> Result<Option<Message<Body>>, DecodeError<Body::Error>> {
         if src.len() < body_size {
             src.reserve(body_size - src.len());
             return Ok(None);
         }
         let body_bytes = src.split_to(body_size).freeze();
-        let message = T::from_bytes(body_bytes)
+        let message = Body::from_bytes(body_bytes)
             .and_then(|body| Message::from_parts(*meta, body))
             .map_err(DecodeError::BodyConversion)?;
         Ok(Some(message))
     }
 }
 
-impl<T> tokio_util::codec::Decoder for Decoder<T>
+impl<Body> tokio_util::codec::Decoder for Decoder<Body>
 where
-    T: BodyBuf,
-    for<'de> <T::Deserializer<'de> as serde::Deserializer<'de>>::Error: Into<T::Error>,
+    Body: crate::Body,
 {
-    type Item = Message<T>;
-    type Error = DecodeError<T::Error>;
+    type Item = Message<Body>;
+    type Error = DecodeError<Body::Error>;
 
     #[instrument(level = "trace", skip_all, err)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -188,13 +182,20 @@ pub enum DecodeError<E> {
     #[error("body conversion error")]
     BodyConversion(#[source] E),
 
-    #[error("read error")]
-    Read(#[source] std::io::Error),
+    #[error(transparent)]
+    Read(#[from] std::io::Error),
 }
 
-fn decode_header<ErrDeserBody>(
-    src: &mut BytesMut,
-) -> Result<Option<(usize, MetaData)>, DecodeError<ErrDeserBody>> {
+impl<E> From<DecodeError<E>> for Error
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    fn from(err: DecodeError<E>) -> Self {
+        Self::LinkLost(err.into())
+    }
+}
+
+fn decode_header<E>(src: &mut BytesMut) -> Result<Option<(usize, MetaData)>, DecodeError<E>> {
     if src.len() < HEADER_SIZE {
         src.reserve(HEADER_SIZE - src.len());
         return Ok(None);
@@ -217,11 +218,11 @@ fn decode_header<ErrDeserBody>(
     Ok(Some((body_size, meta)))
 }
 
-fn put_header<ErrSerBody>(
+fn put_header<E>(
     meta: MetaData,
     body_size: usize,
     dst: &mut BytesMut,
-) -> Result<(), EncodeError<ErrSerBody>> {
+) -> Result<(), EncodeError<E>> {
     put_magic_cookie(dst);
     put_id(meta.id, dst);
     put_body_size(body_size, dst)?;
@@ -295,7 +296,7 @@ fn put_body_size<ErrSerBody>(
     dst: &mut BytesMut,
 ) -> Result<(), EncodeError<ErrSerBody>> {
     if size > (u32::MAX as usize) {
-        return Err(EncodeError::BodySizeCannotBeRepresentedAsU32Error(size));
+        return Err(EncodeError::BodySizeCannotBeRepresentedAsU32(size));
     }
     let size = size as u32;
     dst.put_u32_le(size);

@@ -1,17 +1,15 @@
 pub use crate::value::ObjectId as Id;
 use crate::{
-    messaging::message,
-    os,
+    error::{FormatError, ValueConversionError},
+    messaging::{self, message},
     session::Session,
-    value::{
-        self, ActionId, Dynamic, FromValue, IntoValue, Reflect, RuntimeReflect, ServiceId, Value,
-    },
+    value::{self, ActionId, Dynamic, FromValue, IntoValue, ServiceId, Value},
+    Error,
 };
 use async_trait::async_trait;
 use sealed::sealed;
-use sha1::{Digest, Sha1};
-use std::borrow::Cow;
-pub use value::object::*;
+use tracing::{info, warn};
+pub use value::object::{Uid, *};
 
 // const ACTION_ID_REGISTER_EVENT: ActionId = ActionId(0);
 // const ACTION_ID_UNREGISTER_EVENT: ActionId = ActionId(1);
@@ -23,6 +21,40 @@ const ACTION_ID_SET_PROPERTY: ActionId = ActionId(6);
 // const ACTION_ID_REGISTER_EVENT_WITH_SIGNATURE: ActionId = ActionId(8);
 pub const ACTION_START_ID: ActionId = ActionId(100);
 
+pub(crate) struct BoxObject(Box<dyn Object + Send + Sync>);
+
+impl BoxObject {
+    pub(crate) fn new<T>(object: T) -> Self
+    where
+        T: Object + Send + Sync + 'static,
+    {
+        Self(Box::new(object))
+    }
+}
+
+impl std::fmt::Debug for BoxObject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("BoxObject").field(self.0.meta()).finish()
+    }
+}
+
+impl std::ops::Deref for BoxObject {
+    type Target = dyn Object + Send + Sync;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl<T> From<T> for BoxObject
+where
+    T: Into<Box<dyn Object + Send + Sync>>,
+{
+    fn from(object: T) -> Self {
+        Self(object.into())
+    }
+}
+
 #[async_trait]
 pub trait Object {
     fn meta(&self) -> &MetaObject;
@@ -30,45 +62,43 @@ pub trait Object {
     async fn meta_call(&self, ident: MemberIdent, args: Value<'_>)
         -> Result<Value<'static>, Error>;
 
-    async fn meta_post(&self, ident: MemberIdent, value: Value<'_>) -> Result<(), Error>;
+    async fn meta_post(&self, ident: MemberIdent, value: Value<'_>);
 
-    async fn meta_event(&self, ident: MemberIdent, value: Value<'_>) -> Result<(), Error>;
+    async fn meta_event(&self, ident: MemberIdent, value: Value<'_>);
 
     fn uid(&self) -> Uid {
         Uid::from_ptr(self)
     }
 }
 
-pub type BoxObject = Box<dyn Object + Send + Sync>;
-
 #[sealed]
 #[async_trait]
 pub trait ObjectExt: Object {
-    async fn call<'t, 'r, R, Ident, T>(&self, ident: Ident, args: T) -> Result<R, Error>
+    async fn call<'a, R, Ident, T>(&self, ident: Ident, args: T) -> Result<R, Error>
     where
         Ident: Into<MemberIdent> + Send,
-        T: IntoValue<'t> + Send,
-        R: FromValue<'r>,
+        T: IntoValue<'a> + Send,
+        R: FromValue<'static>,
     {
         Ok(self
             .meta_call(ident.into(), args.into_value())
             .await?
             .cast_into()
-            .map_err(Error::MethodReturnValue)?)
+            .map_err(ValueConversionError::MethodReturnValue)?)
     }
 
-    async fn property<'r, Ident, R>(&self, ident: Ident) -> Result<R, Error>
+    async fn property<Ident, R>(&self, ident: Ident) -> Result<R, Error>
     where
         Ident: Into<MemberIdent> + Send,
-        R: Reflect + FromValue<'r>,
+        R: for<'r> FromValue<'r>,
     {
         self.call(ACTION_ID_PROPERTY, Dynamic(ident.into())).await
     }
 
-    async fn set_property<'t, Ident, T>(&self, ident: Ident, value: T) -> Result<(), Error>
+    async fn set_property<Ident, T>(&self, ident: Ident, value: T) -> Result<(), Error>
     where
         Ident: Into<MemberIdent> + Send,
-        T: IntoValue<'t> + Send,
+        T: for<'t> IntoValue<'t> + Send,
     {
         self.call(
             ACTION_ID_SET_PROPERTY,
@@ -88,92 +118,24 @@ pub trait ObjectExt: Object {
 }
 
 #[sealed]
+#[async_trait]
 impl<O> ObjectExt for O where O: Object + Sync + ?Sized {}
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct Uid(qi_value::object::ObjectUid);
-
-impl Uid {
-    pub fn from_bytes(bytes: [u8; 20]) -> Self {
-        Self(qi_value::object::ObjectUid::from_bytes(bytes))
-    }
-
-    pub fn from_ptr<T: ?Sized>(ptr: *const T) -> Self {
-        let machine_id = os::MachineId::default();
-        let process_uuid = os::process_uuid();
-        let ptr_addr = ptr.cast::<()>() as usize;
-        let digest = <Sha1 as Digest>::new()
-            .chain_update(machine_id.as_bytes())
-            .chain_update(process_uuid.as_bytes())
-            .chain_update(ptr_addr.to_ne_bytes())
-            .finalize();
-        Self::from_bytes(digest.into())
-    }
-}
-
-impl std::fmt::Display for Uid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl qi_value::Reflect for Uid {
-    fn ty() -> Option<qi_value::Type> {
-        Some(qi_value::Type::String)
-    }
-}
-
-impl qi_value::RuntimeReflect for Uid {
-    fn ty(&self) -> qi_value::Type {
-        qi_value::Type::String
-    }
-}
-
-impl qi_value::ToValue for Uid {
-    fn to_value(&self) -> qi_value::Value<'_> {
-        qi_value::Value::ByteString(Cow::Borrowed(self.0.bytes()))
-    }
-}
-
-impl<'a> qi_value::IntoValue<'a> for Uid {
-    fn into_value(self) -> qi_value::Value<'a> {
-        qi_value::Value::ByteString(Cow::Owned(self.0.bytes().to_vec()))
-    }
-}
-
-impl<'a> qi_value::FromValue<'a> for Uid {
-    fn from_value(
-        value: qi_value::Value<'a>,
-    ) -> std::result::Result<Self, qi_value::FromValueError> {
-        let bytes =
-            value
-                .as_string_bytes()
-                .ok_or_else(|| qi_value::FromValueError::TypeMismatch {
-                    expected: "an Object UID".to_owned(),
-                    actual: value.to_string(),
-                })?;
-        let bytes = <[u8; 20]>::try_from(bytes)
-            .map_err(|err| qi_value::FromValueError::Other(err.into()))?;
-        Ok(Self(qi_value::object::ObjectUid::from_bytes(bytes)))
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Client {
+pub struct Client<Body> {
     service_id: ServiceId,
     id: Id,
     uid: Uid,
     meta: MetaObject,
-    session: Session,
+    session: Session<Body>,
 }
 
-impl Client {
+impl<Body> Client<Body> {
     pub(super) fn new(
         service_id: ServiceId,
         id: Id,
         uid: Uid,
         meta: MetaObject,
-        session: Session,
+        session: Session<Body>,
     ) -> Self {
         Self {
             service_id,
@@ -183,13 +145,20 @@ impl Client {
             session,
         }
     }
+}
+
+impl<Body> Client<Body>
+where
+    Body: messaging::Body + Send,
+    Body::Error: Send + Sync + 'static,
+{
     pub(super) async fn connect(
         service_id: ServiceId,
         id: Id,
         uid: Uid,
-        session: Session,
+        session: Session<Body>,
     ) -> Result<Self, Error> {
-        let meta = fetch_meta_object(&session, service_id, id).await?;
+        let meta = Self::fetch_meta_object(&session, service_id, id).await?;
         Ok(Self {
             service_id,
             id,
@@ -198,10 +167,56 @@ impl Client {
             session,
         })
     }
+
+    async fn fetch_meta_object(
+        session: &Session<Body>,
+        service_id: ServiceId,
+        id: Id,
+    ) -> Result<MetaObject, Error> {
+        Ok(session
+            .call(
+                message::Address(service_id, id, ACTION_ID_METAOBJECT),
+                0.into_value(), // unused
+                <MetaObject as value::Reflect>::signature()
+                    .into_type()
+                    .as_ref(),
+            )
+            .await?
+            .cast_into()
+            .map_err(ValueConversionError::MethodReturnValue)?)
+    }
+}
+
+impl<Body> Clone for Client<Body> {
+    fn clone(&self) -> Self {
+        Self {
+            service_id: self.service_id,
+            id: self.id,
+            uid: self.uid,
+            meta: self.meta.clone(),
+            session: self.session.clone(),
+        }
+    }
+}
+
+impl<Body> std::fmt::Debug for Client<Body> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("service_id", &self.service_id)
+            .field("id", &self.id)
+            .field("uid", &self.uid)
+            .field("meta", &self.meta)
+            .field("session", &self.session)
+            .finish()
+    }
 }
 
 #[async_trait]
-impl Object for Client {
+impl<Body> Object for Client<Body>
+where
+    Body: messaging::Body + Send,
+    Body::Error: Send + Sync + 'static,
+{
     fn meta(&self) -> &MetaObject {
         &self.meta
     }
@@ -215,43 +230,65 @@ impl Object for Client {
             .meta
             .method(&ident)
             .ok_or_else(|| Error::MethodNotFound(ident))?;
-        let args_signature = args.signature();
-        Ok(self
-            .session
+        self.session
             .call(
                 message::Address(self.service_id, self.id, method.uid),
                 args,
                 method.return_signature.to_type(),
             )
-            .await?)
+            .await
     }
 
-    async fn meta_post(&self, ident: MemberIdent, args: Value<'_>) -> Result<(), Error> {
-        let target = PostTarget::get(&self.meta, &ident)?;
-        let args_signature = args.signature();
-        let target_signature = target.parameters_signature();
-        Ok(self
+    async fn meta_post(&self, ident: MemberIdent, args: Value<'_>) {
+        let target = match PostTarget::get(&self.meta, &ident) {
+            Some(target) => target,
+            None => {
+                warn!(
+                    member = %ident,
+                    "post request error: target not found"
+                );
+                return;
+            }
+        };
+        if let Err(err) = self
             .session
             .oneway(
                 message::Address(self.service_id, self.id, target.action_id()),
                 message::Oneway::Post(args),
             )
-            .await?)
+            .await
+        {
+            warn!(
+                error = &err as &dyn std::error::Error,
+                "post request error: failure to send"
+            );
+        }
     }
 
-    async fn meta_event(&self, ident: MemberIdent, value: Value<'_>) -> Result<(), Error> {
-        let signal = self
-            .meta
-            .signal(&ident)
-            .ok_or_else(|| Error::SignalNotFound(ident))?;
-        let args_signature = value.signature();
-        Ok(self
+    async fn meta_event(&self, ident: MemberIdent, value: Value<'_>) {
+        let signal = match self.meta.signal(&ident) {
+            Some(signal) => signal,
+            None => {
+                warn!(
+                    member = %ident,
+                    "event request error: signal not found"
+                );
+                return;
+            }
+        };
+        if let Err(err) = self
             .session
             .oneway(
                 message::Address(self.service_id, self.id, signal.uid),
                 message::Oneway::Event(value),
             )
-            .await?)
+            .await
+        {
+            warn!(
+                error = &err as &dyn std::error::Error,
+                "event request error: failure to send"
+            );
+        }
     }
 
     fn uid(&self) -> Uid {
@@ -259,35 +296,17 @@ impl Object for Client {
     }
 }
 
-pub(super) async fn fetch_meta_object(
-    session: &Session,
-    service_id: ServiceId,
-    id: Id,
-) -> Result<MetaObject, Error> {
-    Ok(session
-        .call(
-            message::Address(service_id, id, ACTION_ID_METAOBJECT),
-            0.into_value(), // unused
-            <MetaObject as value::Reflect>::signature()
-                .into_type()
-                .as_ref(),
-        )
-        .await?
-        .cast_into()?)
-}
-
 #[derive(Debug)]
-pub(super) enum PostTarget<'a> {
+enum PostTarget<'a> {
     Method(&'a MetaMethod),
     Signal(&'a MetaSignal),
 }
 
 impl<'a> PostTarget<'a> {
-    pub(super) fn get(meta: &'a MetaObject, ident: &MemberIdent) -> Result<Self, Error> {
+    fn get(meta: &'a MetaObject, ident: &MemberIdent) -> Option<Self> {
         meta.method(ident)
             .map(Self::Method)
             .or_else(|| meta.signal(ident).map(Self::Signal))
-            .ok_or_else(|| Error::MethodOrSignalNotFound(ident.clone()))
     }
 
     fn action_id(&self) -> ActionId {
@@ -297,7 +316,7 @@ impl<'a> PostTarget<'a> {
         }
     }
 
-    pub(super) fn parameters_signature(&self) -> &value::Signature {
+    fn parameters_signature(&self) -> &value::Signature {
         match self {
             PostTarget::Method(method) => &method.parameters_signature,
             PostTarget::Signal(signal) => &signal.signature,
@@ -305,25 +324,93 @@ impl<'a> PostTarget<'a> {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-enum Error {
-    #[error("failed to convert arguments")]
-    Arguments(#[source] value::FromValueError),
+/// An messaging handler-like interface for object, but not exactly one. Messaging handlers take
+/// messaging address as parameter, while this interface only takes action identifiers (so without the
+/// service and object identifiers in messaging addresses).
+#[async_trait]
+pub(super) trait HandlerExt<Body>: Object
+where
+    Body: messaging::Body + Send,
+    Body::Error: std::error::Error + Send + Sync + 'static,
+{
+    async fn handler_meta_call<'a>(&'a self, action: ActionId, args: Body) -> Result<Body, Error>
+    where
+        Body: 'a,
+    {
+        // Get the targeted method so that we can get the expected parameters type and know what
+        // type of value we're supposed to deserialize.
+        let action_ident = MemberIdent::Id(action);
+        let method = self
+            .meta()
+            .method(&action_ident)
+            .ok_or_else(|| Error::MethodNotFound(action_ident.clone()))?;
+        let args = args
+            .deserialize_seed(value::de::ValueOfType::new(
+                method.parameters_signature.to_type(),
+            ))
+            .map_err(FormatError::ArgumentsDeserialization)?;
+        let reply = self.meta_call(action_ident, args).await?;
+        Ok(Body::serialize(&reply).map_err(FormatError::MethodReturnValueSerialization)?)
+    }
 
-    #[error("failed to convert of method return value")]
-    MethodReturnValue(#[source] value::FromValueError),
+    async fn handler_meta_post<'a>(&'a self, action: ActionId, args: Body)
+    where
+        Body: 'a,
+    {
+        // Same as for "call", we need to know the type of parameters to know what to deserialize.
+        let action_ident = MemberIdent::Id(action);
+        let target = match PostTarget::get(self.meta(), &action_ident) {
+            Some(target) => target,
+            None => {
+                info!(
+                    target = %action_ident,
+                    "post request discarded: action target not found"
+                );
+                return;
+            }
+        };
+        match args.deserialize_seed(value::de::ValueOfType::new(
+            target.parameters_signature().to_type(),
+        )) {
+            Ok(args) => self.meta_post(action_ident, args).await,
+            Err(err) => info!(
+                error = &err as &dyn std::error::Error,
+                "post request discarded: failed to deserialize arguments"
+            ),
+        };
+    }
 
-    #[error("no object method with identifier {0}")]
-    MethodNotFound(MemberIdent),
+    async fn handler_meta_event<'a>(&'a self, action: ActionId, args: Body)
+    where
+        Body: 'a,
+    {
+        let action_ident = MemberIdent::Id(action);
+        let signal = match self.meta().signal(&action_ident) {
+            Some(signal) => signal,
+            None => {
+                info!(
+                    signal = %action_ident,
+                    "event request discarded: signal not found"
+                );
+                return;
+            }
+        };
+        match args.deserialize_seed(value::de::ValueOfType::new(signal.signature.to_type())) {
+            Ok(args) => self.meta_event(action_ident, args).await,
+            Err(err) => info!(
+                error = &err as &dyn std::error::Error,
+                "event request discarded: failed to deserialize arguments"
+            ),
+        };
+    }
+}
 
-    #[error("no object signal with identifier {0}")]
-    SignalNotFound(MemberIdent),
-
-    #[error("no object method or signal with identifier {0}")]
-    MethodOrSignalNotFound(MemberIdent),
-
-    #[error("method returned an error")]
-    Method(#[source] Box<dyn std::error::Error + Send + Sync>),
+impl<Body, O> HandlerExt<Body> for O
+where
+    O: Object + Sync + ?Sized,
+    Body: messaging::Body + Send,
+    Body::Error: std::error::Error + Send + Sync + 'static,
+{
 }
 
 #[cfg(test)]
@@ -508,29 +595,30 @@ mod tests {
         fn call(self, calc: &mut Calculator, args: Value<'_>) -> Result<Value<'static>, Error> {
             Ok(match &self {
                 Self::Add => {
-                    let arg = args.cast_into().map_err(Error::Arguments)?;
+                    let arg = args.cast_into().map_err(ValueConversionError::Arguments)?;
                     calc.add(arg).into_value()
                 }
                 Self::Sub => {
-                    let arg = args.cast_into().map_err(Error::Arguments)?;
+                    let arg = args.cast_into().map_err(ValueConversionError::Arguments)?;
                     calc.sub(arg).into_value()
                 }
                 Self::Mul => {
-                    let arg = args.cast_into().map_err(Error::Arguments)?;
+                    let arg = args.cast_into().map_err(ValueConversionError::Arguments)?;
                     calc.mul(arg).into_value()
                 }
                 Self::Div => {
-                    let arg = args.cast_into().map_err(Error::Arguments)?;
+                    let arg = args.cast_into().map_err(ValueConversionError::Arguments)?;
                     calc.div(arg)
-                        .map_err(|err| Error::Method(err.into()))?
+                        .map_err(Into::into)
+                        .map_err(Error::Other)?
                         .into_value()
                 }
                 Self::Clamp => {
-                    let (arg1, arg2) = args.cast_into().map_err(Error::Arguments)?;
+                    let (arg1, arg2) = args.cast_into().map_err(ValueConversionError::Arguments)?;
                     calc.clamp(arg1, arg2).into_value()
                 }
                 Self::Ans => {
-                    let () = args.cast_into().map_err(Error::Arguments)?;
+                    let () = args.cast_into().map_err(ValueConversionError::Arguments)?;
                     calc.ans().into_value()
                 }
             })
@@ -553,13 +641,12 @@ mod tests {
                 .call(&mut *self.lock().await, args)
         }
 
-        async fn meta_post(&self, ident: MemberIdent, args: Value<'_>) -> Result<(), Error> {
-            self.meta_call(ident, args).await?;
-            Ok(())
+        async fn meta_post(&self, ident: MemberIdent, args: Value<'_>) {
+            let _res = self.meta_call(ident, args).await;
         }
 
-        async fn meta_event(&self, ident: MemberIdent, _value: Value<'_>) -> Result<(), Error> {
-            Err(Error::SignalNotFound(ident))
+        async fn meta_event(&self, _ident: MemberIdent, _value: Value<'_>) {
+            // no signal
         }
     }
 
@@ -579,15 +666,13 @@ mod tests {
         let res: i32 = calc.call("clamp", (32, 127)).await.unwrap();
         assert_eq!(res, 127);
         let res: Result<i32, _> = calc.call("div", 0).await;
-        assert_matches!(res,
-            Err(Error::Method(err)) => {
-                assert_eq!(err.to_string(), "division by zero");
-            }
-        );
+        assert_matches!(res, Err(Error::Other(err)) => {
+            assert!(err.downcast::<DivisionByZeroError>().is_ok())
+        });
         let res: Result<i32, _> = calc.call("log", 1).await;
         assert_matches!(
             res,
-            Err(Error::SignalNotFound(ident)) => assert_eq!(ident, "log")
+            Err(Error::MethodNotFound(ident)) => assert_eq!(ident, "log")
         );
         let res: i32 = calc.call("ans", ()).await.unwrap();
         assert_eq!(res, 127);

@@ -1,7 +1,6 @@
-use crate::{body::BodyBuf, CapabilitiesMap};
+use crate::CapabilitiesMap;
 use qi_value::Dynamic;
 pub use qi_value::{ActionId as Action, ObjectId as Object, ServiceId as Service};
-use serde::Deserialize;
 
 #[derive(
     Default,
@@ -136,16 +135,16 @@ impl Address {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
-pub enum Message<T> {
+pub enum Message<Body> {
     Call {
         id: Id,
         address: Address,
-        value: T,
+        value: Body,
     },
     Reply {
         id: Id,
         address: Address,
-        value: T,
+        value: Body,
     },
     Error {
         id: Id,
@@ -155,12 +154,12 @@ pub enum Message<T> {
     Post {
         id: Id,
         address: Address,
-        value: T,
+        value: Body,
     },
     Event {
         id: Id,
         address: Address,
-        value: T,
+        value: Body,
     },
     Capabilities {
         id: Id,
@@ -191,11 +190,11 @@ where
     }
 }
 
-impl<T> Message<T>
+impl<Body> Message<Body>
 where
-    T: BodyBuf,
+    Body: crate::Body,
 {
-    pub(crate) fn into_parts(self) -> Result<(MetaData, T), T::Error> {
+    pub(crate) fn into_parts(self) -> Result<(MetaData, Body), Body::Error> {
         match self {
             Message::Call { id, address, value } => Ok((
                 MetaData {
@@ -219,7 +218,7 @@ where
                     address,
                     ty: Type::Error,
                 },
-                T::serialize(&error)?,
+                Body::serialize(&error)?,
             )),
             Message::Post { id, address, value } => Ok((
                 MetaData {
@@ -247,7 +246,7 @@ where
                     address,
                     ty: Type::Capabilities,
                 },
-                T::serialize(&capabilities)?,
+                Body::serialize(&capabilities)?,
             )),
             Message::Cancel {
                 id,
@@ -259,7 +258,7 @@ where
                     address,
                     ty: Type::Cancel,
                 },
-                T::serialize(&call_id)?,
+                Body::serialize(&call_id)?,
             )),
             Message::Canceled { id, address } => Ok((
                 MetaData {
@@ -267,15 +266,12 @@ where
                     address,
                     ty: Type::Canceled,
                 },
-                T::serialize(&())?,
+                Body::serialize(&())?,
             )),
         }
     }
 
-    pub(crate) fn from_parts(meta: MetaData, mut body: T) -> Result<Self, T::Error>
-    where
-        for<'de> <T::Deserializer<'de> as serde::Deserializer<'de>>::Error: Into<T::Error>,
-    {
+    pub(crate) fn from_parts(meta: MetaData, body: Body) -> Result<Self, Body::Error> {
         let MetaData { id, address, ty } = meta;
         let msg = match ty {
             Type::Call => Self::Call {
@@ -291,7 +287,7 @@ where
             Type::Error => Self::Error {
                 id,
                 address,
-                error: Deserialize::deserialize(body.deserializer()).map_err(Into::into)?,
+                error: body.deserialize().map_err(Into::into)?,
             },
             Type::Post => Self::Post {
                 id,
@@ -306,12 +302,12 @@ where
             Type::Capabilities => Self::Capabilities {
                 id,
                 address,
-                capabilities: Deserialize::deserialize(body.deserializer()).map_err(Into::into)?,
+                capabilities: body.deserialize().map_err(Into::into)?,
             },
             Type::Cancel => Self::Cancel {
                 id,
                 address,
-                call_id: Deserialize::deserialize(body.deserializer()).map_err(Into::into)?,
+                call_id: body.deserialize().map_err(Into::into)?,
             },
             Type::Canceled => Self::Canceled { id, address },
         };
@@ -341,13 +337,13 @@ pub struct MetaData {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
-pub enum Oneway<T> {
-    Post(T),
-    Event(T),
+pub enum Oneway<Body> {
+    Post(Body),
+    Event(Body),
     Capabilities(CapabilitiesMap<'static>),
 }
 
-impl<T> Oneway<T> {
+impl<Body> Oneway<Body> {
     pub fn ty(&self) -> Type {
         match self {
             Self::Post(_) => Type::Post,
@@ -358,7 +354,7 @@ impl<T> Oneway<T> {
 
     pub fn try_map<F, U, E>(self, f: F) -> Result<Oneway<U>, E>
     where
-        F: FnOnce(T) -> Result<U, E>,
+        F: FnOnce(Body) -> Result<U, E>,
     {
         Ok(match self {
             Self::Post(value) => Oneway::Post(f(value)?),

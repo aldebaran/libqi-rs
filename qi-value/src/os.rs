@@ -1,7 +1,23 @@
 use once_cell::sync::Lazy;
+use serde_with::serde_as;
 use uuid::Uuid;
 
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+use crate::{FromValue, FromValueError, IntoValue, Reflect, RuntimeReflect, ToValue, Type, Value};
+
+#[derive(
+    Default,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    serde_with::SerializeDisplay,
+    serde_with::DeserializeFromStr,
+)]
+#[serde_as]
 pub struct MachineId(Uuid);
 
 impl MachineId {
@@ -20,7 +36,7 @@ impl MachineId {
                 if let Some(path) = MachineId::config_path() {
                     let _res = std::fs::write(path, uuid);
                 }
-                Self(uuid)
+                MachineId(uuid)
             })
         });
         *LOCAL
@@ -78,60 +94,40 @@ impl std::fmt::Display for MachineId {
     }
 }
 
-impl qi_value::Reflect for MachineId {
-    fn ty() -> Option<qi_value::Type> {
-        Some(qi_value::Type::String)
+impl Reflect for MachineId {
+    fn ty() -> Option<Type> {
+        Some(Type::String)
     }
 }
 
-impl qi_value::RuntimeReflect for MachineId {
-    fn ty(&self) -> qi_value::Type {
-        qi_value::Type::String
+impl RuntimeReflect for MachineId {
+    fn ty(&self) -> Type {
+        Type::String
     }
 }
 
-impl<'a> qi_value::FromValue<'a> for MachineId {
-    fn from_value(value: qi_value::Value<'a>) -> Result<Self, qi_value::FromValueError> {
+impl<'a> FromValue<'a> for MachineId {
+    fn from_value(value: Value<'a>) -> Result<Self, FromValueError> {
         String::from_value(value)?
             .parse()
             .map_err(Into::into)
-            .map_err(qi_value::FromValueError::Other)
+            .map_err(FromValueError::Other)
     }
 }
 
-impl<'a> qi_value::IntoValue<'a> for MachineId {
-    fn into_value(self) -> qi_value::Value<'a> {
-        qi_value::Value::String(self.to_string().into())
+impl<'a> IntoValue<'a> for MachineId {
+    fn into_value(self) -> Value<'a> {
+        Value::String(self.to_string().into())
     }
 }
 
-impl qi_value::ToValue for MachineId {
-    fn to_value(&self) -> qi_value::Value<'_> {
-        qi_value::Value::String(self.to_string().into())
+impl ToValue for MachineId {
+    fn to_value(&self) -> Value<'_> {
+        Value::String(self.to_string().into())
     }
 }
 
 pub fn process_uuid() -> Uuid {
     static PROCESS_UUID: Lazy<Uuid> = Lazy::new(Uuid::new_v4);
     *PROCESS_UUID
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{os::MachineId, value::BinaryValue};
-    use std::str::FromStr;
-
-    #[test]
-    fn machine_id_from_binary_value() {
-        let mut binvalue = BinaryValue::from_static(&[
-            0x24, 0x00, 0x00, 0x00, 0x39, 0x61, 0x36, 0x35, 0x62, 0x35, 0x36, 0x65, 0x2d, 0x63,
-            0x33, 0x64, 0x33, 0x2d, 0x34, 0x34, 0x38, 0x35, 0x2d, 0x38, 0x39, 0x32, 0x34, 0x2d,
-            0x36, 0x36, 0x31, 0x62, 0x30, 0x33, 0x36, 0x32, 0x30, 0x32, 0x62, 0x33,
-        ]);
-        let machine_id: MachineId = binvalue.deserialize_value().unwrap();
-        assert_eq!(
-            machine_id,
-            MachineId::from_str("9a65b56e-c3d3-4485-8924-661b036202b3").unwrap(),
-        )
-    }
 }

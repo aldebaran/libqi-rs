@@ -1,11 +1,10 @@
+use std::marker::PhantomData;
+
 use bytes::{Buf, Bytes};
 
-pub trait BodyBuf: Sized {
-    type Error;
+pub trait Body: Sized {
+    type Error: serde::de::Error;
     type Data: Buf;
-    type Deserializer<'de>: serde::Deserializer<'de>
-    where
-        Self: 'de;
 
     fn from_bytes(bytes: Bytes) -> Result<Self, Self::Error>;
 
@@ -15,5 +14,14 @@ pub trait BodyBuf: Sized {
     where
         T: serde::Serialize;
 
-    fn deserializer(&mut self) -> Self::Deserializer<'_>;
+    fn deserialize_seed<'de, T>(&'de self, seed: T) -> Result<T::Value, Self::Error>
+    where
+        T: serde::de::DeserializeSeed<'de>;
+
+    fn deserialize<'de, T>(&'de self) -> Result<T, Self::Error>
+    where
+        T: serde::de::Deserialize<'de>,
+    {
+        self.deserialize_seed(PhantomData)
+    }
 }

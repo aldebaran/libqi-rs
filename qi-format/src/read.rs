@@ -1,145 +1,105 @@
 use crate::{Error, Result};
-use bytes::{Buf, Bytes};
+use bytes::Buf;
 
-pub fn read_bool<B>(buf: &mut B) -> Result<bool>
-where
-    B: Buf,
-{
-    if !buf.has_remaining() {
+pub fn read_bool<B: Buf>(bytes: &mut B) -> Result<bool> {
+    if !bytes.has_remaining() {
         return Err(Error::ShortRead);
     };
-    match buf.get_u8() {
+    match bytes.get_u8() {
         crate::FALSE_BOOL => Ok(false),
         crate::TRUE_BOOL => Ok(true),
         byte => Err(Error::NotABoolValue(byte)),
     }
 }
 
-pub fn read_u8<B>(buf: &mut B) -> Result<u8>
-where
-    B: Buf,
-{
-    if !buf.has_remaining() {
+pub fn read_u8<B: Buf>(bytes: &mut B) -> Result<u8> {
+    if !bytes.has_remaining() {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_u8())
+    Ok(bytes.get_u8())
 }
 
-pub fn read_i8<B>(buf: &mut B) -> Result<i8>
-where
-    B: Buf,
-{
-    if !buf.has_remaining() {
+pub fn read_i8<B: Buf>(bytes: &mut B) -> Result<i8> {
+    if !bytes.has_remaining() {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_i8())
+    Ok(bytes.get_i8())
 }
 
-pub fn read_u16<B>(buf: &mut B) -> Result<u16>
-where
-    B: Buf,
-{
-    if buf.remaining() < 2 {
+pub fn read_u16<B: Buf>(bytes: &mut B) -> Result<u16> {
+    if bytes.remaining() < 2 {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_u16_le())
+    Ok(bytes.get_u16_le())
 }
 
-pub fn read_i16<B>(buf: &mut B) -> Result<i16>
-where
-    B: Buf,
-{
-    if buf.remaining() < 2 {
+pub fn read_i16<B: Buf>(bytes: &mut B) -> Result<i16> {
+    if bytes.remaining() < 2 {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_i16_le())
+    Ok(bytes.get_i16_le())
 }
 
-pub fn read_u32<B>(buf: &mut B) -> Result<u32>
-where
-    B: Buf,
-{
-    if buf.remaining() < 4 {
+pub fn read_u32<B: Buf>(bytes: &mut B) -> Result<u32> {
+    if bytes.remaining() < 4 {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_u32_le())
+    Ok(bytes.get_u32_le())
 }
 
-pub fn read_i32<B>(buf: &mut B) -> Result<i32>
-where
-    B: Buf,
-{
-    if buf.remaining() < 4 {
+pub fn read_i32<B: Buf>(bytes: &mut B) -> Result<i32> {
+    if bytes.remaining() < 4 {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_i32_le())
+    Ok(bytes.get_i32_le())
 }
 
-pub fn read_u64<B>(buf: &mut B) -> Result<u64>
-where
-    B: Buf,
-{
-    if buf.remaining() < 8 {
+pub fn read_u64<B: Buf>(bytes: &mut B) -> Result<u64> {
+    if bytes.remaining() < 8 {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_u64_le())
+    Ok(bytes.get_u64_le())
 }
 
-pub fn read_i64<B>(buf: &mut B) -> Result<i64>
-where
-    B: Buf,
-{
-    if buf.remaining() < 8 {
+pub fn read_i64<B: Buf>(bytes: &mut B) -> Result<i64> {
+    if bytes.remaining() < 8 {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_i64_le())
+    Ok(bytes.get_i64_le())
 }
 
-pub fn read_f32<B>(buf: &mut B) -> Result<f32>
-where
-    B: Buf,
-{
-    if buf.remaining() < 4 {
+pub fn read_f32<B: Buf>(bytes: &mut B) -> Result<f32> {
+    if bytes.remaining() < 4 {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_f32_le())
+    Ok(bytes.get_f32_le())
 }
 
-pub fn read_f64<B>(buf: &mut B) -> Result<f64>
-where
-    B: Buf,
-{
-    if buf.remaining() < 8 {
+pub fn read_f64<B: Buf>(bytes: &mut B) -> Result<f64> {
+    if bytes.remaining() < 8 {
         return Err(Error::ShortRead);
     };
-    Ok(buf.get_f64_le())
+    Ok(bytes.get_f64_le())
 }
 
-pub fn read_size<B>(buf: &mut B) -> Result<usize>
-where
-    B: Buf,
-{
-    let size_as_u32 = read_u32(buf)?;
+pub fn read_size<B: Buf>(bytes: &mut B) -> Result<usize> {
+    let size_as_u32 = read_u32(bytes)?;
     let size = size_as_u32.try_into().map_err(Error::SizeConversionError)?;
     Ok(size)
 }
 
-pub fn read_raw<B>(buf: &mut B) -> Result<Bytes>
-where
-    B: Buf,
-{
-    let size = read_size(buf)?;
-    if buf.remaining() < size {
+pub fn read_raw<'b>(bytes: &mut &'b [u8]) -> Result<&'b [u8]> {
+    let size = read_size(bytes).map_err(|err| Error::SequenceSize(err.into()))?;
+    if bytes.remaining() < size {
         return Err(Error::ShortRead);
     }
-    Ok(buf.copy_to_bytes(size))
+    let (front, back) = bytes.split_at(size);
+    *bytes = back;
+    Ok(front)
 }
 
-pub fn read_raw_buf<B>(buf: &mut B) -> Result<Vec<u8>>
-where
-    B: Buf,
-{
-    let size = read_size(buf)?;
+pub fn read_raw_buf<B: Buf>(buf: &mut B) -> Result<Vec<u8>> {
+    let size = read_size(buf).map_err(|err| Error::SequenceSize(err.into()))?;
     if buf.remaining() < size {
         return Err(Error::ShortRead);
     }
@@ -149,10 +109,13 @@ where
 }
 
 // equivalence: string -> raw
-pub fn read_string<B>(buf: &mut B) -> Result<String>
-where
-    B: Buf,
-{
+pub fn read_str<'b>(bytes: &mut &'b [u8]) -> Result<&'b str> {
+    let raw = read_raw(bytes)?;
+    Ok(std::str::from_utf8(raw)?)
+}
+
+// equivalence: string -> raw
+pub fn read_string<B: Buf>(buf: &mut B) -> Result<String> {
     let raw = read_raw_buf(buf)?;
     Ok(String::from_utf8(raw)?)
 }
@@ -161,6 +124,7 @@ where
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use bytes::Bytes;
 
     #[test]
     fn test_slice_read_string() {
@@ -168,7 +132,7 @@ mod tests {
         assert_matches!(read_string(&mut buf), Ok(s) => assert_eq!(s, "d"));
         assert_matches!(read_string(&mut buf), Err(Error::InvalidStringUtf8(_)));
         assert_matches!(read_string(&mut buf), Ok(s) => assert_eq!(s, String::new()));
-        assert_matches!(read_string(&mut buf), Err(Error::ShortRead));
+        assert_matches!(read_string(&mut buf), Err(Error::SequenceSize(_)));
     }
 
     #[test]
@@ -177,7 +141,7 @@ mod tests {
         assert_matches!(read_raw(&mut buf), Ok(s) => assert_eq!(s, Bytes::from_static(&[100])));
         assert_matches!(read_raw(&mut buf), Ok(s) => assert_eq!(s, Bytes::from_static(&[1])));
         assert_matches!(read_raw(&mut buf), Ok(s) => assert_eq!(s, Bytes::from_static(&[])));
-        assert_matches!(read_raw(&mut buf), Err(Error::ShortRead));
+        assert_matches!(read_raw(&mut buf), Err(Error::SequenceSize(_)));
     }
 
     #[test]
