@@ -13,7 +13,109 @@ error[E0277]: the trait bound `F: Reflect` is not satisfied
             (T0, T1, T2)
             (T0, T1, T2, T3)
             (T0, T1, T2, T3, T4)
-          and $N others
+            (T0, T1, T2, T3, T4, T5)
+            (T0, T1, T2, T3, T4, T5, T6)
+            (T0, T1, T2, T3, T4, T5, T6, T7)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30)
+            (T0,)
+            ActionId
+            Arc<T>
+            AsRaw<T>
+            BTreeMap<K, V>
+            BTreeSet<T>
+            BinaryHeap<T>
+            Box<T>
+            CString
+            Cow<'_, T>
+            HashMap<K, V>
+            HashSet<T>
+            LinkedList<T>
+            MachineId
+            MetaMethod
+            MetaMethodParameter
+            MetaObject
+            MetaProperty
+            MetaSignal
+            ObjectId
+            PhantomData<T>
+            Rc<T>
+            S
+            ServiceId
+            Signature
+            Vec<T>
+            VecDeque<T>
+            [T; 0]
+            [T; 10]
+            [T; 11]
+            [T; 12]
+            [T; 13]
+            [T; 14]
+            [T; 15]
+            [T; 16]
+            [T; 17]
+            [T; 18]
+            [T; 19]
+            [T; 1]
+            [T; 20]
+            [T; 21]
+            [T; 22]
+            [T; 23]
+            [T; 24]
+            [T; 25]
+            [T; 26]
+            [T; 27]
+            [T; 28]
+            [T; 29]
+            [T; 2]
+            [T; 30]
+            [T; 31]
+            [T; 3]
+            [T; 4]
+            [T; 5]
+            [T; 6]
+            [T; 7]
+            [T; 8]
+            [T; 9]
+            [T]
+            bool
+            bytes::bytes::Bytes
+            char
+            f32
+            f64
+            i16
+            i32
+            i64
+            i8
+            qi_value::Dynamic<T>
+            qi_value::Map<K, V>
+            std::option::Option<T>
+            std::string::String
+            u16
+            u32
+            u64
+            u8
 
 error[E0277]: the trait bound `F: RuntimeReflect` is not satisfied
  --> tests/value/fail_struct_field_not_impl.rs:3:10
@@ -30,7 +132,109 @@ error[E0277]: the trait bound `F: RuntimeReflect` is not satisfied
             (T0, T1, T2)
             (T0, T1, T2, T3)
             (T0, T1, T2, T3, T4)
-          and $N others
+            (T0, T1, T2, T3, T4, T5)
+            (T0, T1, T2, T3, T4, T5, T6)
+            (T0, T1, T2, T3, T4, T5, T6, T7)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30)
+            (T0,)
+            ActionId
+            Arc<T>
+            AsRaw<T>
+            BTreeMap<K, V>
+            BTreeSet<T>
+            BinaryHeap<T>
+            Box<T>
+            CString
+            Cow<'_, T>
+            HashMap<K, V>
+            HashSet<T>
+            LinkedList<T>
+            MachineId
+            MetaMethod
+            MetaMethodParameter
+            MetaObject
+            MetaProperty
+            MetaSignal
+            ObjectId
+            PhantomData<T>
+            Rc<T>
+            S
+            ServiceId
+            Signature
+            Value<'_>
+            Vec<T>
+            VecDeque<T>
+            [T; 0]
+            [T; 10]
+            [T; 11]
+            [T; 12]
+            [T; 13]
+            [T; 14]
+            [T; 15]
+            [T; 16]
+            [T; 17]
+            [T; 18]
+            [T; 19]
+            [T; 1]
+            [T; 20]
+            [T; 21]
+            [T; 22]
+            [T; 23]
+            [T; 24]
+            [T; 25]
+            [T; 26]
+            [T; 27]
+            [T; 28]
+            [T; 29]
+            [T; 2]
+            [T; 30]
+            [T; 31]
+            [T; 3]
+            [T; 4]
+            [T; 5]
+            [T; 6]
+            [T; 7]
+            [T; 8]
+            [T; 9]
+            [T]
+            bool
+            bytes::bytes::Bytes
+            char
+            f32
+            f64
+            i16
+            i32
+            i64
+            i8
+            qi_value::Map<K, V>
+            std::option::Option<T>
+            std::string::String
+            u16
+            u32
+            u64
+            u8
   = note: this error originates in the derive macro `qi_macros::Reflect` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `F: ToValue` is not satisfied
@@ -48,7 +252,108 @@ error[E0277]: the trait bound `F: ToValue` is not satisfied
             (T0, T1, T2, T3)
             (T0, T1, T2, T3, T4)
             (T0, T1, T2, T3, T4, T5)
-          and $N others
+            (T0, T1, T2, T3, T4, T5, T6)
+            (T0, T1, T2, T3, T4, T5, T6, T7)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29)
+            (T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30)
+            (T0,)
+            ActionId
+            AsRaw<T>
+            BTreeMap<K, V>
+            BTreeSet<T>
+            BinaryHeap<T>
+            Box<T>
+            CString
+            HashMap<K, V>
+            HashSet<T>
+            LinkedList<T>
+            MachineId
+            MetaMethod
+            MetaMethodParameter
+            MetaObject
+            MetaProperty
+            MetaSignal
+            ObjectId
+            PhantomData<T>
+            Rc<T>
+            S
+            ServiceId
+            Signature
+            Value<'_>
+            Vec<T>
+            VecDeque<T>
+            [T; 0]
+            [T; 10]
+            [T; 11]
+            [T; 12]
+            [T; 13]
+            [T; 14]
+            [T; 15]
+            [T; 16]
+            [T; 17]
+            [T; 18]
+            [T; 19]
+            [T; 1]
+            [T; 20]
+            [T; 21]
+            [T; 22]
+            [T; 23]
+            [T; 24]
+            [T; 25]
+            [T; 26]
+            [T; 27]
+            [T; 28]
+            [T; 29]
+            [T; 2]
+            [T; 30]
+            [T; 31]
+            [T; 3]
+            [T; 4]
+            [T; 5]
+            [T; 6]
+            [T; 7]
+            [T; 8]
+            [T; 9]
+            [T]
+            bool
+            bytes::bytes::Bytes
+            char
+            f32
+            f64
+            i16
+            i32
+            i64
+            i8
+            qi_value::Dynamic<T>
+            qi_value::Map<K, V>
+            std::option::Option<T>
+            std::string::String
+            str
+            u16
+            u32
+            u64
+            u8
   = note: this error originates in the derive macro `qi_macros::ToValue` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `F: IntoValue<'_>` is not satisfied
@@ -58,15 +363,119 @@ error[E0277]: the trait bound `F: IntoValue<'_>` is not satisfied
   |                                                  ^^^^^^^^^^^^^^^^^^^^ the trait `IntoValue<'_>` is not implemented for `F`
   |
   = help: the following other types implement trait `IntoValue<'a>`:
-            <&'long T as IntoValue<'short>>
-            <&'long mut T as IntoValue<'short>>
-            <() as IntoValue<'a>>
-            <(T0, T1) as IntoValue<'a>>
-            <(T0, T1, T2) as IntoValue<'a>>
-            <(T0, T1, T2, T3) as IntoValue<'a>>
-            <(T0, T1, T2, T3, T4) as IntoValue<'a>>
-            <(T0, T1, T2, T3, T4, T5) as IntoValue<'a>>
-          and $N others
+            `&'long T` implements `IntoValue<'short>`
+            `&'long mut T` implements `IntoValue<'short>`
+            `()` implements `IntoValue<'a>`
+            `(T0, T1)` implements `IntoValue<'a>`
+            `(T0, T1, T2)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29)` implements `IntoValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30)` implements `IntoValue<'a>`
+            `(T0,)` implements `IntoValue<'a>`
+            `ActionId` implements `IntoValue<'__qi_value>`
+            `Arc<T>` implements `IntoValue<'a>`
+            `AsRaw<&'long T>` implements `IntoValue<'short>`
+            `AsRaw<Vec<u8>>` implements `IntoValue<'a>`
+            `BTreeMap<K, V>` implements `IntoValue<'a>`
+            `BTreeSet<T>` implements `IntoValue<'a>`
+            `BinaryHeap<T>` implements `IntoValue<'a>`
+            `Box<T>` implements `IntoValue<'a>`
+            `CString` implements `IntoValue<'a>`
+            `Cow<'long, T>` implements `IntoValue<'short>`
+            `HashMap<K, V>` implements `IntoValue<'a>`
+            `HashSet<T>` implements `IntoValue<'a>`
+            `LinkedList<T>` implements `IntoValue<'a>`
+            `MachineId` implements `IntoValue<'a>`
+            `MemberIdent` implements `IntoValue<'a>`
+            `MetaMethod` implements `IntoValue<'__qi_value>`
+            `MetaMethodParameter` implements `IntoValue<'__qi_value>`
+            `MetaObject` implements `IntoValue<'__qi_value>`
+            `MetaProperty` implements `IntoValue<'__qi_value>`
+            `MetaSignal` implements `IntoValue<'__qi_value>`
+            `ObjectId` implements `IntoValue<'__qi_value>`
+            `PhantomData<T>` implements `IntoValue<'a>`
+            `Rc<T>` implements `IntoValue<'a>`
+            `S` implements `IntoValue<'__qi_value>`
+            `ServiceId` implements `IntoValue<'__qi_value>`
+            `Signature` implements `IntoValue<'a>`
+            `Value<'long>` implements `IntoValue<'short>`
+            `Vec<T>` implements `IntoValue<'a>`
+            `VecDeque<T>` implements `IntoValue<'a>`
+            `[T; 0]` implements `IntoValue<'a>`
+            `[T; 10]` implements `IntoValue<'a>`
+            `[T; 11]` implements `IntoValue<'a>`
+            `[T; 12]` implements `IntoValue<'a>`
+            `[T; 13]` implements `IntoValue<'a>`
+            `[T; 14]` implements `IntoValue<'a>`
+            `[T; 15]` implements `IntoValue<'a>`
+            `[T; 16]` implements `IntoValue<'a>`
+            `[T; 17]` implements `IntoValue<'a>`
+            `[T; 18]` implements `IntoValue<'a>`
+            `[T; 19]` implements `IntoValue<'a>`
+            `[T; 1]` implements `IntoValue<'a>`
+            `[T; 20]` implements `IntoValue<'a>`
+            `[T; 21]` implements `IntoValue<'a>`
+            `[T; 22]` implements `IntoValue<'a>`
+            `[T; 23]` implements `IntoValue<'a>`
+            `[T; 24]` implements `IntoValue<'a>`
+            `[T; 25]` implements `IntoValue<'a>`
+            `[T; 26]` implements `IntoValue<'a>`
+            `[T; 27]` implements `IntoValue<'a>`
+            `[T; 28]` implements `IntoValue<'a>`
+            `[T; 29]` implements `IntoValue<'a>`
+            `[T; 2]` implements `IntoValue<'a>`
+            `[T; 30]` implements `IntoValue<'a>`
+            `[T; 31]` implements `IntoValue<'a>`
+            `[T; 3]` implements `IntoValue<'a>`
+            `[T; 4]` implements `IntoValue<'a>`
+            `[T; 5]` implements `IntoValue<'a>`
+            `[T; 6]` implements `IntoValue<'a>`
+            `[T; 7]` implements `IntoValue<'a>`
+            `[T; 8]` implements `IntoValue<'a>`
+            `[T; 9]` implements `IntoValue<'a>`
+            `bool` implements `IntoValue<'a>`
+            `bytes::bytes::Bytes` implements `IntoValue<'a>`
+            `char` implements `IntoValue<'a>`
+            `f32` implements `IntoValue<'a>`
+            `f64` implements `IntoValue<'a>`
+            `i16` implements `IntoValue<'a>`
+            `i32` implements `IntoValue<'a>`
+            `i64` implements `IntoValue<'a>`
+            `i8` implements `IntoValue<'a>`
+            `qi_value::Dynamic<T>` implements `IntoValue<'a>`
+            `qi_value::Map<K, V>` implements `IntoValue<'a>`
+            `qi_value::Object` implements `IntoValue<'a>`
+            `std::option::Option<T>` implements `IntoValue<'a>`
+            `std::string::String` implements `IntoValue<'a>`
+            `u16` implements `IntoValue<'a>`
+            `u32` implements `IntoValue<'a>`
+            `u64` implements `IntoValue<'a>`
+            `u8` implements `IntoValue<'a>`
   = note: this error originates in the derive macro `qi_macros::IntoValue` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `F: FromValue<'_>` is not satisfied
@@ -76,13 +485,119 @@ error[E0277]: the trait bound `F: FromValue<'_>` is not satisfied
   |                                                                        ^^^^^^^^^^^^^^^^^^^^ the trait `FromValue<'_>` is not implemented for `F`
   |
   = help: the following other types implement trait `FromValue<'a>`:
-            <&'short [u8] as FromValue<'long>>
-            <&'short str as FromValue<'long>>
-            <() as FromValue<'_>>
-            <(T0, T1) as FromValue<'a>>
-            <(T0, T1, T2) as FromValue<'a>>
-            <(T0, T1, T2, T3) as FromValue<'a>>
-            <(T0, T1, T2, T3, T4) as FromValue<'a>>
-            <(T0, T1, T2, T3, T4, T5) as FromValue<'a>>
-          and $N others
+            `&'short [u8]` implements `FromValue<'long>`
+            `&'short str` implements `FromValue<'long>`
+            `()` implements `FromValue<'_>`
+            `(T0, T1)` implements `FromValue<'a>`
+            `(T0, T1, T2)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29)` implements `FromValue<'a>`
+            `(T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18, T19, T20, T21, T22, T23, T24, T25, T26, T27, T28, T29, T30)` implements `FromValue<'a>`
+            `(T0,)` implements `FromValue<'a>`
+            `ActionId` implements `FromValue<'__qi_value>`
+            `Arc<T>` implements `FromValue<'a>`
+            `AsRaw<&'short [u8]>` implements `FromValue<'long>`
+            `AsRaw<Box<[u8]>>` implements `FromValue<'a>`
+            `AsRaw<Cow<'short, [u8]>>` implements `FromValue<'long>`
+            `AsRaw<Vec<u8>>` implements `FromValue<'a>`
+            `BTreeMap<K, V>` implements `FromValue<'a>`
+            `BTreeSet<T>` implements `FromValue<'a>`
+            `BinaryHeap<T>` implements `FromValue<'a>`
+            `Box<T>` implements `FromValue<'a>`
+            `CString` implements `FromValue<'a>`
+            `Cow<'short, T>` implements `FromValue<'long>`
+            `HashMap<K, V>` implements `FromValue<'a>`
+            `HashSet<T>` implements `FromValue<'a>`
+            `LinkedList<T>` implements `FromValue<'a>`
+            `MachineId` implements `FromValue<'a>`
+            `MemberIdent` implements `FromValue<'a>`
+            `MetaMethod` implements `FromValue<'__qi_value>`
+            `MetaMethodParameter` implements `FromValue<'__qi_value>`
+            `MetaObject` implements `FromValue<'__qi_value>`
+            `MetaProperty` implements `FromValue<'__qi_value>`
+            `MetaSignal` implements `FromValue<'__qi_value>`
+            `ObjectId` implements `FromValue<'__qi_value>`
+            `PhantomData<T>` implements `FromValue<'_>`
+            `Rc<T>` implements `FromValue<'a>`
+            `S` implements `FromValue<'__qi_value>`
+            `ServiceId` implements `FromValue<'__qi_value>`
+            `Signature` implements `FromValue<'_>`
+            `Value<'short>` implements `FromValue<'long>`
+            `Vec<T>` implements `FromValue<'a>`
+            `VecDeque<T>` implements `FromValue<'a>`
+            `[T; 0]` implements `FromValue<'_>`
+            `[T; 10]` implements `FromValue<'a>`
+            `[T; 11]` implements `FromValue<'a>`
+            `[T; 12]` implements `FromValue<'a>`
+            `[T; 13]` implements `FromValue<'a>`
+            `[T; 14]` implements `FromValue<'a>`
+            `[T; 15]` implements `FromValue<'a>`
+            `[T; 16]` implements `FromValue<'a>`
+            `[T; 17]` implements `FromValue<'a>`
+            `[T; 18]` implements `FromValue<'a>`
+            `[T; 19]` implements `FromValue<'a>`
+            `[T; 1]` implements `FromValue<'a>`
+            `[T; 20]` implements `FromValue<'a>`
+            `[T; 21]` implements `FromValue<'a>`
+            `[T; 22]` implements `FromValue<'a>`
+            `[T; 23]` implements `FromValue<'a>`
+            `[T; 24]` implements `FromValue<'a>`
+            `[T; 25]` implements `FromValue<'a>`
+            `[T; 26]` implements `FromValue<'a>`
+            `[T; 27]` implements `FromValue<'a>`
+            `[T; 28]` implements `FromValue<'a>`
+            `[T; 29]` implements `FromValue<'a>`
+            `[T; 2]` implements `FromValue<'a>`
+            `[T; 30]` implements `FromValue<'a>`
+            `[T; 31]` implements `FromValue<'a>`
+            `[T; 3]` implements `FromValue<'a>`
+            `[T; 4]` implements `FromValue<'a>`
+            `[T; 5]` implements `FromValue<'a>`
+            `[T; 6]` implements `FromValue<'a>`
+            `[T; 7]` implements `FromValue<'a>`
+            `[T; 8]` implements `FromValue<'a>`
+            `[T; 9]` implements `FromValue<'a>`
+            `bool` implements `FromValue<'_>`
+            `bytes::bytes::Bytes` implements `FromValue<'_>`
+            `char` implements `FromValue<'a>`
+            `f32` implements `FromValue<'_>`
+            `f64` implements `FromValue<'_>`
+            `i16` implements `FromValue<'_>`
+            `i32` implements `FromValue<'_>`
+            `i64` implements `FromValue<'_>`
+            `i8` implements `FromValue<'_>`
+            `qi_value::Dynamic<T>` implements `FromValue<'a>`
+            `qi_value::Map<K, V>` implements `FromValue<'a>`
+            `qi_value::Object` implements `FromValue<'_>`
+            `std::option::Option<T>` implements `FromValue<'a>`
+            `std::string::String` implements `FromValue<'_>`
+            `u16` implements `FromValue<'_>`
+            `u32` implements `FromValue<'_>`
+            `u64` implements `FromValue<'_>`
+            `u8` implements `FromValue<'_>`
   = note: this error originates in the derive macro `qi_macros::FromValue` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,10 +1,7 @@
-use std::borrow::Cow;
-
 use crate::{
-    os, ty, ActionId, FromValue, FromValueError, IntoValue, Map, ObjectId, Reflect, RuntimeReflect,
-    ServiceId, Signature, ToValue, Type, Value,
+    os, ty, ActionId, FromValue, FromValueError, IntoValue, Map, ObjectId, ServiceId, Signature,
+    Type, Value,
 };
-use serde_with::serde_as;
 use sha1_smol::Sha1;
 
 #[derive(
@@ -50,8 +47,6 @@ impl std::fmt::Display for Object {
     }
 }
 
-/// ObjectUid are represented as strings containing pure binary data for compatibility reasons. They
-/// are therefore NOT UTF-8 valid strings or even contain printable characters.
 #[derive(
     Default,
     Clone,
@@ -70,13 +65,16 @@ impl std::fmt::Display for Object {
 )]
 #[into_iterator(owned, ref)]
 #[serde(transparent)]
-#[serde_as]
 pub struct Uid(
     // SHA-1 digest as bytes of Big Endian encoded sequence of 5 DWORD.
-    #[serde_as(as = "Bytes")] [u8; 20],
+    [u8; 20],
 );
 
 impl Uid {
+    pub const fn from_bytes(bytes: [u8; 20]) -> Self {
+        Self(bytes)
+    }
+
     pub const fn bytes(&self) -> &[u8; 20] {
         &self.0
     }
@@ -115,43 +113,6 @@ impl PartialEq<[u8; 20]> for Uid {
 impl PartialEq<Uid> for [u8; 20] {
     fn eq(&self, other: &Uid) -> bool {
         self == &other.0
-    }
-}
-
-impl Reflect for Uid {
-    fn ty() -> Option<Type> {
-        Some(Type::String)
-    }
-}
-
-impl RuntimeReflect for Uid {
-    fn ty(&self) -> Type {
-        Type::String
-    }
-}
-
-impl ToValue for Uid {
-    fn to_value(&self) -> Value<'_> {
-        Value::ByteString(Cow::Borrowed(&self.0))
-    }
-}
-
-impl<'a> IntoValue<'a> for Uid {
-    fn into_value(self) -> Value<'a> {
-        Value::ByteString(Cow::Owned(self.0.to_vec()))
-    }
-}
-
-impl<'a> FromValue<'a> for Uid {
-    fn from_value(value: Value<'a>) -> std::result::Result<Self, FromValueError> {
-        let bytes = value
-            .as_string_bytes()
-            .ok_or_else(|| FromValueError::TypeMismatch {
-                expected: "an Object UID".to_owned(),
-                actual: value.to_string(),
-            })?;
-        let bytes = <[u8; 20]>::try_from(bytes).map_err(|err| FromValueError::Other(err.into()))?;
-        Ok(Self(bytes))
     }
 }
 
