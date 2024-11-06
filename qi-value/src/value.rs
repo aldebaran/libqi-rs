@@ -1,10 +1,12 @@
 pub mod de;
 mod impls;
 mod ser;
+mod string;
 
 use crate::{map::Map, reflect::RuntimeReflect, ty, Object, Type};
 use ordered_float::OrderedFloat;
-use std::{borrow::Cow, str::Utf8Error, string::FromUtf8Error};
+use std::{borrow::Cow, string::String as StdString};
+pub use string::String;
 
 /// The [`Value`] structure represents any value of the `qi` type system.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -21,8 +23,7 @@ pub enum Value<'a> {
     UInt64(u64),
     Float32(OrderedFloat<f32>),
     Float64(OrderedFloat<f64>),
-    String(Cow<'a, str>),
-    ByteString(Cow<'a, [u8]>),
+    String(String<'a>),
     Raw(Cow<'a, [u8]>),
     Option(Option<Box<Value<'a>>>),
     List(Vec<Value<'a>>),
@@ -40,10 +41,16 @@ impl<'a> Value<'a> {
         T::from_value(self)
     }
 
-    pub fn as_string_bytes(&'a self) -> Option<&'a [u8]> {
+    pub fn as_string(&self) -> Option<&String<'a>> {
         match self {
-            Self::String(s) => Some(s.as_bytes()),
-            Self::ByteString(s) => Some(s),
+            Self::String(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub fn into_string(self) -> Option<String<'a>> {
+        match self {
+            Self::String(str) => Some(str),
             _ => None,
         }
     }
@@ -66,8 +73,7 @@ impl<'a> Value<'a> {
             Self::UInt64(v) => Value::UInt64(v),
             Self::Float32(v) => Value::Float32(v),
             Self::Float64(v) => Value::Float64(v),
-            Self::ByteString(v) => Value::ByteString(v.into_owned().into()),
-            Self::String(v) => Value::String(v.into_owned().into()),
+            Self::String(v) => Value::String(v.into_owned()),
             Self::Raw(v) => Value::Raw(v.into_owned().into()),
             Self::Option(v) => Value::Option(v.map(|v| Box::new(v.into_owned()))),
             Self::List(v) => Value::List(v.into_iter().map(Value::into_owned).collect()),
@@ -105,7 +111,6 @@ impl std::fmt::Display for Value<'_> {
             Value::Float32(v) => v.fmt(f),
             Value::Float64(v) => v.fmt(f),
             Value::String(v) => v.fmt(f),
-            Value::ByteString(v) => String::from_utf8_lossy(v).fmt(f),
             Value::Raw(v) => {
                 write!(f, "raw[len={}]", v.len())
             }
@@ -191,7 +196,7 @@ impl RuntimeReflect for Value<'_> {
             Self::UInt64(_) => Type::UInt64,
             Self::Float32(_) => Type::Float32,
             Self::Float64(_) => Type::Float64,
-            Self::String(_) | Self::ByteString(_) => Type::String,
+            Self::String(_) => Type::String,
             Self::Raw(_) => Type::Raw,
             Self::Option(v) => Type::Option(v.as_deref().map(|v| Box::new(v.ty()))),
             Self::List(v) => Type::List(ty::reduce_type(v.iter().map(Value::ty)).map(Box::new)),
@@ -224,22 +229,16 @@ pub trait FromValue<'a>: Sized {
 #[derive(thiserror::Error, Debug)]
 pub enum FromValueError {
     #[error("value type mismatch: expected \"{expected}\", found \"{actual}\"")]
-    TypeMismatch { expected: String, actual: String },
+    TypeMismatch {
+        expected: StdString,
+        actual: StdString,
+    },
 
-    #[error(transparent)]
-    NulChar(#[from] std::ffi::NulError),
-
-    #[error(transparent)]
-    Utf8(#[from] Utf8Error),
+    #[error("bad string null character")]
+    BadNulChar(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     #[error(transparent)]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
-}
-
-impl From<FromUtf8Error> for FromValueError {
-    fn from(err: FromUtf8Error) -> Self {
-        Self::Utf8(err.utf8_error())
-    }
 }
 
 impl From<std::convert::Infallible> for FromValueError {

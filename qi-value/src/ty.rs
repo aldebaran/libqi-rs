@@ -28,6 +28,76 @@ pub enum Type {
     Tuple(Tuple),
 }
 
+impl Type {
+    pub fn list_of<T>(t: T) -> Self
+    where
+        T: Into<Option<Type>>,
+    {
+        Self::List(t.into().map(Box::new))
+    }
+
+    pub fn option_of<T>(t: T) -> Self
+    where
+        T: Into<Option<Type>>,
+    {
+        Self::Option(t.into().map(Box::new))
+    }
+
+    pub fn varargs_of<T>(t: T) -> Self
+    where
+        T: Into<Option<Type>>,
+    {
+        Self::VarArgs(t.into().map(Box::new))
+    }
+
+    pub fn map_of<K, V>(key: K, value: V) -> Self
+    where
+        K: Into<Option<Type>>,
+        V: Into<Option<Type>>,
+    {
+        Self::Map {
+            key: key.into().map(Box::new),
+            value: value.into().map(Box::new),
+        }
+    }
+
+    pub fn tuple_of<I, F>(fields: I) -> Self
+    where
+        I: IntoIterator<Item = F>,
+        F: Into<Option<Type>>,
+    {
+        Self::Tuple(Tuple::Tuple(fields.into_iter().map(Into::into).collect()))
+    }
+
+    pub fn unit_tuple() -> Self {
+        Self::Tuple(Tuple::Tuple(vec![]))
+    }
+
+    pub fn struct_of<N, I, F>(name: N, fields: I) -> Type
+    where
+        N: Into<String>,
+        I: IntoIterator<Item = F>,
+        F: Into<StructField>,
+    {
+        Type::Tuple(Tuple::Struct {
+            name: name.into(),
+            fields: fields.into_iter().map(Into::into).collect(),
+        })
+    }
+
+    pub fn tuple_struct_of<N, I, F>(name: N, elements: I) -> Type
+    where
+        N: Into<String>,
+        I: IntoIterator<Item = F>,
+        F: Into<Option<Type>>,
+    {
+        Type::Tuple(Tuple::TupleStruct {
+            name: name.into(),
+            elements: elements.into_iter().map(Into::into).collect(),
+        })
+    }
+}
+
 /// Defaults constructs a type as a unit type.
 impl Default for Type {
     fn default() -> Self {
@@ -61,24 +131,24 @@ impl std::fmt::Display for Type {
             Type::Object => f.write_str("object"),
             Type::Option(t) => {
                 f.write_str("option(")?;
-                DisplayTypeOption(t).fmt(f)?;
+                DisplayOption(&t.as_deref()).fmt(f)?;
                 f.write_str(")")
             }
             Type::List(t) => {
                 f.write_str("list(")?;
-                DisplayTypeOption(t).fmt(f)?;
+                DisplayOption(&t.as_deref()).fmt(f)?;
                 f.write_str(")")
             }
             Type::VarArgs(t) => {
                 f.write_str("varargs(")?;
-                DisplayTypeOption(t).fmt(f)?;
+                DisplayOption(&t.as_deref()).fmt(f)?;
                 f.write_str(")")
             }
             Type::Map { key, value } => {
                 f.write_str("map(")?;
-                DisplayTypeOption(key).fmt(f)?;
+                DisplayOption(&key.as_deref()).fmt(f)?;
                 f.write_str(",")?;
-                DisplayTypeOption(value).fmt(f)?;
+                DisplayOption(&value.as_deref()).fmt(f)?;
                 f.write_str(")")
             }
             Type::Tuple(t) => t.fmt(f),
@@ -87,12 +157,9 @@ impl std::fmt::Display for Type {
 }
 
 #[derive(Debug)]
-pub struct DisplayTypeOption<'a, T>(pub &'a Option<T>);
+pub struct DisplayOption<'a>(pub &'a Option<&'a Type>);
 
-impl<T> std::fmt::Display for DisplayTypeOption<'_, T>
-where
-    T: std::fmt::Display,
-{
+impl std::fmt::Display for DisplayOption<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
             Some(ty) => ty.fmt(f),
@@ -102,16 +169,13 @@ where
 }
 
 #[derive(Debug)]
-pub struct DisplayTypeTuple<'a, T>(pub &'a Vec<Option<T>>);
+pub struct DisplayTuple<'a>(pub &'a Vec<Option<&'a Type>>);
 
-impl<T> std::fmt::Display for DisplayTypeTuple<'_, T>
-where
-    T: std::fmt::Display,
-{
+impl std::fmt::Display for DisplayTuple<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("(")?;
         for t in self.0 {
-            DisplayTypeOption(t).fmt(f)?;
+            DisplayOption(t).fmt(f)?;
         }
         f.write_str(")")
     }
@@ -221,7 +285,7 @@ impl std::fmt::Display for Tuple {
             if idx > 0 {
                 f.write_str(",")?;
             }
-            DisplayTypeOption(&element).fmt(f)?;
+            DisplayOption(&element.as_ref()).fmt(f)?;
         }
         f.write_str(")")?;
         if let Some(annotations) = self.annotations() {
@@ -280,74 +344,6 @@ impl std::fmt::Display for StructAnnotations {
         f.write_str(">")?;
         Ok(())
     }
-}
-
-pub fn option<T>(t: T) -> Type
-where
-    T: Into<Option<Type>>,
-{
-    Type::Option(t.into().map(Box::new))
-}
-
-pub fn varargs<T>(t: T) -> Type
-where
-    T: Into<Option<Type>>,
-{
-    Type::VarArgs(t.into().map(Box::new))
-}
-
-pub fn list<T>(t: T) -> Type
-where
-    T: Into<Option<Type>>,
-{
-    Type::List(t.into().map(Box::new))
-}
-
-pub fn map<K, V>(key: K, value: V) -> Type
-where
-    K: Into<Option<Type>>,
-    V: Into<Option<Type>>,
-{
-    Type::Map {
-        key: key.into().map(Box::new),
-        value: value.into().map(Box::new),
-    }
-}
-
-pub fn tuple<I, F>(fields: I) -> Type
-where
-    I: IntoIterator<Item = F>,
-    F: Into<Option<Type>>,
-{
-    Type::Tuple(Tuple::Tuple(fields.into_iter().map(Into::into).collect()))
-}
-
-pub fn unit_tuple() -> Type {
-    Type::Tuple(Tuple::Tuple(vec![]))
-}
-
-pub fn struct_ty<N, I, F>(name: N, fields: I) -> Type
-where
-    N: Into<String>,
-    I: IntoIterator<Item = F>,
-    F: Into<StructField>,
-{
-    Type::Tuple(Tuple::Struct {
-        name: name.into(),
-        fields: fields.into_iter().map(Into::into).collect(),
-    })
-}
-
-pub fn tuple_struct<N, I, F>(name: N, elements: I) -> Type
-where
-    N: Into<String>,
-    I: IntoIterator<Item = F>,
-    F: Into<Option<Type>>,
-{
-    Type::Tuple(Tuple::TupleStruct {
-        name: name.into(),
-        elements: elements.into_iter().map(Into::into).collect(),
-    })
 }
 
 pub(crate) fn zip_struct_fields<N, E>(

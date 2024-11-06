@@ -1,6 +1,5 @@
 #![deny(unreachable_pub, unsafe_code)]
 // TODO: #![deny(missing_docs)]
-#![warn(unused_crate_dependencies)]
 #![warn(
     clippy::all,
     clippy::clone_on_ref_ptr,
@@ -49,7 +48,7 @@ pub mod map;
 pub mod object;
 pub mod os;
 mod reflect;
-mod signature;
+pub mod signature;
 pub mod ty;
 pub mod value;
 

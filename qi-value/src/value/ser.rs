@@ -20,7 +20,6 @@ impl serde::Serialize for Value<'_> {
             Value::Float32(v) => v.serialize(serializer),
             Value::Float64(v) => v.serialize(serializer),
             Value::String(v) => v.serialize(serializer),
-            Value::ByteString(v) => v.serialize(serializer),
             Value::Raw(v) => serializer.serialize_bytes(v),
             Value::Option(opt) => opt.serialize(serializer),
             Value::List(list) => list.serialize(serializer),

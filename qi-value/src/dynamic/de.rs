@@ -1,20 +1,9 @@
-use crate::{value::de::ValueOfType, Signature, Value};
-use std::marker::PhantomData;
+use crate::{value::de::ValueType, Signature, Value};
 
-pub(crate) struct DynamicVisitor<'v> {
-    phantom: PhantomData<&'v ()>,
-}
+pub(crate) struct DynamicVisitor;
 
-impl<'v> DynamicVisitor<'v> {
-    pub(crate) fn new() -> Self {
-        Self {
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<'de, 'v> serde::de::Visitor<'de> for DynamicVisitor<'v> {
-    type Value = Value<'v>;
+impl<'de> serde::de::Visitor<'de> for DynamicVisitor {
+    type Value = Value<'de>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter.write_str("a dynamic value")
@@ -34,7 +23,7 @@ impl<'de, 'v> serde::de::Visitor<'de> for DynamicVisitor<'v> {
 
         // Value
         let value = seq
-            .next_element_seed(ValueOfType::new(value_type.as_ref()))?
+            .next_element_seed(ValueType(value_type.as_ref()))?
             .ok_or_else(|| Error::invalid_length(1, &self))?;
 
         Ok(value)
@@ -58,7 +47,7 @@ impl<'de, 'v> serde::de::Visitor<'de> for DynamicVisitor<'v> {
         }?;
         let value_type = signature.into_type();
         let value = match map.next_key()? {
-            Some(Field::Value) => map.next_value_seed(ValueOfType::new(value_type.as_ref())),
+            Some(Field::Value) => map.next_value_seed(ValueType(value_type.as_ref())),
             _ => Err(Error::missing_field("value")),
         }?;
         Ok(value)

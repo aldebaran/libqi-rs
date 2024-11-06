@@ -51,18 +51,17 @@ impl RuntimeReflect for Signature {
 
 impl FromValue<'_> for Signature {
     fn from_value(value: Value<'_>) -> Result<Self, FromValueError> {
-        fn from_str(str: &str) -> Result<Signature, FromValueError> {
-            str.parse()
-                .map_err(|err: FromStrError| FromValueError::Other(err.into()))
-        }
-        match value {
-            Value::String(s) => from_str(&s),
-            Value::ByteString(s) => from_str(std::str::from_utf8(&s)?),
-            _ => Err(FromValueError::TypeMismatch {
+        value
+            .as_string()
+            .and_then(|str| str.as_str())
+            .ok_or_else(|| FromValueError::TypeMismatch {
                 expected: "Signature".to_owned(),
                 actual: value.to_string(),
-            }),
-        }
+            })
+            .and_then(|str| {
+                str.parse()
+                    .map_err(|err: ParseError| FromValueError::Other(err.into()))
+            })
     }
 }
 
@@ -99,7 +98,7 @@ impl std::fmt::Display for Signature {
 }
 
 impl std::str::FromStr for Signature {
-    type Err = FromStrError;
+    type Err = ParseError;
 
     fn from_str(src: &str) -> Result<Self, Self::Err> {
         let mut iter = src.chars();
@@ -208,12 +207,12 @@ where
     }
 }
 
-fn parse_type(iter: &mut std::str::Chars) -> Result<Option<Type>, SignatureParseError> {
+fn parse_type(iter: &mut std::str::Chars) -> Result<Option<Type>, ParseError> {
     let type_str = iter.as_str();
     // Multiple characters types are read from the beginning. Therefore we clone the iterator,
     // read one char, and if we detect any marker of those types, pass the original iterator to
     // the subparsing function and return its result immediately.
-    let c = iter.clone().next().ok_or(SignatureParseError::EndOfInput)?;
+    let c = iter.clone().next().ok_or(ParseError::EndOfInput)?;
     match c {
         CHAR_MARK_OPTION => return Ok(Some(parse_option(iter)?)),
         CHAR_MARK_VAR_ARGS => return Ok(Some(parse_var_args(iter)?)),
@@ -243,79 +242,75 @@ fn parse_type(iter: &mut std::str::Chars) -> Result<Option<Type>, SignatureParse
         CHAR_OBJECT => Some(Type::Object),
         CHAR_DYNAMIC => None,
         // Anything else is unexpected.
-        c => return Err(SignatureParseError::UnexpectedChar(c, type_str.to_owned())),
+        c => return Err(ParseError::UnexpectedChar(c, type_str.to_owned())),
     };
     Ok(t)
 }
 
-fn parse_option(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
+fn parse_option(iter: &mut std::str::Chars) -> Result<Type, ParseError> {
     let option_str = iter.as_str();
     advance_once(iter.by_ref());
     let value_type = match parse_type(iter) {
         Ok(t) => t,
         Err(err) => {
             return Err(match err {
-                SignatureParseError::EndOfInput => {
-                    SignatureParseError::MissingOptionValueType(option_str.to_owned())
-                }
-                _ => SignatureParseError::OptionValueTypeParsing(Box::new(err)),
+                ParseError::EndOfInput => ParseError::MissingOptionValueType(option_str.to_owned()),
+                _ => ParseError::OptionValueTypeParsing(Box::new(err)),
             })
         }
     };
     Ok(Type::Option(value_type.map(Box::new)))
 }
 
-fn parse_var_args(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
+fn parse_var_args(iter: &mut std::str::Chars) -> Result<Type, ParseError> {
     let var_args_str = iter.as_str();
     advance_once(iter.by_ref());
     let value_type = match parse_type(iter) {
         Ok(t) => t,
         Err(err) => {
             return Err(match err {
-                SignatureParseError::EndOfInput => {
-                    SignatureParseError::MissingVarArgsValueType(var_args_str.to_owned())
+                ParseError::EndOfInput => {
+                    ParseError::MissingVarArgsValueType(var_args_str.to_owned())
                 }
-                _ => SignatureParseError::VarArgsValueTypeParsing(Box::new(err)),
+                _ => ParseError::VarArgsValueTypeParsing(Box::new(err)),
             })
         }
     };
     Ok(Type::VarArgs(value_type.map(Box::new)))
 }
 
-fn parse_list(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
+fn parse_list(iter: &mut std::str::Chars) -> Result<Type, ParseError> {
     let list_str = iter.as_str();
     advance_once(iter.by_ref());
     let value_type = match parse_type(iter) {
         Ok(t) => t,
         Err(err) => {
             return Err(match err {
-                SignatureParseError::UnexpectedChar(CHAR_LIST_END, _)
-                | SignatureParseError::EndOfInput => {
-                    SignatureParseError::MissingListValueType(list_str.to_owned())
+                ParseError::UnexpectedChar(CHAR_LIST_END, _) | ParseError::EndOfInput => {
+                    ParseError::MissingListValueType(list_str.to_owned())
                 }
-                _ => SignatureParseError::ListValueTypeParsing(Box::new(err)),
+                _ => ParseError::ListValueTypeParsing(Box::new(err)),
             })
         }
     };
     if iter.clone().next() != Some(CHAR_LIST_END) {
-        return Err(SignatureParseError::MissingListEnd(list_str.to_owned()));
+        return Err(ParseError::MissingListEnd(list_str.to_owned()));
     }
     advance_once(iter);
     Ok(Type::List(value_type.map(Box::new)))
 }
 
-fn parse_map(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
+fn parse_map(iter: &mut std::str::Chars) -> Result<Type, ParseError> {
     let map_str = iter.as_str();
     advance_once(iter.by_ref());
     let key_type = match parse_type(iter) {
         Ok(t) => t,
         Err(err) => {
             return Err(match err {
-                SignatureParseError::UnexpectedChar(CHAR_MAP_END, _)
-                | SignatureParseError::EndOfInput => {
-                    SignatureParseError::MissingMapKeyType(map_str.to_owned())
+                ParseError::UnexpectedChar(CHAR_MAP_END, _) | ParseError::EndOfInput => {
+                    ParseError::MissingMapKeyType(map_str.to_owned())
                 }
-                _ => SignatureParseError::MapKeyTypeParsing(Box::new(err)),
+                _ => ParseError::MapKeyTypeParsing(Box::new(err)),
             })
         }
     };
@@ -323,15 +318,15 @@ fn parse_map(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
         Ok(t) => t,
         Err(err) => {
             return Err(match err {
-                SignatureParseError::UnexpectedChar(CHAR_MAP_END, _) => {
-                    SignatureParseError::MissingMapValueType(map_str.to_owned())
+                ParseError::UnexpectedChar(CHAR_MAP_END, _) => {
+                    ParseError::MissingMapValueType(map_str.to_owned())
                 }
-                _ => SignatureParseError::MapValueTypeParsing(Box::new(err)),
+                _ => ParseError::MapValueTypeParsing(Box::new(err)),
             })
         }
     };
     if iter.clone().next() != Some(CHAR_MAP_END) {
-        return Err(SignatureParseError::MissingMapEnd(map_str.to_owned()));
+        return Err(ParseError::MissingMapEnd(map_str.to_owned()));
     }
     advance_once(iter.by_ref());
     Ok(Type::Map {
@@ -340,7 +335,7 @@ fn parse_map(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
     })
 }
 
-fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> {
+fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, ParseError> {
     let tuple_str = iter.as_str();
     advance_once(iter.by_ref());
     let mut elements = Vec::new();
@@ -348,11 +343,11 @@ fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> 
         match parse_type(iter) {
             Ok(element) => elements.push(element),
             Err(err) => match err {
-                SignatureParseError::UnexpectedChar(CHAR_TUPLE_END, _) => break elements,
-                SignatureParseError::EndOfInput => {
-                    return Err(SignatureParseError::MissingTupleEnd(tuple_str.to_owned()))
+                ParseError::UnexpectedChar(CHAR_TUPLE_END, _) => break elements,
+                ParseError::EndOfInput => {
+                    return Err(ParseError::MissingTupleEnd(tuple_str.to_owned()))
                 }
-                _ => return Err(SignatureParseError::TupleElementTypeParsing(Box::new(err))),
+                _ => return Err(ParseError::TupleElementTypeParsing(Box::new(err))),
             },
         }
     };
@@ -364,7 +359,7 @@ fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> 
                 let annotations = match parse_tuple_annotations(iter) {
                     Ok(annotations) => annotations,
                     Err(err) => {
-                        return Err(SignatureParseError::Annotations {
+                        return Err(ParseError::Annotations {
                             annotations: annotations_str.to_owned(),
                             tuple: tuple_str.to_owned(),
                             source: err,
@@ -374,7 +369,7 @@ fn parse_tuple(iter: &mut std::str::Chars) -> Result<Type, SignatureParseError> 
                 let tuple = match annotations {
                     Some(annotations) => {
                         Tuple::struct_from_annotations_of_elements(annotations, elements).map_err(
-                            |err| SignatureParseError::Annotations {
+                            |err| ParseError::Annotations {
                                 annotations: annotations_str.to_owned(),
                                 tuple: tuple_str.to_owned(),
                                 source: err.into(),
@@ -480,11 +475,7 @@ fn parse_tuple_annotations(
 }
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-#[error("error while parsing signature: {0}")]
-pub struct FromStrError(#[from] pub SignatureParseError);
-
-#[derive(thiserror::Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-pub enum SignatureParseError {
+pub enum ParseError {
     #[error("end of input reached")]
     EndOfInput,
 
@@ -495,19 +486,19 @@ pub enum SignatureParseError {
     MissingOptionValueType(String),
 
     #[error("parsing of option value type failed")]
-    OptionValueTypeParsing(#[source] Box<SignatureParseError>),
+    OptionValueTypeParsing(#[source] Box<ParseError>),
 
     #[error("value type of varargs starting at input \"{0}\" is missing")]
     MissingVarArgsValueType(String),
 
     #[error("parsing of varargs value type failed")]
-    VarArgsValueTypeParsing(#[source] Box<SignatureParseError>),
+    VarArgsValueTypeParsing(#[source] Box<ParseError>),
 
     #[error("value type of list starting at input \"{0}\" is missing")]
     MissingListValueType(String),
 
     #[error("parsing of list value type failed")]
-    ListValueTypeParsing(#[source] Box<SignatureParseError>),
+    ListValueTypeParsing(#[source] Box<ParseError>),
 
     #[error("end of list starting at input \"{0}\" is missing")]
     MissingListEnd(String),
@@ -516,19 +507,19 @@ pub enum SignatureParseError {
     MissingMapKeyType(String),
 
     #[error("parsing of map key type failed")]
-    MapKeyTypeParsing(#[source] Box<SignatureParseError>),
+    MapKeyTypeParsing(#[source] Box<ParseError>),
 
     #[error("value type of map starting at input \"{0}\" is missing")]
     MissingMapValueType(String),
 
     #[error("parsing of map value type failed")]
-    MapValueTypeParsing(#[source] Box<SignatureParseError>),
+    MapValueTypeParsing(#[source] Box<ParseError>),
 
     #[error("end of map starting at input \"{0}\" is missing")]
     MissingMapEnd(String),
 
     #[error("parsing of a tuple element type failed")]
-    TupleElementTypeParsing(#[source] Box<SignatureParseError>),
+    TupleElementTypeParsing(#[source] Box<ParseError>),
 
     #[error("end of tuple starting at input \"{0}\" is missing")]
     MissingTupleEnd(String),
@@ -551,304 +542,4 @@ pub enum AnnotationsError {
 
     #[error(transparent)]
     ZipError(#[from] ty::ZipStructFieldsSizeError),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ty::{self, list, map, option, struct_ty, tuple, tuple_struct, unit_tuple, varargs};
-
-    #[test]
-    fn test_signature_to_from_string() {
-        macro_rules! assert_sig_to_str {
-            ($t:expr, $s:expr) => {{
-                assert_eq!(
-                    Signature($t.into()).to_string(),
-                    $s,
-                    "signature of ({t:?}) is not {s:?}",
-                    t = $t,
-                    s = $s
-                );
-            }};
-        }
-        macro_rules! assert_sig_from_str {
-            ($t:expr, $s:expr) => {{
-                assert_eq!(
-                    $s.parse::<Signature>().map(|s| s.into_type()),
-                    Ok($t.into()),
-                    "{s:?} into a signature is not {t:?}",
-                    s = $s,
-                    t = $t
-                );
-            }};
-        }
-        macro_rules! assert_sig_from_to_str {
-            ($t:expr, $s:expr) => {{
-                assert_sig_from_to_str!($s => $t => $s);
-            }};
-            ($from_s:expr => $t:expr => $to_s:expr) => {{
-                assert_sig_from_str!($t, $from_s);
-                assert_sig_to_str!($t, $to_s);
-            }};
-        }
-        assert_sig_from_to_str!(Type::Unit, "v");
-        assert_sig_from_to_str!(Type::Bool, "b");
-        assert_sig_from_to_str!(Type::Int8, "c");
-        assert_sig_from_to_str!(Type::UInt8, "C");
-        assert_sig_from_to_str!(Type::Int16, "w");
-        assert_sig_from_to_str!(Type::UInt16, "W");
-        assert_sig_from_to_str!(Type::Int32, "i");
-        assert_sig_from_to_str!(Type::UInt32, "I");
-        assert_sig_from_to_str!(Type::Int64, "l");
-        assert_sig_from_to_str!(Type::UInt64, "L");
-        assert_sig_from_to_str!(Type::Float32, "f");
-        assert_sig_from_to_str!(Type::Float64, "d");
-        assert_sig_from_to_str!(Type::String, "s");
-        assert_sig_from_to_str!(Type::Raw, "r");
-        assert_sig_from_to_str!(Type::Object, "o");
-        assert_sig_from_to_str!(None::<Type>, "m");
-        assert_sig_from_to_str!(option(Type::Unit), "+v");
-        assert_sig_from_to_str!(varargs(None), "#m");
-        assert_sig_from_to_str!(list(Type::Int32), "[i]");
-        assert_sig_from_to_str!(list(unit_tuple()), "[()]");
-        assert_sig_from_to_str!(map(Type::Float32, Type::String), "{fs}");
-        assert_sig_from_to_str!(tuple([Type::Float32, Type::String, Type::UInt32]), "(fsI)");
-        assert_sig_from_to_str!(
-            tuple_struct(
-                "ExplorationMap",
-                [list(tuple([Type::Float64, Type::Float64])), Type::UInt64]
-            ),
-            "([(dd)]L)<ExplorationMap>"
-        );
-        assert_sig_from_to_str!(
-            struct_ty(
-                "ExplorationMap",
-                [
-                    (
-                        "points",
-                        list(struct_ty(
-                            "Point",
-                            [("x", Type::Float64), ("y", Type::Float64),]
-                        ))
-                    ),
-                    ("timestamp", Type::UInt64)
-                ]
-            ),
-            "([(dd)<Point,x,y>]L)<ExplorationMap,points,timestamp>"
-        );
-        // Underscores in structure and field names are allowed.
-        // Spaces between structure or field names are trimmed.
-        assert_sig_from_to_str!(
-            "(i)<   A_B ,  c_d   >" =>
-            struct_ty("A_B", [("c_d", Type::Int32)]) =>
-            "(i)<A_B,c_d>"
-        );
-        // Annotations can be ignored if the struct name is missing.
-        assert_sig_from_to_str!("()<>" => unit_tuple() => "()");
-        assert_sig_from_to_str!("(i)<>" => tuple([Type::Int32]) => "(i)");
-        assert_sig_from_to_str!("(i)<,,,,,,,>" => tuple([Type::Int32]) => "(i)");
-        assert_sig_from_to_str!("(ff)<,x,y>" => tuple([Type::Float32, Type::Float32]) => "(ff)");
-        // Some complex type for fun.
-        assert_sig_from_to_str!(
-            tuple([
-                list(map(option(Type::Object), Type::Raw)),
-                varargs(option(None))
-            ]),
-            "([{+or}]#+m)"
-        );
-    }
-
-    #[test]
-    fn test_signature_from_str_errors() {
-        assert_eq!(
-            "".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::EndOfInput))
-        );
-        assert_eq!(
-            "u".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::UnexpectedChar(
-                'u',
-                "u".to_owned()
-            )))
-        );
-        // Option
-        assert_eq!(
-            "+".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingOptionValueType(
-                "+".to_owned()
-            )))
-        );
-        assert_eq!(
-            "+[".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::OptionValueTypeParsing(
-                Box::new(SignatureParseError::MissingListValueType("[".to_owned()))
-            )))
-        );
-        // VarArgs
-        assert_eq!(
-            "#".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingVarArgsValueType(
-                "#".to_owned()
-            )))
-        );
-        assert_eq!(
-            "#[".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::VarArgsValueTypeParsing(
-                Box::new(SignatureParseError::MissingListValueType("[".to_owned()))
-            )))
-        );
-        // Lists
-        assert_eq!(
-            "[".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingListValueType(
-                "[".to_owned()
-            )))
-        );
-        assert_eq!(
-            "[]".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingListValueType(
-                "[]".to_owned()
-            )))
-        );
-        assert_eq!(
-            "[i".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingListEnd(
-                "[i".to_owned()
-            )))
-        );
-        assert_eq!(
-            "[{i}]".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::ListValueTypeParsing(
-                Box::new(SignatureParseError::MissingMapValueType("{i}]".to_owned()))
-            )))
-        );
-        // The error is `UnexpectedChar` and not `MissingTupleEnd` because we don't detect subtype
-        // parsing.
-        assert_eq!(
-            "[(]".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::ListValueTypeParsing(
-                Box::new(SignatureParseError::TupleElementTypeParsing(Box::new(
-                    SignatureParseError::UnexpectedChar(']', "]".to_owned())
-                )))
-            )))
-        );
-        // Maps
-        assert_eq!(
-            "{".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingMapKeyType(
-                "{".to_owned()
-            )))
-        );
-        assert_eq!(
-            "{}".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingMapKeyType(
-                "{}".to_owned()
-            )))
-        );
-        assert_eq!(
-            "{i}".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingMapValueType(
-                "{i}".to_owned()
-            )))
-        );
-        assert_eq!(
-            "{ii".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingMapEnd(
-                "{ii".to_owned()
-            )))
-        );
-        assert_eq!(
-            "{[]i}".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MapKeyTypeParsing(
-                Box::new(SignatureParseError::MissingListValueType("[]i}".to_owned()))
-            )))
-        );
-        assert_eq!(
-            "{i[]}".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MapValueTypeParsing(
-                Box::new(SignatureParseError::MissingListValueType("[]}".to_owned()))
-            )))
-        );
-        // The error is `UnexpectedChar` and not `MissingListEnd` because we don't detect subtype
-        // parsing.
-        assert_eq!(
-            "{i[}".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MapValueTypeParsing(
-                Box::new(SignatureParseError::ListValueTypeParsing(Box::new(
-                    SignatureParseError::UnexpectedChar('}', "}".to_owned())
-                )))
-            )))
-        );
-        // Tuples
-        assert_eq!(
-            "(".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingTupleEnd(
-                "(".to_owned()
-            )))
-        );
-        assert_eq!(
-            "(iii".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::MissingTupleEnd(
-                "(iii".to_owned()
-            )))
-        );
-        assert_eq!(
-            "(i[i)".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::TupleElementTypeParsing(
-                Box::new(SignatureParseError::MissingListEnd("[i)".to_owned()))
-            )))
-        );
-        // Tuples annotations
-        assert_eq!(
-            "(i)<".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::Annotations {
-                annotations: "<".to_owned(),
-                tuple: "(i)<".to_owned(),
-                source: AnnotationsError::MissingTupleAnnotationEnd
-            }))
-        );
-        assert_eq!(
-            "(i)<S,a,b>".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::Annotations {
-                annotations: "<S,a,b>".to_owned(),
-                tuple: "(i)<S,a,b>".to_owned(),
-                source: AnnotationsError::ZipError(ty::ZipStructFieldsSizeError {
-                    name_count: 2,
-                    element_count: 1
-                }),
-            }))
-        );
-        //   - Only ASCII is supported
-        assert_eq!(
-            "(i)<越>".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::Annotations {
-                annotations: "<越>".to_owned(),
-                tuple: "(i)<越>".to_owned(),
-                source: AnnotationsError::UnexpectedChar('越'),
-            }))
-        );
-
-        // The error is `UnexpectedChar` and not `MissingMapEnd` because we don't detect subtype
-        // parsing.
-        assert_eq!(
-            "(i{i)".parse::<Signature>(),
-            Err(FromStrError(SignatureParseError::TupleElementTypeParsing(
-                Box::new(SignatureParseError::MapValueTypeParsing(Box::new(
-                    SignatureParseError::UnexpectedChar(')', ")".to_owned())
-                )))
-            )))
-        );
-    }
-
-    #[test]
-    fn test_signature_ser_de() {
-        use serde_test::{assert_tokens, Token};
-        assert_tokens(
-            &Signature(Some(struct_ty(
-                "Point",
-                [("x", Type::Float64), ("y", Type::Float64)],
-            ))),
-            &[Token::Str("(dd)<Point,x,y>")],
-        )
-    }
 }

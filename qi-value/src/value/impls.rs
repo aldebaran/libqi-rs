@@ -1,9 +1,9 @@
 use super::{FromValue, FromValueError, IntoValue, ToValue, Value};
-use crate::{ty, Reflect, RuntimeReflect, Type};
+use crate::{ty, value::String, Reflect, RuntimeReflect, Type};
 use bytes::Bytes;
 use ordered_float::OrderedFloat;
 use seq_macro::seq;
-use std::{borrow::Cow, hash::Hash, rc::Rc, sync::Arc};
+use std::{borrow::Cow, hash::Hash, rc::Rc, string::String as StdString, sync::Arc};
 
 macro_rules! impl_reflect {
     (impl $( < $($lt:lifetime,)* $($params:ident),* $(,)*> )? for $t:ty => $vt:ident $(where $($bounds:tt)*)?) => {
@@ -200,20 +200,18 @@ impl<'a> FromValue<'a> for char {
                 actual: actual.to_string(),
             }
         }
-        fn from_str(s: &str) -> Result<char, FromValueError> {
-            let mut chars = s.chars();
-            let c = chars.next().ok_or_else(|| make_error("an empty string"))?;
-            if chars.next().is_some() {
-                return Err(make_error(format!(
-                    "a string of size {}",
-                    chars.count() + 2
-                )));
+        match value.as_string().and_then(String::as_str) {
+            Some(str) => {
+                let mut chars = str.chars();
+                let c = chars.next().ok_or_else(|| make_error("an empty string"))?;
+                if chars.next().is_some() {
+                    return Err(make_error(format!(
+                        "a string of size {}",
+                        chars.count() + 2
+                    )));
+                }
+                Ok(c)
             }
-            Ok(c)
-        }
-        match value {
-            Value::String(s) => from_str(&s),
-            Value::ByteString(s) => from_str(std::str::from_utf8(&s)?),
             _ => Err(make_error(value)),
         }
     }
@@ -225,15 +223,14 @@ impl_reflect!(impl for &str => String);
 
 impl ToValue for str {
     fn to_value(&self) -> Value<'_> {
-        Value::String(Cow::Borrowed(self))
+        String::from(self).into()
     }
 }
 
-impl<'long: 'short, 'short> FromValue<'long> for &'short str {
-    fn from_value(value: Value<'long>) -> Result<Self, FromValueError> {
-        match value {
-            Value::String(Cow::Borrowed(s)) => Ok(s),
-            Value::ByteString(Cow::Borrowed(s)) => Ok(std::str::from_utf8(s)?),
+impl<'v: 's, 's> FromValue<'v> for &'s str {
+    fn from_value(value: Value<'v>) -> Result<Self, FromValueError> {
+        match value.as_string() {
+            Some(String::Borrowed(str)) => Ok(str),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a borrowed string".to_owned(),
                 actual: value.ty().to_string(),
@@ -244,28 +241,29 @@ impl<'long: 'short, 'short> FromValue<'long> for &'short str {
 
 // String
 // ============================================================================
-impl_reflect!(impl for String => String);
+impl_reflect!(impl for StdString => String);
 
-impl ToValue for String {
+impl ToValue for StdString {
     fn to_value(&self) -> Value<'_> {
-        Value::String(Cow::Borrowed(self))
+        String::Borrowed(self).into()
     }
 }
 
-impl<'a> IntoValue<'a> for String {
+impl<'a> IntoValue<'a> for StdString {
     fn into_value(self) -> Value<'a> {
-        Value::String(Cow::Owned(self))
+        String::Owned(self).into()
     }
 }
 
-impl FromValue<'_> for String {
+impl FromValue<'_> for StdString {
     fn from_value(value: Value<'_>) -> Result<Self, FromValueError> {
-        match value {
-            Value::String(s) => Ok(s.into_owned()),
-            Value::ByteString(s) => Ok(String::from_utf8(s.into_owned())?),
+        let value_type = value.ty();
+        match value.into_string() {
+            Some(String::Borrowed(str)) => Ok(str.to_owned()),
+            Some(String::Owned(str)) => Ok(str),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a String".to_owned(),
-                actual: value.ty().to_string(),
+                actual: value_type.to_string(),
             }),
         }
     }
@@ -273,30 +271,52 @@ impl FromValue<'_> for String {
 
 // CStr
 // ============================================================================
+impl_reflect!(impl for std::ffi::CStr => String);
+
+impl ToValue for std::ffi::CStr {
+    fn to_value(&self) -> Value<'_> {
+        String::from_maybe_utf8(self.to_bytes()).into()
+    }
+}
+
+impl<'v: 's, 's> FromValue<'v> for &'s std::ffi::CStr {
+    fn from_value(value: Value<'v>) -> Result<Self, FromValueError> {
+        let value_type = value.ty();
+        match value.as_string() {
+            Some(String::Bytes(bytes)) => std::ffi::CStr::from_bytes_until_nul(bytes)
+                .map_err(|err| FromValueError::BadNulChar(err.into())),
+            _ => Err(FromValueError::TypeMismatch {
+                expected: "a C borrowed string".to_owned(),
+                actual: value_type.to_string(),
+            }),
+        }
+    }
+}
 
 // CString
 // ============================================================================
-impl_reflect!(impl for std::ffi::CString => Raw);
+impl_reflect!(impl for std::ffi::CString => String);
 
 impl ToValue for std::ffi::CString {
     fn to_value(&self) -> Value<'_> {
-        Value::ByteString(Cow::Borrowed(self.as_bytes()))
+        String::Bytes(self.as_bytes()).into()
     }
 }
 
 impl<'a> IntoValue<'a> for std::ffi::CString {
     fn into_value(self) -> Value<'a> {
-        Value::ByteString(Cow::Owned(self.as_bytes().to_owned()))
+        String::ByteBuf(self.as_bytes().to_owned()).into()
     }
 }
 
 impl<'a> FromValue<'a> for std::ffi::CString {
     fn from_value(value: Value<'a>) -> Result<Self, FromValueError> {
-        match value {
-            Value::String(s) => Ok(Self::new(s.into_owned())?),
+        let value_type = value.ty();
+        match value.into_string() {
+            Some(str) => Self::new(str).map_err(|err| FromValueError::BadNulChar(err.into())),
             _ => Err(FromValueError::TypeMismatch {
                 expected: "a C String".to_owned(),
-                actual: value.ty().to_string(),
+                actual: value_type.to_string(),
             }),
         }
     }
@@ -309,7 +329,7 @@ where
     T: Reflect,
 {
     fn ty() -> Option<Type> {
-        Some(ty::option(<T as Reflect>::ty()))
+        Some(Type::option_of(<T as Reflect>::ty()))
     }
 }
 
@@ -318,7 +338,7 @@ where
     T: RuntimeReflect,
 {
     fn ty(&self) -> Type {
-        ty::option(self.as_ref().map(RuntimeReflect::ty))
+        Type::option_of(self.as_ref().map(RuntimeReflect::ty))
     }
 }
 
@@ -392,7 +412,7 @@ macro_rules! impl_list_value {
             T: Reflect,
         {
             fn ty() -> Option<Type> {
-                Some(ty::list(<T as Reflect>::ty()))
+                Some(Type::list_of(<T as Reflect>::ty()))
             }
         }
 
@@ -402,7 +422,7 @@ macro_rules! impl_list_value {
         {
             fn ty(&self) -> Type {
                 let value_type = ty::reduce_type(self.iter().map(RuntimeReflect::ty));
-                ty::list(value_type)
+                Type::list_of(value_type)
             }
         }
 
@@ -455,7 +475,7 @@ where
     T: Reflect,
 {
     fn ty() -> Option<Type> {
-        Some(ty::list(T::ty()))
+        Some(Type::list_of(T::ty()))
     }
 }
 
@@ -465,7 +485,7 @@ where
 {
     fn ty(&self) -> Type {
         let value_type = ty::reduce_type(self.iter().map(RuntimeReflect::ty));
-        ty::list(value_type)
+        Type::list_of(value_type)
     }
 }
 
@@ -500,7 +520,7 @@ macro_rules! impl_map_value {
             V: Reflect,
         {
             fn ty() -> Option<Type> {
-                Some(ty::map(K::ty(), V::ty()))
+                Some(Type::map_of(K::ty(), V::ty()))
             }
         }
 
@@ -512,7 +532,7 @@ macro_rules! impl_map_value {
             fn ty(&self) -> Type {
                 let (key_type, value_type) =
                     ty::reduce_map_types(self.iter().map(|(k, v)| (k.ty(), v.ty())));
-                ty::map(key_type, value_type)
+                Type::map_of(key_type, value_type)
             }
         }
 
