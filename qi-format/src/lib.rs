@@ -6,9 +6,8 @@
 const FALSE_BOOL: u8 = 0;
 const TRUE_BOOL: u8 = 1;
 
-mod read;
-
-mod write;
+pub mod read;
+pub mod write;
 
 pub mod ser;
 #[doc(inline)]
@@ -38,9 +37,6 @@ pub enum Error {
     #[error("expected {0} elements, got one more")]
     UnexpectedElement(usize),
 
-    #[error("string data is not valid UTF-8")]
-    InvalidStringUtf8(#[from] std::str::Utf8Error),
-
     #[error("failure to process sequence size")]
     SequenceSize(#[source] Box<Error>),
 
@@ -58,12 +54,6 @@ pub enum Error {
 
     #[error("{0}")]
     Custom(std::string::String),
-}
-
-impl From<std::string::FromUtf8Error> for Error {
-    fn from(err: std::string::FromUtf8Error) -> Self {
-        Self::InvalidStringUtf8(err.utf8_error())
-    }
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

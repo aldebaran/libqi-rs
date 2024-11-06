@@ -2,7 +2,7 @@ use pretty_assertions::assert_eq;
 use qi_format::{from_slice, to_bytes};
 use qi_value::{
     object::{MetaMethod, MetaObject, MetaProperty, MetaSignal, Object},
-    os, ty, ActionId, Dynamic, Map, ObjectId, Reflect, ServiceId, Signature, Type,
+    os, ActionId, Dynamic, Map, ObjectId, Reflect, ServiceId, Signature, Type,
 };
 use serde_with::serde_as;
 use std::{collections::BTreeMap, str::FromStr};
@@ -198,7 +198,7 @@ fn object_descr_from_to_format() {
                             uid: ActionId(0),
                             return_signature: Signature::new(Some(Type::UInt64)),
                             name: String::from("registerEvent"),
-                            parameters_signature: Signature::new(Some(ty::tuple([
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
                                 Type::UInt32,
                                 Type::UInt32,
                                 Type::UInt64,
@@ -214,7 +214,7 @@ fn object_descr_from_to_format() {
                             uid: ActionId(1),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("unregisterEvent"),
-                            parameters_signature: Signature::new(Some(ty::tuple([
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
                                 Type::UInt32,
                                 Type::UInt32,
                                 Type::UInt64,
@@ -230,7 +230,9 @@ fn object_descr_from_to_format() {
                             uid: ActionId(2),
                             return_signature: Signature::new(MetaObject::ty()),
                             name: String::from("metaObject"),
-                            parameters_signature: Signature::new(Some(ty::tuple([Type::UInt32]))),
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
+                                Type::UInt32
+                            ]))),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -242,7 +244,9 @@ fn object_descr_from_to_format() {
                             uid: ActionId(3),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("terminate"),
-                            parameters_signature: Signature::new(Some(ty::tuple([Type::UInt32]))),
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
+                                Type::UInt32
+                            ]))),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -254,7 +258,7 @@ fn object_descr_from_to_format() {
                             uid: ActionId(5),
                             return_signature: Signature::dynamic(),
                             name: String::from("property"),
-                            parameters_signature: Signature::new(Some(ty::tuple([None]))),
+                            parameters_signature: Signature::new(Some(Type::tuple_of([None]))),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -266,7 +270,9 @@ fn object_descr_from_to_format() {
                             uid: ActionId(6),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("setProperty"),
-                            parameters_signature: Signature::new(Some(ty::tuple([None, None]))),
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
+                                None, None
+                            ]))),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -276,9 +282,9 @@ fn object_descr_from_to_format() {
                         ActionId(7),
                         MetaMethod {
                             uid: ActionId(7),
-                            return_signature: Signature::new(Some(ty::list(Type::String))),
+                            return_signature: Signature::new(Some(Type::list_of(Type::String))),
                             name: String::from("properties"),
-                            parameters_signature: Signature::new(Some(ty::unit_tuple())),
+                            parameters_signature: Signature::new(Some(Type::unit_tuple())),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -290,7 +296,7 @@ fn object_descr_from_to_format() {
                             uid: ActionId(8),
                             return_signature: Signature::new(Some(Type::UInt64)),
                             name: String::from("registerEventWithSignature"),
-                            parameters_signature: Signature::new(Some(ty::tuple([
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
                                 Type::UInt32,
                                 Type::UInt32,
                                 Type::UInt64,
@@ -307,7 +313,7 @@ fn object_descr_from_to_format() {
                             uid: ActionId(80),
                             return_signature: Signature::new(Some(Type::Bool)),
                             name: String::from("isStatsEnabled"),
-                            parameters_signature: Signature::new(Some(ty::unit_tuple())),
+                            parameters_signature: Signature::new(Some(Type::unit_tuple())),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -319,7 +325,9 @@ fn object_descr_from_to_format() {
                             uid: ActionId(81),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("enableStats"),
-                            parameters_signature: Signature::new(Some(ty::tuple([Type::Bool]))),
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
+                                Type::Bool
+                            ]))),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -330,7 +338,7 @@ fn object_descr_from_to_format() {
                         MetaMethod {
                             uid: ActionId(82),
                             return_signature: Signature::new(Some({
-                                let minmaxsum = ty::struct_ty(
+                                let minmaxsum = Type::struct_of(
                                     "MinMaxSum",
                                     [
                                         ("minValue", Type::Float32),
@@ -338,9 +346,9 @@ fn object_descr_from_to_format() {
                                         ("cumulatedValue", Type::Float32),
                                     ],
                                 );
-                                ty::map(
+                                Type::map_of(
                                     Type::UInt32,
-                                    ty::struct_ty(
+                                    Type::struct_of(
                                         "MethodStatistics",
                                         [
                                             ("count", Type::UInt32),
@@ -352,7 +360,7 @@ fn object_descr_from_to_format() {
                                 )
                             })),
                             name: String::from("stats"),
-                            parameters_signature: Signature::new(Some(ty::unit_tuple())),
+                            parameters_signature: Signature::new(Some(Type::unit_tuple())),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -364,7 +372,7 @@ fn object_descr_from_to_format() {
                             uid: ActionId(83),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("clearStats"),
-                            parameters_signature: Signature::new(Some(ty::unit_tuple())),
+                            parameters_signature: Signature::new(Some(Type::unit_tuple())),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -376,7 +384,7 @@ fn object_descr_from_to_format() {
                             uid: ActionId(84),
                             return_signature: Signature::new(Some(Type::Bool)),
                             name: String::from("isTraceEnabled"),
-                            parameters_signature: Signature::new(Some(ty::unit_tuple())),
+                            parameters_signature: Signature::new(Some(Type::unit_tuple())),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -388,7 +396,9 @@ fn object_descr_from_to_format() {
                             uid: ActionId(85),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("enableTrace"),
-                            parameters_signature: Signature::new(Some(ty::tuple([Type::Bool]))),
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
+                                Type::Bool
+                            ]))),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -400,7 +410,9 @@ fn object_descr_from_to_format() {
                             uid: ActionId(100),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("pingMe"),
-                            parameters_signature: Signature::new(Some(ty::tuple([Type::Object]))),
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
+                                Type::Object
+                            ]))),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -412,7 +424,7 @@ fn object_descr_from_to_format() {
                             uid: ActionId(101),
                             return_signature: Signature::new(Some(Type::String)),
                             name: String::from("ping"),
-                            parameters_signature: Signature::new(Some(ty::unit_tuple())),
+                            parameters_signature: Signature::new(Some(Type::unit_tuple())),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -424,7 +436,9 @@ fn object_descr_from_to_format() {
                             uid: ActionId(102),
                             return_signature: Signature::new(Some(Type::Unit)),
                             name: String::from("nameMe"),
-                            parameters_signature: Signature::new(Some(ty::tuple([Type::String]))),
+                            parameters_signature: Signature::new(Some(Type::tuple_of([
+                                Type::String
+                            ]))),
                             description: String::new(),
                             parameters: vec![],
                             return_description: String::new(),
@@ -437,7 +451,7 @@ fn object_descr_from_to_format() {
                         MetaSignal {
                             uid: ActionId(86),
                             name: String::from("traceObject"),
-                            signature: Signature::new(Some(ty::tuple([ty::struct_ty(
+                            signature: Signature::new(Some(Type::tuple_of([Type::struct_of(
                                 "EventTrace",
                                 [
                                     ("id", Some(Type::UInt32)),
@@ -446,7 +460,7 @@ fn object_descr_from_to_format() {
                                     ("arguments", None),
                                     (
                                         "timestamp",
-                                        Some(ty::struct_ty(
+                                        Some(Type::struct_of(
                                             "timeval",
                                             [("tv_sec", Type::Int64), ("tv_usec", Type::Int64)],
                                         )),
@@ -464,7 +478,7 @@ fn object_descr_from_to_format() {
                         MetaSignal {
                             uid: ActionId(103),
                             name: String::from("name"),
-                            signature: Signature::new(Some(ty::tuple([Type::String]))),
+                            signature: Signature::new(Some(Type::tuple_of([Type::String]))),
                         },
                     ),
                 ]),
