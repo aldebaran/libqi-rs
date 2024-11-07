@@ -2,7 +2,7 @@ use crate::{
     node, object, session,
     value::{self, os},
 };
-use std::borrow::Cow;
+use qi_value::RuntimeReflect;
 pub use value::ServiceId as Id;
 
 pub(super) const MAIN_OBJECT_ID: object::Id = object::Id(1);
@@ -145,26 +145,27 @@ impl value::RuntimeReflect for ObjectUidAsStr {
 
 impl value::ToValue for ObjectUidAsStr {
     fn to_value(&self) -> value::Value<'_> {
-        value::Value::ByteString(Cow::Borrowed(self.0.bytes()))
+        value::String::from_maybe_utf8(self.0.bytes()).into()
     }
 }
 
 impl<'a> value::IntoValue<'a> for ObjectUidAsStr {
     fn into_value(self) -> value::Value<'a> {
-        value::Value::ByteString(Cow::Owned(self.0.bytes().to_vec()))
+        value::String::from_maybe_utf8_owned(self.0.bytes().to_vec()).into()
     }
 }
 
 impl<'a> value::FromValue<'a> for ObjectUidAsStr {
     fn from_value(value: value::Value<'a>) -> std::result::Result<Self, value::FromValueError> {
-        let bytes = value
-            .as_string_bytes()
+        let value_type = value.ty();
+        let value_str = value
+            .into_string()
             .ok_or_else(|| value::FromValueError::TypeMismatch {
                 expected: "an Object UID".to_owned(),
-                actual: value.to_string(),
+                actual: value_type.to_string(),
             })?;
-        let bytes =
-            <[u8; 20]>::try_from(bytes).map_err(|err| value::FromValueError::Other(err.into()))?;
+        let bytes = <[u8; 20]>::try_from(value_str.as_bytes())
+            .map_err(|err| value::FromValueError::Other(err.into()))?;
         Ok(Self(bytes.into()))
     }
 }
@@ -194,10 +195,12 @@ mod tests {
     use crate::messaging;
     use messaging::Address;
     use qi_format::{from_slice, to_bytes};
+    use qi_value::{de::ValueType, Reflect};
+    use serde::de::DeserializeSeed;
     use std::net::{Ipv4Addr, SocketAddr};
 
     #[test]
-    fn service_info_from_format() {
+    fn service_info_from_format_value() {
         let value_in = &[
             0x0a, 0x00, 0x00, 0x00, 0x43, 0x61, 0x6c, 0x63, 0x75, 0x6c, 0x61, 0x74, 0x6f, 0x72,
             0x02, 0x00, 0x00, 0x00, 0x24, 0x00, 0x00, 0x00, 0x39, 0x61, 0x36, 0x35, 0x62, 0x35,
@@ -213,7 +216,11 @@ mod tests {
             0xc1, 0x2e, 0xcb, 0xea, 0x6b, 0x58, 0xcc, 0x42, 0x20, 0xb7, 0x33, 0x3d, 0xc4, 0xe1,
             0x0d, 0x8a, 0xd6, 0x16,
         ][..];
-        let service_info: Info = from_slice(value_in).unwrap();
+        let service_info: Info = ValueType(<Info as Reflect>::ty().as_ref())
+            .deserialize(qi_format::SliceDeserializer::new(value_in))
+            .unwrap()
+            .cast_into()
+            .unwrap();
         assert_eq!(
             service_info,
             Info {

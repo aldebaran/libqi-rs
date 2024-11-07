@@ -1,4 +1,4 @@
-use crate::CapabilitiesMap;
+use crate::{CapabilitiesMap, OwnedCapabilitiesMap};
 use qi_value::Dynamic;
 pub use qi_value::{ActionId as Action, ObjectId as Object, ServiceId as Service};
 
@@ -133,8 +133,7 @@ impl Address {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone)]
 pub enum Message<Body> {
     Call {
         id: Id,
@@ -302,7 +301,9 @@ where
             Type::Capabilities => Self::Capabilities {
                 id,
                 address,
-                capabilities: body.deserialize().map_err(Into::into)?,
+                capabilities: body
+                    .deserialize::<serde_with::de::DeserializeAsWrap<_, OwnedCapabilitiesMap>>()?
+                    .into_inner(),
             },
             Type::Cancel => Self::Cancel {
                 id,
@@ -336,7 +337,7 @@ pub struct MetaData {
     pub(crate) ty: Type,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Oneway<Body> {
     Post(Body),
     Event(Body),
@@ -364,9 +365,7 @@ impl<Body> Oneway<Body> {
     }
 }
 
-#[derive(
-    Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub(crate) enum Response<T> {
     Reply(T),
     Error(String),

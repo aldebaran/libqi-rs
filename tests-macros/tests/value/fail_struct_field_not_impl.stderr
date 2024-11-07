@@ -47,6 +47,7 @@ error[E0277]: the trait bound `F: Reflect` is not satisfied
             BTreeSet<T>
             BinaryHeap<T>
             Box<T>
+            CStr
             CString
             Cow<'_, T>
             HashMap<K, V>
@@ -166,6 +167,7 @@ error[E0277]: the trait bound `F: RuntimeReflect` is not satisfied
             BTreeSet<T>
             BinaryHeap<T>
             Box<T>
+            CStr
             CString
             Cow<'_, T>
             HashMap<K, V>
@@ -284,6 +286,7 @@ error[E0277]: the trait bound `F: ToValue` is not satisfied
             BTreeSet<T>
             BinaryHeap<T>
             Box<T>
+            CStr
             CString
             HashMap<K, V>
             HashSet<T>
@@ -470,6 +473,7 @@ error[E0277]: the trait bound `F: IntoValue<'_>` is not satisfied
             `qi_value::Dynamic<T>` implements `IntoValue<'a>`
             `qi_value::Map<K, V>` implements `IntoValue<'a>`
             `qi_value::Object` implements `IntoValue<'a>`
+            `qi_value::String<'s>` implements `IntoValue<'s>`
             `std::option::Option<T>` implements `IntoValue<'a>`
             `std::string::String` implements `IntoValue<'a>`
             `u16` implements `IntoValue<'a>`
@@ -485,8 +489,9 @@ error[E0277]: the trait bound `F: FromValue<'_>` is not satisfied
   |                                                                        ^^^^^^^^^^^^^^^^^^^^ the trait `FromValue<'_>` is not implemented for `F`
   |
   = help: the following other types implement trait `FromValue<'a>`:
+            `&'s CStr` implements `FromValue<'v>`
+            `&'s str` implements `FromValue<'v>`
             `&'short [u8]` implements `FromValue<'long>`
-            `&'short str` implements `FromValue<'long>`
             `()` implements `FromValue<'_>`
             `(T0, T1)` implements `FromValue<'a>`
             `(T0, T1, T2)` implements `FromValue<'a>`

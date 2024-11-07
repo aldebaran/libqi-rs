@@ -18,6 +18,13 @@ impl<'s> String<'s> {
         }
     }
 
+    pub fn from_maybe_utf8_owned(bytes: Vec<u8>) -> Self {
+        match StdString::from_utf8(bytes) {
+            Ok(str) => str.into(),
+            Err(err) => err.into_bytes().into(),
+        }
+    }
+
     pub fn into_owned(self) -> String<'static> {
         match self {
             Self::Borrowed(str) => String::Owned(str.to_owned()),
@@ -73,27 +80,42 @@ impl<'s> From<String<'s>> for Vec<u8> {
     }
 }
 
-impl<'s> PartialEq for String<'s> {
+impl PartialEq<str> for String<'_> {
+    fn eq(&self, other: &str) -> bool {
+        match self.as_str() {
+            Some(str) => str.eq(other),
+            None => false,
+        }
+    }
+}
+
+impl PartialEq<String<'_>> for str {
+    fn eq(&self, other: &String<'_>) -> bool {
+        other.eq(self)
+    }
+}
+
+impl PartialEq for String<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.as_bytes() == other.as_bytes()
     }
 }
 
-impl<'s> Eq for String<'s> {}
+impl Eq for String<'_> {}
 
-impl<'s> PartialOrd for String<'s> {
+impl PartialOrd for String<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'s> Ord for String<'s> {
+impl Ord for String<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.as_bytes().cmp(other.as_bytes())
     }
 }
 
-impl<'s> Hash for String<'s> {
+impl Hash for String<'_> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.as_bytes().hash(state);
     }
@@ -105,7 +127,7 @@ impl<'s> IntoValue<'s> for String<'s> {
     }
 }
 
-impl<'a> serde::Serialize for String<'a> {
+impl serde::Serialize for String<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,

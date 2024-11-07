@@ -62,5 +62,5 @@ pub use crate::{
     reflect::{Reflect, RuntimeReflect},
     signature::Signature,
     ty::Type,
-    value::{de, FromValue, FromValueError, IntoValue, ToValue, Value},
+    value::{de, FromValue, FromValueError, IntoValue, String, ToValue, Value},
 };

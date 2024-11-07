@@ -9,6 +9,7 @@ use crate::{
 };
 use futures::{future, FutureExt, TryFutureExt};
 use messaging::message;
+use qi_messaging::OwnedCapabilitiesMap;
 use qi_value::{ActionId, Dynamic, ObjectId, ServiceId, Value};
 use std::{collections::HashMap, future::Future, sync::Arc};
 use tokio::sync::watch;
@@ -47,7 +48,7 @@ impl Controller {
         Ok(authentication::state_done_map(shared_capabilities))
     }
 
-    pub(super) async fn authenticate_to_server<'r, Body>(
+    pub(super) async fn authenticate_to_server<Body>(
         &self,
         client: &mut messaging::Client<Body>,
         parameters: HashMap<String, Value<'_>>,
@@ -70,8 +71,9 @@ impl Controller {
             )
             .await?;
         let mut shared_capabilities = authenticate_result
-            .deserialize()
-            .map_err(FormatError::MethodReturnValueDeserialization)?;
+            .deserialize::<serde_with::de::DeserializeAsWrap<_, OwnedCapabilitiesMap>>()
+            .map_err(FormatError::MethodReturnValueDeserialization)?
+            .into_inner();
         authentication::extract_state_result(&mut shared_capabilities)
             .map_err(AuthenticateToServerError::ResultState)?;
         capabilities::check_required(&shared_capabilities)

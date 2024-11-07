@@ -1,10 +1,9 @@
-use std::borrow::Cow;
-
 use assert_matches::assert_matches;
 use qi_value::{
     ty::{StructField, Tuple},
     AsRaw, IntoValue, Type, Value,
 };
+use std::borrow::Cow;
 
 #[derive(
     Debug,
@@ -82,12 +81,12 @@ fn test_basic_derive_to_value() {
             assert_matches!(
                 fields.as_slice(),
                 [
-                    Value::String(Cow::Borrowed(s)),
+                    Value::String(s),
                     Value::Bool(true),
                     Value::Unit,
                     Value::List(li)
                 ] => {
-                    assert_eq!(*s, "cookies");
+                    assert_eq!(s, "cookies");
                     assert_eq!(
                         li.as_slice(),
                         &[
@@ -117,7 +116,7 @@ fn test_basic_derive_into_value() {
             assert_matches!(
                 fields.as_slice(),
                 [
-                    Value::String(Cow::Owned(s)),
+                    Value::String(s),
                     Value::Bool(false), Value::Unit, Value::List(li)
                 ] => {
                     assert_eq!(s, "muffins");
@@ -202,10 +201,10 @@ fn test_borrows_derive_to_value() {
             assert_matches!(
                 tuple.as_slice(),
                 [
-                    Value::String(Cow::Borrowed(s)),
+                    Value::String(s),
                     Value::Raw(Cow::Borrowed([1, 20, 100, 200]))
                 ] => {
-                    assert_eq!(*s, "cupcakes");
+                    assert_eq!(s, "cupcakes");
                 }
             )
         }
@@ -224,10 +223,10 @@ fn test_borrows_derive_into_value() {
             assert_matches!(
                 tuple.as_slice(),
                 [
-                    Value::String(Cow::Borrowed(s)),
+                    Value::String(s),
                     Value::Raw(Cow::Borrowed([7, 5, 3, 2, 1]))
                 ] => {
-                    assert_eq!(*s, "apples");
+                    assert_eq!(s, "apples");
                 }
             )
         }

@@ -345,9 +345,7 @@ where
             .method(&action_ident)
             .ok_or_else(|| Error::MethodNotFound(action_ident.clone()))?;
         let args = args
-            .deserialize_seed(value::de::ValueOfType::new(
-                method.parameters_signature.to_type(),
-            ))
+            .deserialize_seed(value::de::ValueType(method.parameters_signature.to_type()))
             .map_err(FormatError::ArgumentsDeserialization)?;
         let reply = self.meta_call(action_ident, args).await?;
         Ok(Body::serialize(&reply).map_err(FormatError::MethodReturnValueSerialization)?)
@@ -369,7 +367,7 @@ where
                 return;
             }
         };
-        match args.deserialize_seed(value::de::ValueOfType::new(
+        match args.deserialize_seed(value::de::ValueType(
             target.parameters_signature().to_type(),
         )) {
             Ok(args) => self.meta_post(action_ident, args).await,
@@ -395,7 +393,7 @@ where
                 return;
             }
         };
-        match args.deserialize_seed(value::de::ValueOfType::new(signal.signature.to_type())) {
+        match args.deserialize_seed(value::de::ValueType(signal.signature.to_type())) {
             Ok(args) => self.meta_event(action_ident, args).await,
             Err(err) => info!(
                 error = &err as &dyn std::error::Error,

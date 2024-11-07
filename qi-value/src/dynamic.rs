@@ -1,5 +1,7 @@
 mod de;
 
+use serde::Serialize;
+
 use crate::{reflect::RuntimeReflect, FromValue, IntoValue, Reflect, ToValue, Value};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::From)]
@@ -81,6 +83,33 @@ where
         D: serde::Deserializer<'de>,
     {
         self::deserialize(deserializer).map(Self)
+    }
+}
+
+impl<T, U> serde_with::SerializeAs<Dynamic<T>> for Dynamic<U>
+where
+    U: serde_with::SerializeAs<T>,
+{
+    fn serialize_as<S>(source: &Dynamic<T>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serde_with::ser::SerializeAsWrap::<T, U>::new(&source.0).serialize(serializer)
+    }
+}
+
+impl<'de, T, U> serde_with::DeserializeAs<'de, Dynamic<T>> for Dynamic<U>
+where
+    U: serde_with::DeserializeAs<'de, T>,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<Dynamic<T>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::Deserialize;
+        Ok(Dynamic(
+            serde_with::de::DeserializeAsWrap::<T, U>::deserialize(deserializer)?.into_inner(),
+        ))
     }
 }
 

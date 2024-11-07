@@ -1,5 +1,3 @@
-use serde::de::DeserializeSeed;
-
 use super::Value;
 use crate::{
     dynamic::{self},
@@ -7,6 +5,7 @@ use crate::{
     value::String,
     IntoValue, Map, Object, Type,
 };
+use serde::{de::DeserializeSeed, Deserialize};
 use std::string::String as StdString;
 
 impl<'de: 'v, 'v> serde::Deserialize<'de> for Value<'v> {
@@ -15,6 +14,15 @@ impl<'de: 'v, 'v> serde::Deserialize<'de> for Value<'v> {
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_any(ValueVisitor)
+    }
+}
+
+impl<'de> serde_with::DeserializeAs<'de, Value<'static>> for Value<'_> {
+    fn deserialize_as<D>(deserializer: D) -> Result<Value<'static>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Value::deserialize(deserializer)?.into_owned())
     }
 }
 

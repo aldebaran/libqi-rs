@@ -149,7 +149,7 @@ where
             .client
             .call(address, args)
             .await?
-            .deserialize_seed(value::de::ValueOfType::new(return_type))
+            .deserialize_seed(value::de::ValueType(return_type))
             .map_err(FormatError::MethodReturnValueDeserialization)?
             .into_owned())
     }

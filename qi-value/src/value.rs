@@ -3,10 +3,10 @@ mod impls;
 mod ser;
 mod string;
 
+pub use self::string::String;
 use crate::{map::Map, reflect::RuntimeReflect, ty, Object, Type};
 use ordered_float::OrderedFloat;
 use std::{borrow::Cow, string::String as StdString};
-pub use string::String;
 
 /// The [`Value`] structure represents any value of the `qi` type system.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

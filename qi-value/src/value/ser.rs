@@ -1,3 +1,5 @@
+use serde::Serialize;
+
 use super::Value;
 use crate::dynamic;
 
@@ -35,5 +37,14 @@ impl serde::Serialize for Value<'_> {
             Value::Object(obj) => obj.serialize(serializer),
             Value::Dynamic(val) => dynamic::serialize(val, serializer),
         }
+    }
+}
+
+impl serde_with::SerializeAs<Value<'static>> for Value<'_> {
+    fn serialize_as<S>(source: &Value<'static>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        source.serialize(serializer)
     }
 }
