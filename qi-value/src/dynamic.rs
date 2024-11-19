@@ -1,11 +1,15 @@
 mod de;
 
-use serde::Serialize;
-
 use crate::{reflect::RuntimeReflect, FromValue, IntoValue, Reflect, ToValue, Value};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, derive_more::From)]
 pub struct Dynamic<T>(pub T);
+
+impl<T> Dynamic<T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
 
 impl<'a> Dynamic<Value<'a>> {
     pub fn into_owned(self) -> Dynamic<Value<'static>> {
@@ -86,30 +90,52 @@ where
     }
 }
 
-impl<T, U> serde_with::SerializeAs<Dynamic<T>> for Dynamic<U>
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AsDynamic;
+
+impl<T> serde_with::SerializeAs<T> for AsDynamic
 where
-    U: serde_with::SerializeAs<T>,
+    for<'a> &'a T: IntoValue<'a>,
+    T: RuntimeReflect,
 {
-    fn serialize_as<S>(source: &Dynamic<T>, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize_as<S>(source: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serde_with::ser::SerializeAsWrap::<T, U>::new(&source.0).serialize(serializer)
+        self::serialize(source, serializer)
     }
 }
 
-impl<'de, T, U> serde_with::DeserializeAs<'de, Dynamic<T>> for Dynamic<U>
+impl<'de, T> serde_with::DeserializeAs<'de, T> for AsDynamic
 where
-    U: serde_with::DeserializeAs<'de, T>,
+    T: FromValue<'de>,
 {
-    fn deserialize_as<D>(deserializer: D) -> Result<Dynamic<T>, D::Error>
+    fn deserialize_as<D>(deserializer: D) -> Result<T, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::Deserialize;
-        Ok(Dynamic(
-            serde_with::de::DeserializeAsWrap::<T, U>::deserialize(deserializer)?.into_inner(),
-        ))
+        self::deserialize(deserializer)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AsDynamicOwned;
+
+impl serde_with::SerializeAs<Value<'static>> for AsDynamicOwned {
+    fn serialize_as<S>(source: &Value<'static>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self::serialize(source, serializer)
+    }
+}
+
+impl<'de> serde_with::DeserializeAs<'de, Value<'static>> for AsDynamicOwned {
+    fn deserialize_as<D>(deserializer: D) -> Result<Value<'static>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        self::deserialize_value(deserializer).map(Value::into_owned)
     }
 }
 
@@ -142,15 +168,20 @@ where
     serializer.end()
 }
 
+fn deserialize_value<'de, D>(deserializer: D) -> Result<Value<'de>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserializer.deserialize_struct(SERDE_STRUCT_NAME, &Fields::KEYS, de::DynamicVisitor)
+}
+
 pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
 where
     T: FromValue<'de>,
     D: serde::Deserializer<'de>,
 {
     use serde::de::Error;
-    let value =
-        deserializer.deserialize_struct(SERDE_STRUCT_NAME, &Fields::KEYS, de::DynamicVisitor)?;
-    value
+    deserialize_value(deserializer)?
         .cast_into()
         .map_err(|err| D::Error::custom(err.to_string()))
 }

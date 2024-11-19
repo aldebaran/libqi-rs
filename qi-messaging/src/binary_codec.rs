@@ -44,7 +44,7 @@
 
 use crate::{
     message::{Address, Id, Message, MetaData, Type, Version},
-    Error,
+    // Error,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::marker::PhantomData;
@@ -87,14 +87,14 @@ pub enum EncodeError<E> {
     Write(#[from] std::io::Error),
 }
 
-impl<E> From<EncodeError<E>> for Error
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn from(err: EncodeError<E>) -> Self {
-        Self::LinkLost(err.into())
-    }
-}
+// impl<E> From<EncodeError<E>> for Error
+// where
+//     E: std::error::Error + Send + Sync + 'static,
+// {
+//     fn from(err: EncodeError<E>) -> Self {
+//         Self::LinkLost(err.into())
+//     }
+// }
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub struct Decoder<T> {
@@ -186,14 +186,14 @@ pub enum DecodeError<E> {
     Read(#[from] std::io::Error),
 }
 
-impl<E> From<DecodeError<E>> for Error
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn from(err: DecodeError<E>) -> Self {
-        Self::LinkLost(err.into())
-    }
-}
+// impl<E> From<DecodeError<E>> for Error
+// where
+//     E: std::error::Error + Send + Sync + 'static,
+// {
+//     fn from(err: DecodeError<E>) -> Self {
+//         Self::LinkLost(err.into())
+//     }
+// }
 
 fn decode_header<E>(src: &mut BytesMut) -> Result<Option<(usize, MetaData)>, DecodeError<E>> {
     if src.len() < HEADER_SIZE {

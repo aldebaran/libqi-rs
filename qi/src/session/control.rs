@@ -4,14 +4,13 @@ use super::{
 };
 use crate::{
     error::{FormatError, NoHandlerError},
-    messaging::{self, CapabilitiesMap},
+    messaging,
+    value::{ActionId, KeyDynValueMap, ObjectId, ServiceId},
     Error,
 };
 use futures::{future, FutureExt, TryFutureExt};
 use messaging::message;
-use qi_messaging::OwnedCapabilitiesMap;
-use qi_value::{ActionId, Dynamic, ObjectId, ServiceId, Value};
-use std::{collections::HashMap, future::Future, sync::Arc};
+use std::{future::Future, sync::Arc};
 use tokio::sync::watch;
 
 const SERVICE_ID: ServiceId = ServiceId(0);
@@ -22,25 +21,24 @@ fn is_control_address(address: message::Address) -> bool {
     address.service() == SERVICE_ID && address.object() == OBJECT_ID
 }
 
-const AUTHENTICATE_ADDRESS: message::Address =
+pub const AUTHENTICATE_ADDRESS: message::Address =
     message::Address(SERVICE_ID, OBJECT_ID, AUTHENTICATE_ACTION_ID);
 
 pub(super) struct Controller {
     authenticator: Box<dyn Authenticator + Send + Sync>,
-    capabilities: watch::Sender<Option<CapabilitiesMap<'static>>>,
+    capabilities: watch::Sender<Option<KeyDynValueMap>>,
     remote_authorized: watch::Sender<bool>,
 }
 
 impl Controller {
     fn authenticate(
         &self,
-        request: CapabilitiesMap<'_>,
-    ) -> Result<CapabilitiesMap<'static>, AuthenticateClientError> {
+        request: KeyDynValueMap,
+    ) -> Result<KeyDynValueMap, AuthenticateClientError> {
         let shared_capabilities = capabilities::shared_with_local(&request);
         capabilities::check_required(&shared_capabilities)?;
-        let parameters = request.into_iter().map(|(k, v)| (k, v.0)).collect();
         self.authenticator
-            .verify(parameters)
+            .verify(request)
             .map_err(AuthenticateClientError::AuthenticationVerification)?;
         self.capabilities
             .send_replace(Some(shared_capabilities.clone()));
@@ -51,7 +49,7 @@ impl Controller {
     pub(super) async fn authenticate_to_server<Body>(
         &self,
         client: &mut messaging::Client<Body>,
-        parameters: HashMap<String, Value<'_>>,
+        parameters: KeyDynValueMap,
     ) -> Result<(), Error>
     where
         Body: messaging::Body + Send,
@@ -59,11 +57,7 @@ impl Controller {
     {
         self.capabilities.send_replace(None); // Reset the capabilities
         let mut request = capabilities::local_map().clone();
-        request.extend(
-            parameters
-                .into_iter()
-                .map(|(k, v)| (k, Dynamic(v.into_owned()))),
-        );
+        request.extend(parameters);
         let authenticate_result = client
             .call(
                 AUTHENTICATE_ADDRESS,
@@ -71,9 +65,8 @@ impl Controller {
             )
             .await?;
         let mut shared_capabilities = authenticate_result
-            .deserialize::<serde_with::de::DeserializeAsWrap<_, OwnedCapabilitiesMap>>()
-            .map_err(FormatError::MethodReturnValueDeserialization)?
-            .into_inner();
+            .deserialize()
+            .map_err(FormatError::MethodReturnValueDeserialization)?;
         authentication::extract_state_result(&mut shared_capabilities)
             .map_err(AuthenticateToServerError::ResultState)?;
         capabilities::check_required(&shared_capabilities)
@@ -94,7 +87,7 @@ impl std::fmt::Debug for Controller {
 
 pub(super) struct Control<H> {
     pub(super) controller: Arc<Controller>,
-    pub(super) capabilities: watch::Receiver<Option<CapabilitiesMap<'static>>>,
+    pub(super) capabilities: watch::Receiver<Option<KeyDynValueMap>>,
     pub(super) remote_authorized: watch::Receiver<bool>,
     pub(super) handler: ControlledHandler<H>,
 }
@@ -136,7 +129,7 @@ pub(super) struct ControlledHandler<H> {
 impl<Handler, Body> messaging::Handler<Body> for ControlledHandler<Handler>
 where
     Handler: messaging::Handler<Body> + Sync,
-    Handler::Error: std::error::Error + Send + Sync + 'static,
+    Handler::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     Body: messaging::Body + Send,
     Body::Error: Send + Sync + 'static,
 {
@@ -173,11 +166,11 @@ where
         }
     }
 
-    async fn oneway(&self, address: message::Address, request: message::Oneway<Body>) {
+    async fn fire_and_forget(&self, address: message::Address, request: message::FireAndForget<Body>) {
         if is_control_address(address) {
             // TODO: Handle capabilities request ?
         } else if *self.controller.remote_authorized.borrow() {
-            self.inner.oneway(address, request).await
+            self.inner.fire_and_forget(address, request).await
         }
     }
 }

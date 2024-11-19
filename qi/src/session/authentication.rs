@@ -1,18 +1,14 @@
-use qi_messaging::CapabilitiesMap;
-use qi_value::{Dynamic, Value};
-use std::collections::HashMap;
-
-pub type Parameters<'a> = HashMap<String, Value<'a>>;
+use qi_value::{KeyDynValueMap, Value};
 
 pub trait Authenticator {
-    fn verify(&self, parameters: Parameters) -> Result<(), Error>;
+    fn verify(&self, parameters: KeyDynValueMap) -> Result<(), Error>;
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct PermissiveAuthenticator;
 
 impl Authenticator for PermissiveAuthenticator {
-    fn verify(&self, _parameters: Parameters) -> Result<(), Error> {
+    fn verify(&self, _parameters: KeyDynValueMap) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -24,7 +20,7 @@ pub struct UserTokenAuthenticator {
 }
 
 impl Authenticator for UserTokenAuthenticator {
-    fn verify(&self, mut parameters: Parameters) -> Result<(), Error> {
+    fn verify(&self, mut parameters: KeyDynValueMap) -> Result<(), Error> {
         let user: &str = parameters
             .remove(USER_KEY)
             .ok_or_else(|| Error::UserValue("missing".to_owned()))?
@@ -41,13 +37,13 @@ impl Authenticator for UserTokenAuthenticator {
     }
 }
 
-pub(super) fn state_done_map(mut capabilities: CapabilitiesMap) -> CapabilitiesMap {
-    capabilities.insert(STATE_KEY.to_owned(), Dynamic(Value::UInt32(STATE_DONE)));
+pub(super) fn state_done_map(mut capabilities: KeyDynValueMap) -> KeyDynValueMap {
+    capabilities.set(STATE_KEY, STATE_DONE);
     capabilities
 }
 
-pub(super) fn extract_state_result(capabilities: &mut CapabilitiesMap) -> Result<(), StateError> {
-    let Dynamic(state) = capabilities
+pub(super) fn extract_state_result(capabilities: &mut KeyDynValueMap) -> Result<(), StateError> {
+    let state = capabilities
         .remove(STATE_KEY)
         .ok_or_else(|| StateError::Missing)?
         .clone();

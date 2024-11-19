@@ -1,6 +1,5 @@
-use crate::{CapabilitiesMap, OwnedCapabilitiesMap};
 use qi_value::Dynamic;
-pub use qi_value::{ActionId as Action, ObjectId as Object, ServiceId as Service};
+pub use qi_value::{ActionId as Action, KeyDynValueMap, ObjectId as Object, ServiceId as Service};
 
 #[derive(
     Default,
@@ -148,7 +147,7 @@ pub enum Message<Body> {
     Error {
         id: Id,
         address: Address,
-        error: Dynamic<String>,
+        error: String,
     },
     Post {
         id: Id,
@@ -163,7 +162,7 @@ pub enum Message<Body> {
     Capabilities {
         id: Id,
         address: Address,
-        capabilities: CapabilitiesMap<'static>,
+        capabilities: KeyDynValueMap,
     },
     Cancel {
         id: Id,
@@ -217,7 +216,7 @@ where
                     address,
                     ty: Type::Error,
                 },
-                Body::serialize(&error)?,
+                Body::serialize(&Dynamic(error))?,
             )),
             Message::Post { id, address, value } => Ok((
                 MetaData {
@@ -286,7 +285,7 @@ where
             Type::Error => Self::Error {
                 id,
                 address,
-                error: body.deserialize().map_err(Into::into)?,
+                error: body.deserialize::<Dynamic<String>>()?.into_inner(),
             },
             Type::Post => Self::Post {
                 id,
@@ -301,9 +300,7 @@ where
             Type::Capabilities => Self::Capabilities {
                 id,
                 address,
-                capabilities: body
-                    .deserialize::<serde_with::de::DeserializeAsWrap<_, OwnedCapabilitiesMap>>()?
-                    .into_inner(),
+                capabilities: body.deserialize()?,
             },
             Type::Cancel => Self::Cancel {
                 id,
@@ -338,13 +335,13 @@ pub struct MetaData {
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Oneway<Body> {
+pub enum FireAndForget<Body> {
     Post(Body),
     Event(Body),
-    Capabilities(CapabilitiesMap<'static>),
+    Capabilities(KeyDynValueMap),
 }
 
-impl<Body> Oneway<Body> {
+impl<Body> FireAndForget<Body> {
     pub fn ty(&self) -> Type {
         match self {
             Self::Post(_) => Type::Post,
@@ -353,14 +350,14 @@ impl<Body> Oneway<Body> {
         }
     }
 
-    pub fn try_map<F, U, E>(self, f: F) -> Result<Oneway<U>, E>
+    pub fn try_map<F, U, E>(self, f: F) -> Result<FireAndForget<U>, E>
     where
         F: FnOnce(Body) -> Result<U, E>,
     {
         Ok(match self {
-            Self::Post(value) => Oneway::Post(f(value)?),
-            Self::Event(value) => Oneway::Event(f(value)?),
-            Self::Capabilities(capabilities) => Oneway::Capabilities(capabilities),
+            Self::Post(value) => FireAndForget::Post(f(value)?),
+            Self::Event(value) => FireAndForget::Event(f(value)?),
+            Self::Capabilities(capabilities) => FireAndForget::Capabilities(capabilities),
         })
     }
 }

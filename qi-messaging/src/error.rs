@@ -1,6 +1,3 @@
-// TODO: Make an Error trait that allows checking if an error type is "canceled" so that we may send
-// back a canceled message to a client instead of an error.
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("messaging link has been lost")]
@@ -11,6 +8,15 @@ pub enum Error {
 
     #[error("the call request has been canceled")]
     CallCanceled,
+}
+
+impl Error {
+    pub fn link_lost<E>(err: E) -> Self
+    where
+        E: Into<Box<dyn std::error::Error + Send + Sync>>,
+    {
+        Self::LinkLost(err.into())
+    }
 }
 
 impl From<std::io::Error> for Error {

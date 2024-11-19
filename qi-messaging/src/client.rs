@@ -1,7 +1,8 @@
 use crate::{
     id_factory::SharedIdFactory,
-    message::{Address, Id, Oneway, Response},
-    CapabilitiesMap, Error, Message,
+    message::{Address, FireAndForget, Id, Response},
+    value::KeyDynValueMap,
+    Error, Message,
 };
 use futures::{stream::FusedStream, Stream};
 use std::{
@@ -49,14 +50,18 @@ impl<Body> Client<Body> {
         response?
     }
 
-    pub async fn oneway(&self, address: Address, request: Oneway<Body>) -> Result<(), Error> {
+    pub async fn fire_and_forget(
+        &self,
+        address: Address,
+        request: FireAndForget<Body>,
+    ) -> Result<(), Error> {
         let request = match request {
-            Oneway::Capabilities(capabilities) => Request::Capababilities {
+            FireAndForget::Capabilities(capabilities) => Request::Capababilities {
                 address,
                 capabilities,
             },
-            Oneway::Post(value) => Request::Post { address, value },
-            Oneway::Event(value) => Request::Event { address, value },
+            FireAndForget::Post(value) => Request::Post { address, value },
+            FireAndForget::Event(value) => Request::Event { address, value },
         };
         self.requests
             .send(request)
@@ -85,7 +90,6 @@ impl<Body> std::fmt::Debug for Client<Body> {
     }
 }
 
-#[derive(Clone)]
 pub struct WeakClient<Body> {
     requests: mpsc::WeakSender<Request<Body>>,
 }
@@ -96,9 +100,19 @@ impl<Body> WeakClient<Body> {
     }
 }
 
+impl<Body> Clone for WeakClient<Body> {
+    fn clone(&self) -> Self {
+        Self {
+            requests: self.requests.clone(),
+        }
+    }
+}
+
 impl<Body> std::fmt::Debug for WeakClient<Body> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("WeakClient")
+        f.debug_struct("WeakClient")
+            .field("requests", &self.requests)
+            .finish()
     }
 }
 
@@ -120,7 +134,7 @@ enum Request<Body> {
     },
     Capababilities {
         address: Address,
-        capabilities: CapabilitiesMap<'static>,
+        capabilities: KeyDynValueMap,
     },
 }
 

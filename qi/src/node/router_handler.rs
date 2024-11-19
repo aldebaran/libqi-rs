@@ -181,18 +181,18 @@ where
         async move { router.lock_owned().await.call(address, value).await }
     }
 
-    fn oneway(
+    fn fire_and_forget(
         &self,
         address: message::Address,
-        request: message::Oneway<Body>,
+        request: message::FireAndForget<Body>,
     ) -> impl Future<Output = ()> + Send {
         let router = Arc::clone(&self.0);
         async move {
             let mut router = router.lock_owned().await;
             match request {
-                message::Oneway::Post(value) => router.post(address, value).await,
-                message::Oneway::Event(value) => router.event(address, value).await,
-                message::Oneway::Capabilities(_) => {
+                message::FireAndForget::Post(value) => router.post(address, value).await,
+                message::FireAndForget::Event(value) => router.event(address, value).await,
+                message::FireAndForget::Capabilities(_) => {
                     // Capabilities messages are not handled by nodes services and messaging handler.
                 }
             }

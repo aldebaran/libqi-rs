@@ -3,9 +3,9 @@ use bytes::{Bytes, BytesMut};
 use qi_messaging::{
     binary_codec::{DecodeError, Decoder, Encoder},
     message::{Action, Address, Id, Object, Service, Version},
-    CapabilitiesMap, Message,
+    Message,
 };
-use qi_value::{Dynamic, IntoValue};
+use qi_value::{IntoValue, KeyDynValueMap};
 use serde_json::json;
 
 #[test]
@@ -136,10 +136,7 @@ fn message_encode() {
     let msg = Message::<JsonBody>::Capabilities {
         id: Id(329),
         address: Address(Service(1), Object(1), Action(104)),
-        capabilities: CapabilitiesMap::from_iter([(
-            "hello".to_owned(),
-            Dynamic("world".into_value()),
-        )]),
+        capabilities: KeyDynValueMap::from_iter([("hello".to_owned(), "world".into_value())]),
     };
     let mut buf = BytesMut::new();
     let mut encoder = Encoder;

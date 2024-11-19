@@ -1,32 +1,30 @@
 use assert_matches::assert_matches;
-use futures::{channel::mpsc, stream, FutureExt, StreamExt};
-use pin_project_lite::pin_project;
+use futures::{channel::mpsc, stream, StreamExt};
 use qi_messaging::{
     endpoint,
-    message::{self, Action, Address, Id, Object, Oneway, Service},
-    CapabilitiesMap, Error, Handler, Message,
+    message::{self, Action, Address, FireAndForget, Id, Object, Service},
+    Error, Handler, Message,
 };
-use qi_value::{Dynamic, Value};
+use qi_value::{KeyDynValueMap, Value};
 use std::{
     convert::Infallible,
     future::Future,
-    pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    task::{ready, Context, Poll},
 };
 use tokio_test::{
     assert_pending, assert_ready, assert_ready_eq, assert_ready_err, assert_ready_ok, task,
 };
 
 #[test]
+
 fn client_call() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
         mpsc::channel::<Result<_, Infallible>>(1);
 
-    let (handler, _) = DummyHandler::new();
+    let (handler, _) = SimpleHandler::new();
     let (client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
@@ -34,7 +32,7 @@ fn client_call() {
 
     let mut call = task::spawn(client.call(
         Address(Service(1), Object(2), Action(3)),
-        "My name is Alice".to_string(),
+        Ok("My name is Alice"),
     ));
     assert_pending!(call.poll());
 
@@ -49,7 +47,7 @@ fn client_call() {
             address: Address(Service(1), Object(2), Action(3)),
             value,
         } => {
-            assert_eq!(value, "My name is Alice");
+            assert_eq!(value, Ok("My name is Alice"));
         }
     );
 
@@ -57,14 +55,14 @@ fn client_call() {
         .try_send(Ok(Message::Reply {
             id: Id(1),
             address: Address(Service(1), Object(2), Action(3)),
-            value: "Hello Alice (from server)".to_string(),
+            value: Ok("Hello Alice (from server)"),
         }))
         .expect("could not send call reply");
     assert_pending!(outgoing.poll_next());
 
     assert!(call.is_woken());
     let reply = assert_ready_ok!(call.poll());
-    assert_eq!(reply, "Hello Alice (from server)");
+    assert_eq!(reply, Ok("Hello Alice (from server)"));
 }
 
 #[test]
@@ -72,7 +70,7 @@ fn client_call_error() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
         mpsc::channel::<Result<_, Infallible>>(1);
 
-    let (handler, _) = DummyHandler::new();
+    let (handler, _) = SimpleHandler::new();
     let (client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
@@ -80,7 +78,7 @@ fn client_call_error() {
 
     let mut call = task::spawn(client.call(
         Address(Service(1), Object(2), Action(3)),
-        "My name is Alice".to_string(),
+        Ok("My name is Alice"),
     ));
     assert_pending!(call.poll());
 
@@ -93,7 +91,7 @@ fn client_call_error() {
         .try_send(Ok(Message::Error {
             id: Id(1),
             address: Address(Service(1), Object(2), Action(3)),
-            error: Dynamic("I don't know anyone named Alice".to_owned()),
+            error: "I don't know anyone named Alice".to_owned(),
         }))
         .expect("could not send call error");
     assert_pending!(outgoing.poll_next());
@@ -110,7 +108,7 @@ fn client_call_canceled() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
         mpsc::channel::<Result<_, Infallible>>(1);
 
-    let (handler, _) = DummyHandler::new();
+    let (handler, _) = SimpleHandler::new();
     let (client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
@@ -118,7 +116,7 @@ fn client_call_canceled() {
 
     let mut call = task::spawn(client.call(
         Address(Service(1), Object(2), Action(3)),
-        "My name is Alice".to_string(),
+        Ok("My name is Alice"),
     ));
     assert_pending!(call.poll());
 
@@ -142,15 +140,15 @@ fn client_call_canceled() {
 
 #[test]
 fn client_post() {
-    let (handler, _) = DummyHandler::new();
+    let (handler, _) = SimpleHandler::new();
     let (client, outgoing) = endpoint::dispatch(stream::empty::<Result<_, Infallible>>(), handler);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
 
-    let mut send = task::spawn(client.oneway(
+    let mut send = task::spawn(client.fire_and_forget(
         Address(Service(1), Object(2), Action(3)),
-        Oneway::Post("Say hi to Bob for me".to_string()),
+        FireAndForget::Post(Ok("Say hi to Bob for me")),
     ));
     assert_ready_ok!(send.poll());
 
@@ -165,22 +163,22 @@ fn client_post() {
             address: Address(Service(1), Object(2), Action(3)),
             value
         } => {
-            assert_eq!(value, "Say hi to Bob for me");
+            assert_eq!(value, Ok("Say hi to Bob for me"));
         }
     )
 }
 
 #[test]
 fn client_event() {
-    let (handler, _) = DummyHandler::new();
+    let (handler, _) = SimpleHandler::new();
     let (client, outgoing) = endpoint::dispatch(stream::empty::<Result<_, Infallible>>(), handler);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
 
-    let mut send = task::spawn(client.oneway(
+    let mut send = task::spawn(client.fire_and_forget(
         Address(Service(1), Object(2), Action(3)),
-        Oneway::Event("Carol says hi by the way".to_string()),
+        FireAndForget::Event(Ok("Carol says hi by the way")),
     ));
     assert_ready_ok!(send.poll());
 
@@ -195,24 +193,24 @@ fn client_event() {
             address: Address(Service(1), Object(2), Action(3)),
             value
         } => {
-            assert_eq!(value, "Carol says hi by the way");
+            assert_eq!(value, Ok("Carol says hi by the way"));
         }
     )
 }
 
 #[test]
 fn client_capabilities() {
-    let (handler, _) = DummyHandler::new();
+    let (handler, _) = SimpleHandler::new();
     let (client, outgoing) = endpoint::dispatch(stream::empty::<Result<_, Infallible>>(), handler);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
 
-    let mut send = task::spawn(client.oneway(
+    let mut send = task::spawn(client.fire_and_forget(
         Address(Service(1), Object(2), Action(3)),
-        Oneway::Capabilities(CapabilitiesMap::from_iter([
-            ("SayHi".to_owned(), Dynamic(Value::Bool(true))),
-            ("NotifyHi".to_owned(), Dynamic(Value::Int32(42))),
+        FireAndForget::Capabilities(KeyDynValueMap::from_iter([
+            ("SayHi".to_owned(), Value::Bool(true)),
+            ("NotifyHi".to_owned(), Value::Int32(42)),
         ])),
     ));
     assert_ready_ok!(send.poll());
@@ -228,9 +226,9 @@ fn client_capabilities() {
             address: Address(Service(1), Object(2), Action(3)),
             capabilities
         } => {
-            assert_eq!(capabilities, CapabilitiesMap::from_iter([
-                ("SayHi".to_owned(), Dynamic(Value::Bool(true))),
-                ("NotifyHi".to_owned(), Dynamic(Value::Int32(42))),
+            assert_eq!(capabilities, KeyDynValueMap::from_iter([
+                ("SayHi".to_owned(), Value::Bool(true)),
+                ("NotifyHi".to_owned(), Value::Int32(42)),
             ]));
         }
     )
@@ -241,7 +239,7 @@ fn handler_call() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
         mpsc::channel::<Result<_, Infallible>>(1);
 
-    let (handler, _) = DummyHandler::new();
+    let (handler, _) = SimpleHandler::new();
     let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
@@ -251,7 +249,7 @@ fn handler_call() {
         .try_send(Ok(Message::Call {
             id: Id(1),
             address: Address(Service(3), Object(2), Action(1)),
-            value: "My name is Alice".to_string(),
+            value: Ok("My name is Alice"),
         }))
         .expect("failed to send call message");
 
@@ -266,7 +264,7 @@ fn handler_call() {
             address: Address(Service(3), Object(2), Action(1)),
             value
         } => {
-            assert_eq!(value, "Hello Alice");
+            assert_eq!(value, Ok("My name is Alice"));
         }
     );
 }
@@ -276,7 +274,7 @@ fn handler_call_error() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
         mpsc::channel::<Result<_, Infallible>>(1);
 
-    let (handler, _) = DummyHandler::new();
+    let (handler, _) = SimpleHandler::new();
     let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
@@ -285,7 +283,11 @@ fn handler_call_error() {
         .try_send(Ok(Message::Call {
             id: Id(1),
             address: Address(Service(3), Object(2), Action(1)),
-            value: "cookies".to_string(),
+            value: Err(HandlerError {
+                message: "bad request",
+                is_canceled: false,
+                is_fatal: false,
+            }),
         }))
         .expect("failed to send call message");
 
@@ -297,9 +299,85 @@ fn handler_call_error() {
         Message::Error {
             id: Id(1),
             address: Address(Service(3), Object(2), Action(1)),
-            error: Dynamic(error)
+            error
         } => {
-            assert_eq!(error.to_string(), "not a hello request");
+            assert_eq!(error.to_string(), "bad request");
+        }
+    );
+}
+
+#[test]
+fn handler_call_error_fatal() {
+    let (mut incoming_messages_sender, incoming_messages_receiver) =
+        mpsc::channel::<Result<_, Infallible>>(1);
+
+    let (handler, _) = SimpleHandler::new();
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+
+    let mut outgoing = task::spawn(outgoing);
+
+    incoming_messages_sender
+        .try_send(Ok(Message::Call {
+            id: Id(1),
+            address: Address(Service(3), Object(2), Action(1)),
+            value: Err(HandlerError {
+                message: "fatal request",
+                is_canceled: false,
+                is_fatal: true,
+            }),
+        }))
+        .expect("failed to send call message");
+
+    let message = assert_ready!(outgoing.poll_next())
+        .expect("missing message error")
+        .expect("error message is not ok");
+    // Dispatch still sends the error back to the caller before stopping.
+    assert_matches!(
+        message,
+        Message::Error {
+            id: Id(1),
+            address: Address(Service(3), Object(2), Action(1)),
+            error
+        } => {
+            assert_eq!(error.to_string(), "fatal request");
+        }
+    );
+
+    // Error is fatal, dispatch is ended.
+    assert_matches!(assert_ready!(outgoing.poll_next()), None);
+}
+
+#[test]
+fn handler_call_canceled() {
+    let (mut incoming_messages_sender, incoming_messages_receiver) =
+        mpsc::channel::<Result<_, Infallible>>(1);
+
+    let (handler, _) = SimpleHandler::new();
+    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+
+    let mut outgoing = task::spawn(outgoing);
+
+    incoming_messages_sender
+        .try_send(Ok(Message::Call {
+            id: Id(1),
+            address: Address(Service(3), Object(2), Action(1)),
+            value: Err(HandlerError {
+                message: "canceled",
+                is_canceled: true,
+                is_fatal: false,
+            }),
+        }))
+        .expect("failed to send call message");
+
+    let message = assert_ready!(outgoing.poll_next())
+        .expect("missing message canceled")
+        .expect("canceled message is not ok");
+    // Dispatch still sends the error back to the caller before stopping.
+    assert_matches!(
+        message,
+        Message::Canceled {
+            id: Id(1),
+            address: Address(Service(3), Object(2), Action(1)),
         }
     );
 }
@@ -380,9 +458,9 @@ fn handler_post() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
         mpsc::channel::<Result<_, Infallible>>(1);
 
-    let (handler, oneway_receiver) = DummyHandler::new();
+    let (handler, faf_receiver) = SimpleHandler::new();
     let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
-    let mut oneway = task::spawn(oneway_receiver);
+    let mut faf = task::spawn(faf_receiver);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -391,17 +469,17 @@ fn handler_post() {
         .try_send(Ok(Message::Post {
             id: Id(1),
             address: Address(Service(1), Object(2), Action(3)),
-            value: "Bob says hi back".to_string(),
+            value: Ok("Bob says hi back"),
         }))
         .expect("could not send post message");
 
     assert!(outgoing.is_woken());
     assert_pending!(outgoing.poll_next());
     assert_ready_eq!(
-        oneway.poll_next(),
+        faf.poll_next(),
         Some((
             Address(Service(1), Object(2), Action(3)),
-            Oneway::Post("Bob says hi back".to_string())
+            FireAndForget::Post(Ok("Bob says hi back"))
         ))
     );
 }
@@ -411,9 +489,9 @@ fn handler_event() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
         mpsc::channel::<Result<_, Infallible>>(1);
 
-    let (handler, oneway_receiver) = DummyHandler::new();
+    let (handler, faf_receiver) = SimpleHandler::new();
     let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
-    let mut oneway = task::spawn(oneway_receiver);
+    let mut faf = task::spawn(faf_receiver);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -422,17 +500,17 @@ fn handler_event() {
         .try_send(Ok(Message::Event {
             id: Id(1),
             address: Address(Service(1), Object(2), Action(3)),
-            value: "Carol received your 'hi'".to_string(),
+            value: Ok("Carol received your 'hi'"),
         }))
         .expect("could not send event message");
 
     assert!(outgoing.is_woken());
     assert_pending!(outgoing.poll_next());
     assert_ready_eq!(
-        oneway.poll_next(),
+        faf.poll_next(),
         Some((
             Address(Service(1), Object(2), Action(3)),
-            Oneway::Event("Carol received your 'hi'".to_string())
+            FireAndForget::Event(Ok("Carol received your 'hi'"))
         ))
     );
 }
@@ -442,9 +520,9 @@ fn handler_capabilities() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
         mpsc::channel::<Result<_, Infallible>>(1);
 
-    let (handler, oneway_receiver) = DummyHandler::new();
+    let (handler, faf_receiver) = SimpleHandler::new();
     let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
-    let mut oneway = task::spawn(oneway_receiver);
+    let mut faf = task::spawn(faf_receiver);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -453,22 +531,19 @@ fn handler_capabilities() {
         .try_send(Ok(Message::Capabilities {
             id: Id(1),
             address: Address(Service(1), Object(2), Action(3)),
-            capabilities: CapabilitiesMap::from_iter([(
-                "SayHi".to_owned(),
-                Dynamic(Value::Bool(false)),
-            )]),
+            capabilities: KeyDynValueMap::from_iter([("SayHi".to_owned(), Value::Bool(false))]),
         }))
         .expect("could not send capabilties message");
 
     assert!(outgoing.is_woken());
     assert_pending!(outgoing.poll_next());
     assert_ready_eq!(
-        oneway.poll_next(),
+        faf.poll_next(),
         Some((
             Address(Service(1), Object(2), Action(3)),
-            Oneway::Capabilities(CapabilitiesMap::from_iter([(
+            FireAndForget::Capabilities(KeyDynValueMap::from_iter([(
                 "SayHi".to_owned(),
-                Dynamic(Value::Bool(false)),
+                Value::Bool(false),
             )]))
         ))
     );
@@ -477,24 +552,22 @@ fn handler_capabilities() {
 #[test]
 fn incoming_messages_error() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
-        mpsc::channel::<Result<_, StrError>>(1);
+        mpsc::channel::<Result<_, StreamError>>(1);
 
-    let (handler, _) = DummyHandler::new();
+    let (handler, _) = SimpleHandler::new();
     let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
 
     incoming_messages_sender
-        .try_send(Err(StrError("This is a incoming error")))
+        .try_send(Err(StreamError("This is a incoming error")))
         .expect("could not send capabilties message");
 
-    let err = assert_ready!(outgoing.poll_next())
+    let StreamError(err) = assert_ready!(outgoing.poll_next())
         .expect("missing error")
         .unwrap_err();
-    assert_matches!(err, Error::LinkLost(err) => {
-        assert_eq!(err.to_string(), "This is a incoming error");
-    })
+    assert_eq!(err, "This is a incoming error");
 }
 
 #[test]
@@ -548,9 +621,23 @@ fn endpoint_termination() {
     assert_matches!(assert_ready!(outgoing.poll_next()), None);
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-struct StrError(&'static str);
+#[derive(Debug, thiserror::Error, PartialEq, Eq, PartialOrd, Ord)]
+#[error("{message}")]
+struct HandlerError {
+    message: &'static str,
+    is_canceled: bool,
+    is_fatal: bool,
+}
+
+impl qi_messaging::handler::Error for HandlerError {
+    fn is_canceled(&self) -> bool {
+        self.is_canceled
+    }
+
+    fn is_fatal(&self) -> bool {
+        self.is_fatal
+    }
+}
 
 // A handler that returns futures that block until notified and tracks how many futures are created.
 struct CountedPendingHandler {
@@ -576,46 +663,38 @@ impl CountedPendingHandler {
 }
 
 impl<'a> Handler<()> for &'a CountedPendingHandler {
-    type Error = Error;
+    type Error = Infallible;
 
     fn call(
         &self,
         _address: message::Address,
         _: (),
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        CountedPendingFuture::new(self.unblock.notified(), Arc::clone(&self.pending_calls))
-    }
-
-    async fn oneway(&self, _address: message::Address, _request: message::Oneway<()>) {}
-}
-
-pin_project! {
-    struct CountedPendingFuture<'a> {
-        #[pin]
-        unblocked: tokio::sync::futures::Notified<'a>,
-        drop_guard: DecreaseCountDropGuard,
-    }
-}
-
-impl<'a> CountedPendingFuture<'a> {
-    fn new(unblocked: tokio::sync::futures::Notified<'a>, count: Arc<AtomicUsize>) -> Self {
-        count.fetch_add(1, Ordering::SeqCst);
-        Self {
-            unblocked,
-            drop_guard: DecreaseCountDropGuard(count),
+        let drop_guard = DecreaseCountDropGuard::new(&self.pending_calls);
+        let unblock = Arc::clone(&self.unblock);
+        async move {
+            unblock.notified().await;
+            drop(drop_guard);
+            Ok(())
         }
     }
-}
 
-impl<'a> Future for CountedPendingFuture<'a> {
-    type Output = Result<(), Error>;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        ready!(self.project().unblocked.poll(cx));
-        Poll::Ready(Ok(()))
+    async fn fire_and_forget(
+        &self,
+        _address: message::Address,
+        _request: message::FireAndForget<()>,
+    ) {
     }
 }
 
 struct DecreaseCountDropGuard(Arc<AtomicUsize>);
+
+impl DecreaseCountDropGuard {
+    fn new(count: &Arc<AtomicUsize>) -> Self {
+        count.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(count))
+    }
+}
 
 impl Drop for DecreaseCountDropGuard {
     fn drop(&mut self) {
@@ -624,36 +703,40 @@ impl Drop for DecreaseCountDropGuard {
 }
 
 #[derive(Debug, Clone)]
-struct DummyHandler(mpsc::UnboundedSender<(message::Address, Oneway<String>)>);
+struct SimpleHandler(mpsc::UnboundedSender<(message::Address, FireAndForget<HandlerValue>)>);
 
-impl DummyHandler {
+impl SimpleHandler {
     fn new() -> (
         Self,
-        mpsc::UnboundedReceiver<(message::Address, Oneway<String>)>,
+        mpsc::UnboundedReceiver<(message::Address, FireAndForget<HandlerValue>)>,
     ) {
         let (sender, receiver) = mpsc::unbounded();
         (Self(sender), receiver)
     }
 }
 
-impl Handler<String> for DummyHandler {
-    type Error = Error;
+impl Handler<HandlerValue> for SimpleHandler {
+    type Error = HandlerError;
 
-    fn call(
+    async fn call(
         &self,
         _address: message::Address,
-        value: String,
-    ) -> impl Future<Output = Result<String, Self::Error>> + Send {
-        async move {
-            let name = value
-                .strip_prefix("My name is ")
-                .ok_or(Error::CallError("not a hello request".to_string()))?;
-            Ok(format!("Hello {name}"))
-        }
-        .boxed()
+        value: HandlerValue,
+    ) -> Result<Result<&'static str, HandlerError>, HandlerError> {
+        value.map(Ok)
     }
 
-    async fn oneway(&self, address: message::Address, request: message::Oneway<String>) {
+    async fn fire_and_forget(
+        &self,
+        address: message::Address,
+        request: message::FireAndForget<HandlerValue>,
+    ) {
         self.0.unbounded_send((address, request)).unwrap()
     }
 }
+
+type HandlerValue = Result<&'static str, HandlerError>;
+
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct StreamError(&'static str);

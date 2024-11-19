@@ -48,7 +48,7 @@ pub mod channel;
 mod client;
 pub mod endpoint;
 mod error;
-mod handler;
+pub mod handler;
 mod id_factory;
 pub mod message;
 mod server;
@@ -62,41 +62,3 @@ pub use self::{
     message::Message,
 };
 pub use qi_value as value;
-
-use serde::Deserialize;
-use serde_with::Same;
-use std::collections::HashMap;
-
-pub type CapabilitiesMap<'a> = HashMap<String, value::Dynamic<value::Value<'a>>>;
-
-pub struct OwnedCapabilitiesMap;
-
-impl<'de> serde_with::DeserializeAs<'de, CapabilitiesMap<'static>> for OwnedCapabilitiesMap {
-    fn deserialize_as<D>(deserializer: D) -> Result<CapabilitiesMap<'static>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(serde_with::de::DeserializeAsWrap::<_, HashMap<Same, value::Dynamic<value::Value<'de>>>>::deserialize(deserializer)?.into_inner())
-    }
-}
-
-// use serde_with::serde_as;
-// use std::collections::HashMap;
-
-// #[serde_as]
-// #[derive(
-//     Debug,
-//     Clone,
-//     PartialEq,
-//     Eq,
-//     derive_more::From,
-//     derive_more::Into,
-//     derive_more::IntoIterator,
-//     serde::Serialize,
-//     serde::Deserialize,
-// )]
-// #[serde(transparent)]
-// pub struct CapabilitiesMap(
-//     #[serde_as(as = "HashMap<_, value::Dynamic<value::Value<'_>>>")]
-//     HashMap<String, value::Dynamic<value::Value<'static>>>,
-// );

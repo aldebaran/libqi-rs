@@ -1,5 +1,4 @@
 #![deny(unreachable_pub, unsafe_code)]
-#![warn(unused_crate_dependencies)]
 #![warn(
     clippy::all,
     clippy::clone_on_ref_ptr,

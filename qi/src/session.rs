@@ -1,6 +1,6 @@
 pub mod authentication;
 mod capabilities;
-mod control;
+pub mod control;
 mod map;
 mod target;
 
@@ -8,9 +8,9 @@ pub(crate) use self::map::Map;
 pub use self::target::Target;
 use crate::{
     error::{Error, FormatError},
-    messaging::{self, message, CapabilitiesMap},
+    messaging::{self, message},
     session::authentication::{Authenticator, PermissiveAuthenticator},
-    value,
+    value::{self, KeyDynValueMap},
 };
 use control::Control;
 use futures::{
@@ -20,8 +20,8 @@ use futures::{
 use std::{future::Future, pin::pin};
 use tokio::{select, sync::watch};
 
-pub(crate) struct Session<Body> {
-    capabilities: watch::Receiver<Option<CapabilitiesMap<'static>>>,
+pub struct Session<Body> {
+    capabilities: watch::Receiver<Option<KeyDynValueMap>>,
     client: messaging::Client<Body>,
 }
 
@@ -32,7 +32,7 @@ where
 {
     pub(crate) async fn connect<Handler>(
         address: messaging::Address,
-        credentials: authentication::Parameters<'_>,
+        credentials: KeyDynValueMap,
         handler: Handler,
     ) -> Result<(Self, impl Future<Output = Result<(), messaging::Error>>), Error>
     where
@@ -91,7 +91,7 @@ where
         Ok((server, endpoints))
     }
 
-    async fn serve<Auth, MsgStream, MsgSink, Handler>(
+    pub async fn serve<Auth, MsgStream, MsgSink, Handler>(
         messages_stream: MsgStream,
         messages_sink: MsgSink,
         authenticator: Auth,
@@ -101,7 +101,7 @@ where
         MsgSink: Sink<messaging::Message<Body>, Error = messaging::Error>,
         Auth: Authenticator + Send + Sync + 'static,
         Handler: messaging::Handler<Body> + Sync,
-        Handler::Error: std::error::Error + Send + Sync + 'static,
+        Handler::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
         let Control {
             capabilities,
@@ -111,6 +111,7 @@ where
         } = control::make(handler, authenticator, true);
         let (client, connection) =
             messaging::endpoint::start(messages_stream, messages_sink, handler);
+        let client = client.downgrade();
         let mut _session = None;
         let mut connection = pin!(connection);
         loop {
@@ -118,7 +119,7 @@ where
                 authorized = remote_authorized.changed() => {
                     match authorized {
                         Ok(()) => if *remote_authorized.borrow_and_update() {
-                            _session = Some(Self {
+                            _session = Some(WeakSession {
                                 capabilities: capabilities.clone(),
                                 client: client.clone(),
                             })
@@ -154,15 +155,15 @@ where
             .into_owned())
     }
 
-    pub(crate) async fn oneway(
+    pub(crate) async fn fire_and_forget(
         &self,
         address: message::Address,
-        request: message::Oneway<value::Value<'_>>,
+        request: message::FireAndForget<value::Value<'_>>,
     ) -> Result<(), Error> {
         let request = request
             .try_map(|value| Body::serialize(&value))
             .map_err(FormatError::ArgumentsSerialization)?;
-        self.client.oneway(address, request).await?;
+        self.client.fire_and_forget(address, request).await?;
         Ok(())
     }
 
@@ -192,9 +193,8 @@ impl<Body> std::fmt::Debug for Session<Body> {
     }
 }
 
-#[derive(Clone)]
 pub(crate) struct WeakSession<Body> {
-    capabilities: watch::Receiver<Option<CapabilitiesMap<'static>>>,
+    capabilities: watch::Receiver<Option<KeyDynValueMap>>,
     client: messaging::WeakClient<Body>,
 }
 
@@ -204,6 +204,15 @@ impl<Body> WeakSession<Body> {
             capabilities: self.capabilities.clone(),
             client,
         })
+    }
+}
+
+impl<Body> Clone for WeakSession<Body> {
+    fn clone(&self) -> Self {
+        Self {
+            capabilities: self.capabilities.clone(),
+            client: self.client.clone(),
+        }
     }
 }
 

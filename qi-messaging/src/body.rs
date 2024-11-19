@@ -1,6 +1,5 @@
-use std::marker::PhantomData;
-
 use bytes::{Buf, Bytes};
+use std::marker::PhantomData;
 
 pub trait Body: Sized {
     type Error: serde::de::Error;

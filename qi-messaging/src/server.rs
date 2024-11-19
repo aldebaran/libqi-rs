@@ -1,4 +1,5 @@
 use crate::{
+    handler,
     message::{Address, Id},
     Message,
 };
@@ -7,7 +8,6 @@ use futures::{
     stream::{FusedStream, FuturesUnordered},
     FutureExt, Stream, StreamExt, TryFutureExt,
 };
-use qi_value::Dynamic;
 use std::{
     future::Future,
     pin::Pin,
@@ -46,9 +46,10 @@ impl<'a, T, E> CallFutures<'a, T, E> {
 
 impl<'a, T, E> Stream for CallFutures<'a, T, E>
 where
-    E: std::string::ToString,
+    E: handler::Error,
 {
-    type Item = Message<T>;
+    /// Message x StopDispatch
+    type Item = (Message<T>, bool);
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.call_futures.poll_next_unpin(cx)
@@ -57,7 +58,7 @@ where
 
 impl<'a, T, E> FusedStream for CallFutures<'a, T, E>
 where
-    E: std::string::ToString,
+    E: handler::Error,
 {
     fn is_terminated(&self) -> bool {
         self.call_futures.is_terminated()
@@ -92,9 +93,10 @@ impl<'a, T, E> CallFuture<'a, T, E> {
 
 impl<'a, T, E> Future for CallFuture<'a, T, E>
 where
-    E: std::string::ToString,
+    E: handler::Error,
 {
-    type Output = Message<T>;
+    /// Message x StopDispatch
+    type Output = (Message<T>, bool);
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state {
@@ -106,26 +108,48 @@ where
                 let call_result = ready!(inner.try_poll_unpin(cx));
                 self.state = CallResponseFutureState::Terminated;
                 match call_result {
-                    Ok(reply) => Poll::Ready(Message::Reply {
-                        id: self.id,
-                        address: self.address,
-                        value: reply,
-                    }),
+                    Ok(reply) => Poll::Ready((
+                        Message::Reply {
+                            id: self.id,
+                            address: self.address,
+                            value: reply,
+                        },
+                        false,
+                    )),
                     // TODO: Check if error corresponds to a "cancelled" request, so that we may
                     // make a Canceled message instead.
-                    Err(error) => Poll::Ready(Message::Error {
-                        id: self.id,
-                        address: self.address,
-                        error: Dynamic(error.to_string()),
-                    }),
+                    Err(error) => {
+                        let message_stop_pair = if error.is_canceled() {
+                            (
+                                Message::Canceled {
+                                    id: self.id,
+                                    address: self.address,
+                                },
+                                false,
+                            )
+                        } else {
+                            (
+                                Message::Error {
+                                    id: self.id,
+                                    address: self.address,
+                                    error: error.to_string(),
+                                },
+                                error.is_fatal(),
+                            )
+                        };
+                        Poll::Ready(message_stop_pair)
+                    }
                 }
             }
             CallResponseFutureState::Canceled => {
                 self.state = CallResponseFutureState::Terminated;
-                Poll::Ready(Message::Canceled {
-                    id: self.id,
-                    address: self.address,
-                })
+                Poll::Ready((
+                    Message::Canceled {
+                        id: self.id,
+                        address: self.address,
+                    },
+                    false,
+                ))
             }
             CallResponseFutureState::Terminated => {
                 debug_assert!(false, "polling a terminated future");

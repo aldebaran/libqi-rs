@@ -1,12 +1,15 @@
 use crate::{
     client,
     id_factory::SharedIdFactory,
-    message::{Oneway, Response},
-    server, Client, Error, Handler, Message,
+    message::{FireAndForget, Response},
+    server, Client, Message,
 };
 use async_stream::stream;
-use futures::{stream::FusedStream, Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
-use qi_value::Dynamic;
+use either::Either;
+use futures::{
+    stream::{FusedStream, FuturesUnordered},
+    Sink, SinkExt, Stream, StreamExt, TryStream, TryStreamExt,
+};
 use std::{future::Future, pin::pin};
 use tokio::select;
 
@@ -56,46 +59,42 @@ use tokio::select;
 //               │   Outgoing Messages   │
 //               │                       │
 //               └───────────────────────┘
-pub fn dispatch<MsgStream, H, Body>(
+pub fn dispatch<MsgStream, Handler, Body>(
     messages: MsgStream,
-    handler: H,
+    handler: Handler,
 ) -> (
     Client<Body>,
-    impl Stream<Item = Result<Message<Body>, Error>>,
+    impl Stream<Item = Result<Message<Body>, MsgStream::Error>>,
 )
 where
     MsgStream: TryStream<Ok = Message<Body>>,
-    MsgStream::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
-    H: Handler<Body>,
-    H::Error: std::string::ToString,
+    Handler: crate::Handler<Body>,
 {
-    let messages = messages
-        .into_stream()
-        .map_err(|err| Error::LinkLost(err.into()))
-        .fuse();
+    let messages = messages.into_stream().fuse();
     let id_factory = SharedIdFactory::new();
     let (client, mut client_requests) = client::pair(id_factory, 1);
     let outgoing = stream! {
         let mut server_calls = server::CallFutures::default();
+        let mut server_faf = FuturesUnordered::new();
         let mut messages = pin!(messages);
         loop {
             select! {
                 // Process and dispatch incoming messages.
-                Some(res_message) = messages.next(), if !messages.is_terminated() => {
-                    match res_message {
+                Some(message) = messages.next(), if !messages.is_terminated() => {
+                    match message {
                         Ok(message) => match message {
                             Message::Call { id, address, value } => {
                                 let call_future = handler.call(address, value);
                                 server_calls.push(id, address, call_future);
                             }
                             Message::Post { address, value, .. } => {
-                                handler.oneway(address, Oneway::Post(value)).await;
+                                server_faf.push(handler.fire_and_forget(address, FireAndForget::Post(value)));
                             }
                             Message::Event { address, value, .. } => {
-                                handler.oneway(address, Oneway::Event(value)).await;
+                                server_faf.push(handler.fire_and_forget(address, FireAndForget::Event(value)));
                             },
                             Message::Capabilities { address, capabilities, .. } => {
-                                handler.oneway(address, Oneway::Capabilities(capabilities)).await;
+                                server_faf.push(handler.fire_and_forget(address, FireAndForget::Capabilities(capabilities)));
                             },
                             Message::Cancel { call_id, .. } => {
                                 server_calls.cancel(&call_id);
@@ -103,18 +102,24 @@ where
                             Message::Reply { id, value, .. } => {
                                 client_requests.dispatch_response(id, Response::Reply(value));
                             },
-                            Message::Error { id, error: Dynamic(error), .. } => {
+                            Message::Error { id, error, .. } => {
                                 client_requests.dispatch_response(id, Response::Error(error));
                             },
                             Message::Canceled { id, .. } => {
                                 client_requests.dispatch_response(id, Response::Canceled);
-                            },
+                            }
                         },
                         Err(err) => yield Err(err),
                     }
                 }
-                Some(message) = server_calls.next(), if !server_calls.is_terminated() => {
+                Some((message, stop)) = server_calls.next(), if !server_calls.is_terminated() => {
                     yield Ok(message);
+                    if stop {
+                        break;
+                    }
+                }
+                Some(()) = server_faf.next(), if !server_faf.is_terminated() => {
+                    // Nothing
                 }
                 Some(message) = client_requests.next(), if !client_requests.is_terminated() => {
                     yield Ok(message);
@@ -128,19 +133,22 @@ where
     (client, outgoing)
 }
 
-pub fn start<MsgStream, MsgSink, H, Body>(
+pub fn start<MsgStream, MsgSink, Handler, Body>(
     messages_stream: MsgStream,
     messages_sink: MsgSink,
-    handler: H,
-) -> (Client<Body>, impl Future<Output = Result<(), Error>>)
+    handler: Handler,
+) -> (
+    Client<Body>,
+    impl Future<Output = Result<(), Either<MsgStream::Error, MsgSink::Error>>>,
+)
 where
     MsgStream: TryStream<Ok = Message<Body>>,
-    MsgStream::Error: Into<Box<dyn std::error::Error + Sync + Send>>,
-    MsgSink: Sink<Message<Body>, Error = Error>,
-    H: Handler<Body>,
-    H::Error: std::string::ToString,
+    MsgSink: Sink<Message<Body>>,
+    Handler: crate::Handler<Body>,
 {
     let (client, outgoing_messages) = dispatch(messages_stream, handler);
-    let connection = outgoing_messages.forward(messages_sink.sink_err_into());
+    let connection = outgoing_messages
+        .map_err(Either::Left)
+        .forward(messages_sink.sink_map_err(Either::Right));
     (client, connection)
 }

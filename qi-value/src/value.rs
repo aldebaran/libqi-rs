@@ -34,6 +34,13 @@ pub enum Value<'a> {
 }
 
 impl<'a> Value<'a> {
+    pub fn new<V>(value: V) -> Self
+    where
+        V: IntoValue<'a>,
+    {
+        value.into_value()
+    }
+
     pub fn cast_into<T>(self) -> Result<T, FromValueError>
     where
         T: FromValue<'a>,

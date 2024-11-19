@@ -9,12 +9,13 @@ use crate::{
     service_directory::{self, ServiceDirectory},
     session::{
         self,
-        authentication::{self, Authenticator, PermissiveAuthenticator},
+        authentication::{Authenticator, PermissiveAuthenticator},
     },
     value::{self, os::MachineId},
     Address, Error,
 };
 use futures::{future::FusedFuture, FutureExt};
+use qi_value::KeyDynValueMap;
 use router_handler::ArcRouterHandler;
 use serde_with::serde_as;
 use server::EndpointsRx;
@@ -83,8 +84,8 @@ impl<Auth, Method, Body> Builder<Auth, Method, Body> {
     pub fn connect_to_space(
         self,
         address: Address,
-        credentials: Option<authentication::Parameters<'_>>,
-    ) -> Builder<Auth, ConnectToSpace<'_>, Body> {
+        credentials: Option<KeyDynValueMap>,
+    ) -> Builder<Auth, ConnectToSpace, Body> {
         Builder {
             authenticator: self.authenticator,
             uid: self.uid,
@@ -111,7 +112,7 @@ impl<Auth, Method, Body> Builder<Auth, Method, Body> {
     }
 }
 
-impl<'a, Auth, Body> Builder<Auth, ConnectToSpace<'a>, Body>
+impl<Auth, Body> Builder<Auth, ConnectToSpace, Body>
 where
     Auth: Authenticator + Send + Sync + Clone + 'static,
     Body: messaging::Body + Send + 'static,
@@ -363,9 +364,9 @@ impl std::str::FromStr for Uid {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct ConnectToSpace<'a> {
+pub struct ConnectToSpace {
     address: Address,
-    credentials: Option<authentication::Parameters<'a>>,
+    credentials: Option<KeyDynValueMap>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

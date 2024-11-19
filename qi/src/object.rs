@@ -252,9 +252,9 @@ where
         };
         if let Err(err) = self
             .session
-            .oneway(
+            .fire_and_forget(
                 message::Address(self.service_id, self.id, target.action_id()),
-                message::Oneway::Post(args),
+                message::FireAndForget::Post(args),
             )
             .await
         {
@@ -278,9 +278,9 @@ where
         };
         if let Err(err) = self
             .session
-            .oneway(
+            .fire_and_forget(
                 message::Address(self.service_id, self.id, signal.uid),
-                message::Oneway::Event(value),
+                message::FireAndForget::Event(value),
             )
             .await
         {

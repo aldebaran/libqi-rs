@@ -1,9 +1,10 @@
 use crate::{
     messaging::{self, Address},
-    session::{self, authentication, target::Kind, Session, WeakSession},
+    session::{self, target::Kind, Session, WeakSession},
     Error,
 };
 use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
+use qi_value::KeyDynValueMap;
 use std::{collections::HashMap, future::Future, sync::Arc};
 use tokio::{
     select,
@@ -79,7 +80,7 @@ where
         &self,
         service_name: &str,
         targets: Targets,
-        credentials: authentication::Parameters<'_>,
+        credentials: KeyDynValueMap,
     ) -> Result<Session<Body>, Error>
     where
         for<'t> &'t Targets: IntoIterator<Item = &'t session::Target>,
@@ -120,7 +121,7 @@ where
         &self,
         service_name: &str,
         address: messaging::Address,
-        credentials: authentication::Parameters<'_>,
+        credentials: KeyDynValueMap,
     ) -> Result<Session<Body>, Error> {
         let (session, connection) =
             Session::connect(address, credentials, self.handler.clone()).await?;
