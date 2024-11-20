@@ -121,8 +121,11 @@ where
                 Some(()) = server_faf.next(), if !server_faf.is_terminated() => {
                     // Nothing
                 }
-                Some(message) = client_requests.next(), if !client_requests.is_terminated() => {
-                    yield Ok(message);
+                message = client_requests.next() => {
+                    match message {
+                        Some(message) => yield Ok(message),
+                        None => break,
+                    }
                 }
                 else => {
                     break;

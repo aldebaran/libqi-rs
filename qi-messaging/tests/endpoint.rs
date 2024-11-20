@@ -235,12 +235,22 @@ fn client_capabilities() {
 }
 
 #[test]
+fn client_drop_closes_endpoint() {
+    let (handler, _) = SimpleHandler::new();
+    let (client, outgoing) = endpoint::dispatch(stream::empty::<Result<_, Infallible>>(), handler);
+    let mut outgoing = task::spawn(outgoing);
+    assert_pending!(outgoing.poll_next());
+    drop(client);
+    assert_matches!(assert_ready!(outgoing.poll_next()), None);
+}
+
+#[test]
 fn handler_call() {
     let (mut incoming_messages_sender, incoming_messages_receiver) =
         mpsc::channel::<Result<_, Infallible>>(1);
 
     let (handler, _) = SimpleHandler::new();
-    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+    let (_client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
@@ -275,7 +285,7 @@ fn handler_call_error() {
         mpsc::channel::<Result<_, Infallible>>(1);
 
     let (handler, _) = SimpleHandler::new();
-    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+    let (_client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
 
@@ -312,7 +322,7 @@ fn handler_call_error_fatal() {
         mpsc::channel::<Result<_, Infallible>>(1);
 
     let (handler, _) = SimpleHandler::new();
-    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+    let (_client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
 
@@ -353,7 +363,7 @@ fn handler_call_canceled() {
         mpsc::channel::<Result<_, Infallible>>(1);
 
     let (handler, _) = SimpleHandler::new();
-    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+    let (_client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
 
@@ -390,7 +400,7 @@ fn handler_call_cancel() {
         mpsc::channel::<Result<_, Infallible>>(1);
 
     let handler = CountedPendingHandler::new();
-    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, &handler);
+    let (_client, outgoing) = endpoint::dispatch(incoming_messages_receiver, &handler);
     let mut outgoing = task::spawn(outgoing);
 
     incoming_messages_sender
@@ -443,7 +453,7 @@ fn handler_concurrent_calls() {
     .take(HANDLER_CONCURRENT_CALLS);
 
     let handler = CountedPendingHandler::new();
-    let (_, outgoing) = endpoint::dispatch(messages, &handler);
+    let (_client, outgoing) = endpoint::dispatch(messages, &handler);
     let mut messages = task::spawn(outgoing);
 
     // Process incoming messages.
@@ -459,7 +469,7 @@ fn handler_post() {
         mpsc::channel::<Result<_, Infallible>>(1);
 
     let (handler, faf_receiver) = SimpleHandler::new();
-    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+    let (_client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
     let mut faf = task::spawn(faf_receiver);
 
     let mut outgoing = task::spawn(outgoing);
@@ -490,7 +500,7 @@ fn handler_event() {
         mpsc::channel::<Result<_, Infallible>>(1);
 
     let (handler, faf_receiver) = SimpleHandler::new();
-    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+    let (_client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
     let mut faf = task::spawn(faf_receiver);
 
     let mut outgoing = task::spawn(outgoing);
@@ -521,7 +531,7 @@ fn handler_capabilities() {
         mpsc::channel::<Result<_, Infallible>>(1);
 
     let (handler, faf_receiver) = SimpleHandler::new();
-    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+    let (_client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
     let mut faf = task::spawn(faf_receiver);
 
     let mut outgoing = task::spawn(outgoing);
@@ -555,7 +565,7 @@ fn incoming_messages_error() {
         mpsc::channel::<Result<_, StreamError>>(1);
 
     let (handler, _) = SimpleHandler::new();
-    let (_, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
+    let (_client, outgoing) = endpoint::dispatch(incoming_messages_receiver, handler);
 
     let mut outgoing = task::spawn(outgoing);
     assert_pending!(outgoing.poll_next());
