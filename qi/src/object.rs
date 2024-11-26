@@ -121,7 +121,7 @@ pub trait ObjectExt: Object {
 #[async_trait]
 impl<O> ObjectExt for O where O: Object + Sync + ?Sized {}
 
-pub struct Client<Body> {
+pub struct Proxy<Body> {
     service_id: ServiceId,
     id: Id,
     uid: Uid,
@@ -129,7 +129,7 @@ pub struct Client<Body> {
     session: Session<Body>,
 }
 
-impl<Body> Client<Body> {
+impl<Body> Proxy<Body> {
     pub(super) fn new(
         service_id: ServiceId,
         id: Id,
@@ -147,9 +147,9 @@ impl<Body> Client<Body> {
     }
 }
 
-impl<Body> Client<Body>
+impl<Body> Proxy<Body>
 where
-    Body: messaging::Body + Send,
+    Body: messaging::Body + Send + 'static,
     Body::Error: Send + Sync + 'static,
 {
     pub(super) async fn connect(
@@ -187,7 +187,7 @@ where
     }
 }
 
-impl<Body> Clone for Client<Body> {
+impl<Body> Clone for Proxy<Body> {
     fn clone(&self) -> Self {
         Self {
             service_id: self.service_id,
@@ -199,9 +199,9 @@ impl<Body> Clone for Client<Body> {
     }
 }
 
-impl<Body> std::fmt::Debug for Client<Body> {
+impl<Body> std::fmt::Debug for Proxy<Body> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Client")
+        f.debug_struct("Proxy")
             .field("service_id", &self.service_id)
             .field("id", &self.id)
             .field("uid", &self.uid)
@@ -212,9 +212,9 @@ impl<Body> std::fmt::Debug for Client<Body> {
 }
 
 #[async_trait]
-impl<Body> Object for Client<Body>
+impl<Body> Object for Proxy<Body>
 where
-    Body: messaging::Body + Send,
+    Body: messaging::Body + Send + 'static,
     Body::Error: Send + Sync + 'static,
 {
     fn meta(&self) -> &MetaObject {

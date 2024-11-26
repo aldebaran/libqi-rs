@@ -6,6 +6,7 @@ use qi_value::RuntimeReflect;
 pub use value::ServiceId as Id;
 
 pub(super) const MAIN_OBJECT_ID: object::Id = object::Id(1);
+pub(super) const UNSPECIFIED_ID: Id = Id(0);
 
 #[derive(
     Default,
@@ -40,10 +41,6 @@ pub struct Info {
 }
 
 impl Info {
-    pub(super) fn registrable(name: String, node_uid: node::Uid, object_uid: object::Uid) -> Self {
-        Self::process_local(name, Id(0), Vec::new(), node_uid, object_uid)
-    }
-
     pub(super) fn process_local(
         name: String,
         id: Id,
@@ -230,7 +227,7 @@ mod tests {
                 process_id: 3420486,
                 endpoints: vec![
                     session::Target::service("Calculator"),
-                    session::Target::endpoint(Address::Tcp {
+                    session::Target::from(Address::Tcp {
                         address: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 41681),
                         ssl: None
                     })

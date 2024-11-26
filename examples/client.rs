@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
         .init();
 
     info!("creating node");
-    let (node, connection) = qi::node::Builder::new()
+    let node = qi::node::Builder::new()
         // You can add services to the node and make them accessible to other nodes of joined spaces.
         .add_service("AudioPlayer", audio::Player::new())
         // Connect the node to a space at the given address.
@@ -60,7 +60,6 @@ async fn main() -> Result<()> {
                 args.address
             )
         })?;
-    tokio::spawn(connection);
 
     // You can access remote services and call methods on them.
     info!("getting \"Calculator\" service");

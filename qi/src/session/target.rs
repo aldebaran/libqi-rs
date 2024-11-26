@@ -27,11 +27,6 @@ impl Target {
         Self(Kind::Service(name.to_string()))
     }
 
-    #[cfg(test)]
-    pub(crate) fn endpoint(address: Address) -> Self {
-        Self(Kind::Endpoint(address))
-    }
-
     pub(crate) fn kind(&self) -> &Kind {
         &self.0
     }

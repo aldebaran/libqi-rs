@@ -4,11 +4,13 @@ use qi::{
     messaging::{self, message, Message},
     session::{self, authentication},
     value::KeyDynValueMap,
+    HandlerError,
 };
 use qi_messaging::Body;
 use serde_json as json;
 use std::{
     collections::VecDeque,
+    convert::Infallible,
     future::{ready, Future},
 };
 use tokio::spawn;
@@ -17,7 +19,7 @@ use tokio::spawn;
 struct DummyHandler;
 
 impl messaging::Handler<JsonBody> for DummyHandler {
-    type Error = std::convert::Infallible;
+    type Error = HandlerError;
 
     async fn call(
         &self,
@@ -75,8 +77,8 @@ async fn server_sends_back_error_on_client_bad_capabilities() {
     // 0.1: start the server session
     let (mut send_to_server, server_recv) = mpsc::unbounded();
     let (server_send, mut recv_from_server) = mpsc::unbounded();
-    let task = spawn(session::Session::serve(
-        server_recv.map(Ok),
+    let task = spawn(session::Session::serve_client(
+        server_recv.map(Ok::<_, Infallible>),
         server_send.sink_map_err(qi_messaging::Error::link_lost),
         authentication::PermissiveAuthenticator,
         DummyHandler,
@@ -113,7 +115,7 @@ async fn server_sends_back_error_on_client_bad_capabilities() {
     );
 
     // 2.
-    assert!(task.await.is_err());
+    let () = task.await.unwrap();
 }
 
 #[tokio::test]

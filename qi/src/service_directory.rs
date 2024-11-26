@@ -24,11 +24,11 @@ pub trait ServiceDirectory: Object {
     async fn update_service_info(&self, info: &service::Info) -> Result<(), Error>;
 }
 
-pub struct Client<Body>(object::Client<Body>);
+pub struct Client<Body>(object::Proxy<Body>);
 
 impl<Body> Client<Body> {
     pub(super) fn new(session: session::Session<Body>) -> Self {
-        Self(object::Client::new(
+        Self(object::Proxy::new(
             SERVICE_ID,
             service::MAIN_OBJECT_ID,
             object::Uid::default(),
@@ -53,7 +53,7 @@ impl<Body> std::fmt::Debug for Client<Body> {
 #[async_trait]
 impl<Body> Object for Client<Body>
 where
-    Body: messaging::Body + Send,
+    Body: messaging::Body + Send + 'static,
     Body::Error: Send + Sync + 'static,
 {
     fn meta(&self) -> &MetaObject {
@@ -84,7 +84,7 @@ where
 #[async_trait]
 impl<Body> ServiceDirectory for Client<Body>
 where
-    Body: messaging::Body + Send,
+    Body: messaging::Body + Send + 'static,
     Body::Error: Send + Sync + 'static,
 {
     async fn services(&self) -> Result<Vec<service::Info>, Error> {

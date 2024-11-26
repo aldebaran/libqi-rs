@@ -3,13 +3,11 @@ use crate::{
     session::{self, target::Kind, Session, WeakSession},
     Error,
 };
-use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, StreamExt};
 use qi_value::KeyDynValueMap;
-use std::{collections::HashMap, future::Future, sync::Arc};
-use tokio::{
-    select,
-    sync::{mpsc, Mutex},
-};
+use std::{collections::HashMap, sync::Arc};
+use tokio::sync::Mutex;
+
+use super::HandlerError;
 
 /// A session map that handles session targets and keeps track of existing
 /// sessions to a space services.
@@ -19,37 +17,17 @@ use tokio::{
 pub(crate) struct Map<Body, Handler> {
     handler: Handler,
 
-    connections: mpsc::Sender<BoxFuture<'static, String>>,
-
     /// The list of existing sessions with the associated service name.
     sessions: Arc<Mutex<HashMap<String, WeakSession<Body>>>>,
 }
 
 impl<Body, Handler> Map<Body, Handler> {
-    pub(crate) fn new(handler: Handler) -> (Self, impl Future<Output = ()>) {
+    pub(crate) fn new(handler: Handler) -> Self {
         let sessions = Default::default();
-        let (connections_sender, mut connections_receiver) = mpsc::channel(1);
-        (
-            Self {
-                handler,
-                sessions: Arc::clone(&sessions),
-                connections: connections_sender,
-            },
-            async move {
-                let mut connections = FuturesUnordered::new();
-                loop {
-                    select! {
-                        Some(connection) = connections_receiver.recv() => {
-                            connections.push(connection);
-                        }
-                        Some(name) = connections.next() => {
-                            sessions.lock().await.remove(&name);
-                        }
-                        else => break,
-                    }
-                }
-            },
-        )
+        Self {
+            handler,
+            sessions: Arc::clone(&sessions),
+        }
     }
 
     async fn get(&self, name: &str) -> Option<Session<Body>> {
@@ -69,8 +47,7 @@ impl<Body, Handler> Map<Body, Handler> {
 
 impl<Body, Handler> Map<Body, Handler>
 where
-    Handler: messaging::Handler<Body> + Clone + Send + Sync + 'static,
-    Handler::Error: std::error::Error + Send + Sync + 'static,
+    Handler: messaging::Handler<Body, Error = HandlerError> + Clone + Send + Sync + 'static,
     Body: messaging::Body + Send + 'static,
     Body::Error: Send + Sync + 'static,
 {
@@ -123,23 +100,12 @@ where
         address: messaging::Address,
         credentials: KeyDynValueMap,
     ) -> Result<Session<Body>, Error> {
-        let (session, connection) =
-            Session::connect(address, credentials, self.handler.clone()).await?;
+        let session = Session::connect(address, credentials, self.handler.clone()).await?;
         let service_name = service_name.to_owned();
         self.sessions
             .lock()
             .await
             .insert(service_name.clone(), session.downgrade());
-        let _res = self
-            .connections
-            .send(
-                async move {
-                    let _res = connection.await;
-                    service_name
-                }
-                .boxed(),
-            )
-            .await;
         Ok(session)
     }
 }
@@ -151,7 +117,6 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Map")
             .field("handler", &self.handler)
-            .field("connections", &self.connections)
             .field("sessions", &self.sessions)
             .finish()
     }

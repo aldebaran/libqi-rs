@@ -52,7 +52,7 @@ pub mod signal;
 pub mod value;
 
 pub use self::{
-    error::{BoxError, Error},
+    error::{BoxError, Error, HandlerError},
     never::Never,
     node::Node,
     object::{Object, ObjectExt},

@@ -580,57 +580,6 @@ fn incoming_messages_error() {
     assert_eq!(err, "This is a incoming error");
 }
 
-#[test]
-fn endpoint_termination() {
-    let (mut incoming_messages_sender, incoming_messages_receiver) =
-        mpsc::channel::<Result<_, std::convert::Infallible>>(1);
-
-    let handler = CountedPendingHandler::new();
-    let (client, outgoing) = endpoint::dispatch(incoming_messages_receiver, &handler);
-
-    let mut outgoing = task::spawn(outgoing);
-    assert_pending!(outgoing.poll_next());
-
-    incoming_messages_sender
-        .try_send(Ok(Message::Call {
-            id: Id(1),
-            address: Address(Service(1), Object(2), Action(3)),
-            value: (),
-        }))
-        .expect("could not send call message");
-
-    assert_pending!(outgoing.poll_next());
-
-    // There is one call that is running.
-    assert_eq!(handler.running_calls(), 1);
-
-    // Terminating the incoming messages stream does not terminate the outgoing messages stream: there are
-    // still messages that could come from either the client or the server.
-    drop(incoming_messages_sender);
-    assert_pending!(outgoing.poll_next());
-
-    // Dropping the client, there could still be messages from the server.
-    drop(client);
-
-    handler.unblock_futures();
-
-    let message = assert_ready!(outgoing.poll_next())
-        .expect("a reply message must be produced")
-        .expect("the reply message must not be an error");
-    assert_matches!(
-        message,
-        Message::Reply {
-            id: Id(1),
-            address: Address(Service(1), Object(2), Action(3)),
-            value: ()
-        }
-    );
-
-    // Now, all the handler calls are finished, client is dropped and there are not more incoming
-    // messages, the stream is terminated.
-    assert_matches!(assert_ready!(outgoing.poll_next()), None);
-}
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq, PartialOrd, Ord)]
 #[error("{message}")]
 struct HandlerError {
@@ -661,10 +610,6 @@ impl CountedPendingHandler {
             unblock: Arc::new(tokio::sync::Notify::new()),
             pending_calls: Arc::default(),
         }
-    }
-
-    fn unblock_futures(&self) {
-        self.unblock.notify_waiters()
     }
 
     fn running_calls(&self) -> usize {

@@ -82,67 +82,43 @@ impl From<NoHandlerError> for Error {
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
-// /// A type erased error.
-// pub struct AnyError(Box<dyn std::error::Error + Send + Sync>);
+#[derive(Debug, thiserror::Error)]
+pub enum HandlerError {
+    #[error("the call request has been canceled")]
+    CallCanceled,
 
-// impl AnyError {
-//     pub fn new<T>(err: T) -> Self
-//     where
-//         T: Into<Box<dyn std::error::Error + Send + Sync>>,
-//     {
-//         Self(err.into())
-//     }
+    #[error("{message}")]
+    Custom { message: String, is_fatal: bool },
+}
 
-//     pub fn as_dyn(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
-//         &*self.0
-//     }
+impl HandlerError {
+    pub(crate) fn non_fatal<E>(err: E) -> Self
+    where
+        E: std::string::ToString,
+    {
+        Self::Custom {
+            message: err.to_string(),
+            is_fatal: false,
+        }
+    }
 
-//     pub fn as_mut_dyn(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
-//         &mut *self.0
-//     }
+    pub(crate) fn fatal<E>(err: E) -> Self
+    where
+        E: std::string::ToString,
+    {
+        Self::Custom {
+            message: err.to_string(),
+            is_fatal: true,
+        }
+    }
+}
 
-//     pub fn downcast<T>(self) -> Result<Box<T>, AnyError>
-//     where
-//         T: std::error::Error + 'static,
-//     {
-//         self.0.downcast().map_err(Self)
-//     }
-// }
+impl messaging::handler::Error for HandlerError {
+    fn is_canceled(&self) -> bool {
+        matches!(self, Self::CallCanceled)
+    }
 
-// impl std::ops::Deref for AnyError {
-//     type Target = dyn std::error::Error + Send + Sync + 'static;
-
-//     fn deref(&self) -> &Self::Target {
-//         self.as_dyn()
-//     }
-// }
-
-// impl std::ops::DerefMut for AnyError {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         self.as_mut_dyn()
-//     }
-// }
-
-// impl From<Box<dyn std::error::Error + Send + Sync>> for AnyError {
-//     fn from(value: Box<dyn std::error::Error + Send + Sync>) -> Self {
-//         Self(value)
-//     }
-// }
-
-// impl std::fmt::Debug for AnyError {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         self.0.fmt(f)
-//     }
-// }
-
-// impl std::fmt::Display for AnyError {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         self.0.fmt(f)
-//     }
-// }
-
-// impl std::error::Error for AnyError {
-//     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-//         self.0.source()
-//     }
-// }
+    fn is_fatal(&self) -> bool {
+        matches!(self, Self::Custom { is_fatal: true, .. })
+    }
+}

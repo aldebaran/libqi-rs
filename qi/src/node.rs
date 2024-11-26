@@ -14,13 +14,13 @@ use crate::{
     value::{self, os::MachineId},
     Address, Error,
 };
-use futures::{future::FusedFuture, FutureExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use qi_value::KeyDynValueMap;
 use router_handler::ArcRouterHandler;
 use serde_with::serde_as;
-use server::EndpointsRx;
-use std::{future::Future, marker::PhantomData, pin::pin, sync::Arc};
-use tokio::{select, sync::Mutex};
+use server::ServerSet;
+use std::{collections::HashMap, marker::PhantomData, sync::Arc};
+use tokio::{sync::Mutex, task};
 
 pub struct Builder<Auth, Method, Body> {
     uid: Uid,
@@ -118,20 +118,12 @@ where
     Body: messaging::Body + Send + 'static,
     Body::Error: Send + Sync + 'static,
 {
-    pub async fn start(
-        self,
-    ) -> Result<
-        (
-            Node<service_directory::Client<Body>, Body>,
-            impl Future<Output = ()>,
-        ),
-        Error,
-    > {
+    pub async fn start(self) -> Result<Node<service_directory::Client<Body>, Body>, Error> {
         let services = Arc::default();
-        let handler = router_handler::ArcRouterHandler::new(Arc::clone(&services));
-        let (server_endpoints, server_task) =
-            server::create(handler.clone(), self.authenticator, self.bind_addresses);
-        let (session_map, session_connections) = session::Map::new(handler);
+        let handler = ArcRouterHandler::new(Arc::clone(&services));
+        let server_set =
+            ServerSet::new(handler.clone(), self.authenticator, self.bind_addresses).await?;
+        let session_map = session::Map::new(handler);
         let session = session_map
             .get_or_create(
                 service_directory::SERVICE_NAME,
@@ -145,16 +137,10 @@ where
             services,
             session_map,
             service_directory,
+            server_set,
         };
-        let task = node
-            .init(
-                self.pending_services,
-                server_task,
-                session_connections,
-                server_endpoints,
-            )
-            .await?;
-        Ok((node, task))
+        node.init_services(self.pending_services).await?;
+        Ok(node)
     }
 }
 
@@ -198,70 +184,64 @@ pub struct Node<SD, Body> {
     services: Arc<Mutex<RouterHandler<Body>>>,
     session_map: session::Map<Body, ArcRouterHandler<Body>>,
     service_directory: SD,
+    server_set: ServerSet,
 }
 
 impl<SD, Body> Node<SD, Body>
 where
-    SD: ServiceDirectory + Clone,
-    Body: messaging::Body + Send,
+    SD: ServiceDirectory + Clone + Send + 'static,
+    Body: messaging::Body + Send + 'static,
     Body::Error: Send + Sync + 'static,
 {
-    async fn init(
-        &mut self,
-        pending_services: PendingServiceMap,
-        server_task: impl Future<Output = ()>,
-        session_connections: impl Future<Output = ()>,
-        mut server_endpoints: EndpointsRx,
-    ) -> Result<impl Future<Output = ()>, Error> {
+    async fn init_services(&mut self, pending_services: PendingServiceMap) -> Result<(), Error> {
+        let mut server_endpoints_receiver = self.server_set.endpoints_receiver().clone();
+
         // Register each service to the directory, and mark them as ready.
-        for (service_name, service_object) in pending_services {
-            let mut info = service::Info::registrable(
-                service_name.clone(),
-                self.uid.clone(),
-                service_object.uid(),
-            );
-            // Registering the service to the directory gets us a service ID, that we can use to
-            // update the local service info. With it, we can also index the service to the
-            // messaging handler so that it can start treating requests for that service.
-            // Consequently, we can notify the service directory of the readiness of the service.
-            let service_id = self.service_directory.register_service(&info).await?;
-            info.id = service_id;
-            self.services
-                .lock()
-                .await
-                .insert(service_name, info, service_object);
-            self.service_directory.service_ready(service_id).await?;
-        }
+        let server_endpoints =
+            endpoints_to_client_targets(&server_endpoints_receiver.borrow_and_update());
+        stream::iter(pending_services)
+            .map(Ok)
+            .try_for_each_concurrent(None, |(service_name, service_object)| {
+                async {
+                    let mut info = service::Info::process_local(
+                        service_name.clone(),
+                        service::UNSPECIFIED_ID,
+                        server_endpoints.clone(),
+                        self.uid.clone(),
+                        service_object.uid(),
+                    );
+                    // Registering the service to the directory gets us a service ID, that we can use to
+                    // update the local service info. With it, we can also index the service to the
+                    // messaging handler so that it can start treating requests for that service.
+                    // Consequently, we can notify the service directory of the readiness of the service.
+                    let service_id = self.service_directory.register_service(&info).await?;
+                    info.id = service_id;
+                    self.services
+                        .lock()
+                        .await
+                        .insert(service_name, info, service_object);
+                    self.service_directory.service_ready(service_id).await?;
+                    Ok::<_, Error>(())
+                }
+            })
+            .await?;
 
         let services = Arc::clone(&self.services);
         let service_directory = self.service_directory.clone();
-        let task = async move {
-            // Execute server, which polls from incoming connections and session connections, which
-            // receive messages and dispatch to messaging handlers and objects.
-            let mut server_task = pin!(server_task.fuse());
-            let mut session_connections = pin!(session_connections.fuse());
-            loop {
-                select! {
-                    () = &mut server_task, if !server_task.is_terminated() => {
-                        // server is terminated
-                    }
-                    () = &mut session_connections, if !session_connections.is_terminated() => {
-                        // sessions are stopped
-                    }
-                    // Also update services info to the service directory when the server endpoints change.
-                    Ok(()) = server_endpoints.changed() => {
-                        let endpoints = server_endpoints.borrow_and_update().values().flatten().map(|&address| address.into()).collect::<Vec<_>>();
-                        for service_info in services.lock().await.info_mut() {
-                            service_info.endpoints.clone_from(&endpoints);
-                            if let Err(_err) = service_directory.update_service_info(&*service_info).await {
-                                 // TODO: log the failure
-                            }
-                        }
+        // Update services info to the service directory whenever the server endpoints change.
+        task::spawn(async move {
+            while let Ok(()) = server_endpoints_receiver.changed().await {
+                let server_endpoints =
+                    endpoints_to_client_targets(&server_endpoints_receiver.borrow_and_update());
+                for service_info in services.lock().await.info_mut() {
+                    service_info.endpoints = server_endpoints.clone();
+                    if let Err(_err) = service_directory.update_service_info(&*service_info).await {
+                        // TODO: log the failure
                     }
                 }
             }
-        };
-        Ok(task)
+        });
+        Ok(())
     }
 }
 
@@ -282,7 +262,7 @@ where
                 Default::default(),
             )
             .await?;
-        let object = object::Client::connect(
+        let object = object::Proxy::connect(
             service.id(),
             service::MAIN_OBJECT_ID,
             service.object_uid(),
@@ -320,6 +300,18 @@ fn sort_service_endpoints(service: &Info) -> Vec<session::Target> {
         )
     });
     endpoints
+}
+
+fn endpoints_to_client_targets(endpoints: &HashMap<Address, Vec<Address>>) -> Vec<session::Target> {
+    let mut targets: Vec<_> = endpoints
+        .values()
+        .flatten()
+        .copied()
+        .map(session::Target::from)
+        .collect();
+    targets.sort();
+    targets.dedup();
+    targets
 }
 
 #[derive(

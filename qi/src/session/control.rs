@@ -3,14 +3,13 @@ use super::{
     capabilities,
 };
 use crate::{
-    error::{FormatError, NoHandlerError},
+    error::{FormatError, HandlerError, NoHandlerError},
     messaging,
     value::{ActionId, KeyDynValueMap, ObjectId, ServiceId},
     Error,
 };
-use futures::{future, FutureExt, TryFutureExt};
 use messaging::message;
-use std::{future::Future, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::watch;
 
 const SERVICE_ID: ServiceId = ServiceId(0);
@@ -24,8 +23,9 @@ fn is_control_address(address: message::Address) -> bool {
 pub const AUTHENTICATE_ADDRESS: message::Address =
     message::Address(SERVICE_ID, OBJECT_ID, AUTHENTICATE_ACTION_ID);
 
+#[derive(Clone)]
 pub(super) struct Controller {
-    authenticator: Box<dyn Authenticator + Send + Sync>,
+    authenticator: Arc<dyn Authenticator + Send + Sync>,
     capabilities: watch::Sender<Option<KeyDynValueMap>>,
     remote_authorized: watch::Sender<bool>,
 }
@@ -86,7 +86,7 @@ impl std::fmt::Debug for Controller {
 }
 
 pub(super) struct Control<H> {
-    pub(super) controller: Arc<Controller>,
+    pub(super) controller: Controller,
     pub(super) capabilities: watch::Receiver<Option<KeyDynValueMap>>,
     pub(super) remote_authorized: watch::Receiver<bool>,
     pub(super) handler: ControlledHandler<H>,
@@ -104,14 +104,14 @@ where
 {
     let (capabilities_sender, capabilities_receiver) = watch::channel(Default::default());
     let (remote_authorized_sender, remote_authorized_receiver) = watch::channel(remote_authorized);
-    let controller = Arc::new(Controller {
-        authenticator: Box::new(authenticator),
+    let controller = Controller {
+        authenticator: Arc::new(authenticator),
         capabilities: capabilities_sender,
         remote_authorized: remote_authorized_sender,
-    });
+    };
     let controlled_handler = ControlledHandler {
         inner: handler,
-        controller: Arc::clone(&controller),
+        controller: controller.clone(),
     };
     Control {
         controller,
@@ -123,50 +123,46 @@ where
 
 pub(super) struct ControlledHandler<H> {
     inner: H,
-    controller: Arc<Controller>,
+    controller: Controller,
 }
 
 impl<Handler, Body> messaging::Handler<Body> for ControlledHandler<Handler>
 where
-    Handler: messaging::Handler<Body> + Sync,
-    Handler::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    Handler: messaging::Handler<Body, Error = HandlerError> + Sync,
     Body: messaging::Body + Send,
     Body::Error: Send + Sync + 'static,
 {
-    type Error = Error;
+    type Error = HandlerError;
 
-    fn call(
-        &self,
-        address: message::Address,
-        value: Body,
-    ) -> impl Future<Output = Result<Body, Self::Error>> + Send {
+    async fn call(&self, address: message::Address, value: Body) -> Result<Body, Self::Error> {
         if is_control_address(address) {
-            let controller = Arc::clone(&self.controller);
-            future::ready(
-                value
-                    .deserialize()
-                    .map_err(FormatError::ArgumentsDeserialization)
-                    .map_err(Into::into)
-                    .and_then(move |request| controller.authenticate(request).map_err(Into::into))
-                    .and_then(|result| {
-                        Body::serialize(&result)
-                            .map_err(FormatError::MethodReturnValueSerialization)
-                            .map_err(Into::into)
-                    }),
-            )
-            .left_future()
+            let request = value
+                .deserialize()
+                .map_err(FormatError::ArgumentsDeserialization)
+                .map_err(HandlerError::non_fatal)?;
+            let result = self
+                .controller
+                .authenticate(request)
+                // All authentication errors are fatal
+                .map_err(HandlerError::fatal)?;
+            Body::serialize(&result)
+                .map_err(FormatError::MethodReturnValueSerialization)
+                .map_err(HandlerError::non_fatal)
         } else if *self.controller.remote_authorized.borrow() {
-            self.inner
-                .call(address, value)
-                .map_err(Into::into)
-                .map_err(Error::Other)
-                .right_future()
+            self.inner.call(address, value).await
         } else {
-            future::err(NoHandlerError(message::Type::Call, address).into()).left_future()
+            Err(HandlerError::non_fatal(NoHandlerError(
+                message::Type::Call,
+                address,
+            )))
         }
     }
 
-    async fn fire_and_forget(&self, address: message::Address, request: message::FireAndForget<Body>) {
+    async fn fire_and_forget(
+        &self,
+        address: message::Address,
+        request: message::FireAndForget<Body>,
+    ) {
         if is_control_address(address) {
             // TODO: Handle capabilities request ?
         } else if *self.controller.remote_authorized.borrow() {

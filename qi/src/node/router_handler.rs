@@ -1,5 +1,5 @@
 use crate::{
-    error::NoHandlerError,
+    error::{HandlerError, NoHandlerError},
     messaging::{self, message},
     object::{self, BoxObject, HandlerExt},
     service, Error,
@@ -170,7 +170,7 @@ where
     Body: messaging::Body + Send,
     Body::Error: Send + Sync + 'static,
 {
-    type Error = Error;
+    type Error = HandlerError;
 
     fn call(
         &self,
@@ -178,7 +178,14 @@ where
         value: Body,
     ) -> impl Future<Output = Result<Body, Self::Error>> + Send {
         let router = Arc::clone(&self.0);
-        async move { router.lock_owned().await.call(address, value).await }
+        async move {
+            router
+                .lock_owned()
+                .await
+                .call(address, value)
+                .await
+                .map_err(HandlerError::non_fatal)
+        }
     }
 
     fn fire_and_forget(

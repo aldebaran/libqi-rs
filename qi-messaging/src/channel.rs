@@ -1,6 +1,6 @@
 use crate::{address::Address, binary_codec, /*Error,*/ Message};
 use async_stream::stream;
-use futures::{Sink, Stream, TryStream};
+use futures::{Sink, Stream};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpListener, TcpStream},
@@ -9,7 +9,13 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 pub async fn connect<Body>(
     address: Address,
-) -> Result<(impl TryStream<Ok = Message<Body>>, impl Sink<Message<Body>>), std::io::Error>
+) -> Result<
+    (
+        impl Stream<Item = Result<Message<Body>, binary_codec::DecodeError<Body::Error>>>,
+        impl Sink<Message<Body>, Error = binary_codec::EncodeError<Body::Error>>,
+    ),
+    std::io::Error,
+>
 where
     Body: crate::Body,
 {
@@ -31,12 +37,12 @@ pub async fn serve<Body>(
     (
         impl Stream<
             Item = (
-                impl TryStream<Ok = Message<Body>>,
-                impl Sink<Message<Body>>,
+                impl Stream<Item = Result<Message<Body>, binary_codec::DecodeError<Body::Error>>>,
+                impl Sink<Message<Body>, Error = binary_codec::EncodeError<Body::Error>>,
                 Address,
             ),
         >,
-        Vec<Address>,
+        Address,
     ),
     std::io::Error,
 >
@@ -50,11 +56,10 @@ where
                 unimplemented!("binding to a TCP endpoint with SSL is not yet supported")
             }
             let listener = TcpListener::bind(address).await?;
-            let endpoints = listener
+            let endpoint = listener
                 .local_addr()
                 .map(|address| Address::Tcp { address, ssl })
-                .into_iter()
-                .collect();
+                .unwrap_or_else(|_err| Address::Tcp { address, ssl });
             let clients = stream! {
                 loop {
                     // TODO: Handle case when accept returns an error that is fatal for this listener.
@@ -66,12 +71,14 @@ where
                     }
                 }
             };
-            Ok((clients, endpoints))
+            Ok((clients, endpoint))
         }
     }
 }
 
-fn read_into_messages_stream<Read, Body>(read: Read) -> impl TryStream<Ok = Message<Body>>
+fn read_into_messages_stream<Read, Body>(
+    read: Read,
+) -> impl Stream<Item = Result<Message<Body>, binary_codec::DecodeError<Body::Error>>>
 where
     Read: AsyncRead,
     Body: crate::Body,
@@ -79,7 +86,9 @@ where
     FramedRead::new(read, binary_codec::Decoder::new())
 }
 
-fn write_into_messages_sink<Write, Body>(write: Write) -> impl Sink<Message<Body>>
+fn write_into_messages_sink<Write, Body>(
+    write: Write,
+) -> impl Sink<Message<Body>, Error = binary_codec::EncodeError<Body::Error>>
 where
     Write: AsyncWrite,
     Body: crate::Body,

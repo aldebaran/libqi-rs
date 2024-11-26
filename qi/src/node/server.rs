@@ -1,45 +1,64 @@
 use crate::{
+    error::HandlerError,
     messaging::{self, Address},
     session::{authentication::Authenticator, Session},
 };
-use futures::{stream, StreamExt};
-use std::{collections::HashMap, future::Future};
-use tokio::sync::watch;
+use std::collections::HashMap;
+use tokio::{sync::watch, task};
 
-pub(super) fn create<Handler, Auth, Body>(
-    handler: Handler,
-    authenticator: Auth,
-    addresses: impl IntoIterator<Item = Address>,
-) -> (EndpointsRx, impl Future<Output = ()>)
-where
-    Handler: messaging::Handler<Body> + Sync + Clone,
-    Handler::Error: std::error::Error + Send + Sync + 'static,
-    Auth: Authenticator + Clone + Send + Sync + 'static,
-    Body: messaging::Body + Send,
-    Body::Error: Send + Sync + 'static,
-{
-    let (endpoints_sender, endpoints_receiver) = watch::channel(Default::default());
-    (
-        endpoints_receiver,
-        stream::iter(addresses).for_each_concurrent(None, move |address| {
-            let endpoints_sender = endpoints_sender.clone();
-            let authenticator = authenticator.clone(); // TODO: Use ref instead of cloning ?
-            let handler = handler.clone();
-            async move {
-                if let Ok((server, endpoints)) =
-                    Session::bind_server(address, authenticator, handler).await
-                {
-                    endpoints_sender.send_modify(|ep| {
-                        ep.insert(address, endpoints);
-                    });
-                    server.await;
-                    endpoints_sender.send_modify(|ep| {
-                        ep.remove(&address);
-                    });
-                }
-            }
-        }),
-    )
+/// A set of servers with their aggregated endpoints.
+///
+/// Drops all server tasks when the set is dropped.
+#[derive(Debug)]
+pub(super) struct ServerSet {
+    endpoints: watch::Receiver<HashMap<Address, Vec<Address>>>,
+    #[allow(dead_code)]
+    server_tasks: task::JoinSet<()>,
 }
 
-pub(super) type EndpointsRx = watch::Receiver<HashMap<Address, Vec<Address>>>;
+impl ServerSet {
+    /// Instantiates a set of servers for a list of addresses and aggregates their endpoints.
+    ///
+    /// For each server created, a task is spawned that will track changes to its endpoints.
+    ///
+    /// If any server fails to bind to its address, then the future terminates with an error and all
+    /// created servers are stopped.
+    pub(super) async fn new<Handler, Auth, Body>(
+        handler: Handler,
+        authenticator: Auth,
+        addresses: impl IntoIterator<Item = Address>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Handler: messaging::Handler<Body, Error = HandlerError> + Send + Sync + Clone + 'static,
+        Auth: Authenticator + Clone + Send + Sync + 'static,
+        Body: messaging::Body + Send + 'static,
+        Body::Error: Send + Sync + 'static,
+    {
+        let (set_endpoints_sender, set_endpoints_receiver) = watch::channel(Default::default());
+        let mut server_tasks = task::JoinSet::new();
+        for address in addresses {
+            let mut server =
+                Session::server(address, authenticator.clone(), handler.clone()).await?;
+            let set_endpoints_sender = set_endpoints_sender.clone();
+            server_tasks.spawn(async move {
+                let server_endpoints = server.endpoints_receiver();
+                while let Ok(()) = server_endpoints.changed().await {
+                    set_endpoints_sender.send_modify(|endpoints: &mut HashMap<_, _>| {
+                        let server_endpoints = server_endpoints.borrow_and_update();
+                        endpoints.insert(server_endpoints.0, server_endpoints.1.clone());
+                    });
+                }
+            });
+        }
+        Ok(ServerSet {
+            endpoints: set_endpoints_receiver,
+            server_tasks,
+        })
+    }
+
+    pub(super) fn endpoints_receiver(
+        &mut self,
+    ) -> &mut watch::Receiver<HashMap<Address, Vec<Address>>> {
+        &mut self.endpoints
+    }
+}

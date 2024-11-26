@@ -7,18 +7,16 @@ mod target;
 pub(crate) use self::map::Map;
 pub use self::target::Target;
 use crate::{
-    error::{Error, FormatError},
+    error::{Error, FormatError, HandlerError},
     messaging::{self, message},
     session::authentication::{Authenticator, PermissiveAuthenticator},
     value::{self, KeyDynValueMap},
 };
 use control::Control;
-use futures::{
-    stream::{FusedStream, FuturesUnordered},
-    Sink, Stream, StreamExt,
-};
-use std::{future::Future, pin::pin};
-use tokio::{select, sync::watch};
+use futures::{stream::FusedStream, Sink, StreamExt, TryStream};
+use qi_messaging::Address;
+use std::{net::SocketAddr, pin::pin};
+use tokio::{select, sync::watch, task, time};
 
 pub struct Session<Body> {
     capabilities: watch::Receiver<Option<KeyDynValueMap>>,
@@ -27,17 +25,16 @@ pub struct Session<Body> {
 
 impl<Body> Session<Body>
 where
-    Body: messaging::Body + Send,
+    Body: messaging::Body + Send + 'static,
     Body::Error: Send + Sync + 'static,
 {
     pub(crate) async fn connect<Handler>(
         address: messaging::Address,
         credentials: KeyDynValueMap,
         handler: Handler,
-    ) -> Result<(Self, impl Future<Output = Result<(), messaging::Error>>), Error>
+    ) -> Result<Self, Error>
     where
-        Handler: messaging::Handler<Body> + Sync,
-        Handler::Error: std::error::Error + Send + Sync + 'static,
+        Handler: messaging::Handler<Body, Error = HandlerError> + Send + Sync + 'static,
     {
         let Control {
             controller,
@@ -48,60 +45,89 @@ where
         let (messages_stream, messages_sink) = messaging::channel::connect(address).await?;
         let (mut client, connection) =
             messaging::endpoint::start(messages_stream, messages_sink, handler);
+        task::spawn(async move {
+            let _res = connection.await;
+        });
         controller
             .authenticate_to_server(&mut client, credentials)
             .await?;
-        Ok((
-            Session {
-                capabilities,
-                client,
-            },
-            connection,
-        ))
+        Ok(Session {
+            capabilities,
+            client,
+        })
     }
 
-    pub(crate) async fn bind_server<Auth, Handler>(
+    /// Binds a server of sessions to an address.
+    ///
+    /// Spawn a server task that:
+    ///   1) spawns a session server side with the given authenticator and messaging handler each
+    ///      time a client connects to the server.
+    ///   2) updates a list of endpoints for this session. The list of endpoints changes if the
+    ///      address targets multiple interfaces and interfaces availability changes on the system.
+    ///
+    /// The future terminates when the server is bound and clients can connect. The return value is a
+    /// watch receiver of a pair of:
+    ///   - a local address that the server is bound to.
+    ///   - a list of endpoints that clients can connect to.
+    ///
+    /// The receiver is severed from its sender when the server is stopped.
+    pub(crate) async fn server<Auth, Handler>(
         address: messaging::Address,
         authenticator: Auth,
         handler: Handler,
-    ) -> Result<(impl Future<Output = ()>, Vec<messaging::Address>), messaging::Error>
+    ) -> Result<Server, std::io::Error>
     where
         Auth: Authenticator + Clone + Send + Sync + 'static,
-        Handler: messaging::Handler<Body> + Sync + Clone,
-        Handler::Error: std::error::Error + Send + Sync + 'static,
+        Handler: messaging::Handler<Body, Error = HandlerError> + Send + Sync + Clone + 'static,
     {
-        let (clients, endpoints) = messaging::channel::serve(address).await?;
-        let server = async move {
+        let (clients, local_address) = messaging::channel::serve(address).await?;
+        let (mut endpoints_sender, endpoints_receiver) =
+            watch::channel((local_address, Vec::new()));
+        let task = task::spawn(async move {
             let mut clients = pin!(clients.fuse());
-            let mut sessions = FuturesUnordered::new();
+            let mut update_endpoints = pin!(update_address_endpoints(
+                local_address,
+                &mut endpoints_sender
+            ));
+            // Use a join set so that when this task is dropped, all spawned client session tasks are aborted.
+            let mut client_tasks = task::JoinSet::new();
             loop {
                 select! {
                     Some((messages_stream, messages_sink, _address)) = clients.next(), if !clients.is_terminated() => {
-                        sessions.push(Self::serve(messages_stream, messages_sink, authenticator.clone(), handler.clone()));
+                        client_tasks.spawn(Session::serve_client(
+                            messages_stream,
+                            messages_sink,
+                            authenticator.clone(),
+                            handler.clone(),
+                        ));
                     }
-                    _res = sessions.next(), if !sessions.is_terminated() => {
-                        // nothing
+                    () = &mut update_endpoints => {
+                        // nothing, if this future terminates it means that the address was not an
+                        // "ANY" IP address. The endpoints sender must not be dropped.
                     }
                     else => {
-                        break
+                        break;
                     }
                 }
             }
-        };
-        Ok((server, endpoints))
+        });
+        Ok(Server {
+            endpoints: endpoints_receiver,
+            task,
+        })
     }
 
-    pub async fn serve<Auth, MsgStream, MsgSink, Handler>(
+    pub async fn serve_client<Auth, MsgStream, MsgSink, Handler>(
         messages_stream: MsgStream,
         messages_sink: MsgSink,
         authenticator: Auth,
         handler: Handler,
     ) where
-        MsgStream: Stream<Item = std::result::Result<messaging::Message<Body>, messaging::Error>>,
-        MsgSink: Sink<messaging::Message<Body>, Error = messaging::Error>,
+        MsgStream: TryStream<Ok = messaging::Message<Body>> + Send + 'static,
+        MsgStream::Error: Send,
+        MsgSink: Sink<messaging::Message<Body>> + Send + 'static,
         Auth: Authenticator + Send + Sync + 'static,
-        Handler: messaging::Handler<Body> + Sync,
-        Handler::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        Handler: messaging::Handler<Body, Error = HandlerError> + Send + Sync + 'static,
     {
         let Control {
             capabilities,
@@ -111,30 +137,19 @@ where
         } = control::make(handler, authenticator, true);
         let (client, connection) =
             messaging::endpoint::start(messages_stream, messages_sink, handler);
-        let client = client.downgrade();
         let mut _session = None;
-        let mut connection = pin!(connection);
-        loop {
-            select! {
-                authorized = remote_authorized.changed() => {
-                    match authorized {
-                        Ok(()) => if *remote_authorized.borrow_and_update() {
-                            _session = Some(WeakSession {
-                                capabilities: capabilities.clone(),
-                                client: client.clone(),
-                            })
-                        } else {
-                            _session = None;
-                        }
-                        Err(_err) => {
-                            // Control has been dropped, stop serving the connection.
-                            break;
-                        }
-                    }
-                }
-                _res = &mut connection => {
-                    break;
-                }
+        task::spawn(async move {
+            let _res = connection.await;
+        });
+
+        while let Ok(()) = remote_authorized.changed().await {
+            if *remote_authorized.borrow_and_update() {
+                _session = Some(Session {
+                    capabilities: capabilities.clone(),
+                    client: client.clone(),
+                })
+            } else {
+                _session = None;
             }
         }
     }
@@ -222,5 +237,75 @@ impl<Body> std::fmt::Debug for WeakSession<Body> {
             .field("capabilities", &self.capabilities)
             .field("client", &self.client)
             .finish()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Server {
+    endpoints: watch::Receiver<(Address, Vec<Address>)>,
+    task: task::JoinHandle<()>,
+}
+
+impl Server {
+    pub(crate) fn endpoints_receiver(&mut self) -> &mut watch::Receiver<(Address, Vec<Address>)> {
+        &mut self.endpoints
+    }
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+const NETWORK_INTERFACES_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Returns a future that will update endpoints associated to a local address into the sender.
+///
+/// A local address can be bound to an "ANY" IP address, meaning that it is bound to all network
+/// interfaces of the host system. This means that when the set of interfaces changes, so do local
+/// endpoints. This future checks if the address is an "ANY" IP address and then continuously tracks
+/// changes to the network interfaces to update the list of endpoints.
+///
+/// If the local address is not an "ANY" IP address, then the endpoints are updated immediately with
+/// the local address and only that address and the future terminates.
+///
+/// In the tuple value, only the list of endpoints is updated. The first value (he local address) is
+/// never set by this function. It is the responsibility of the caller to set it.
+async fn update_address_endpoints(
+    local_address: Address,
+    endpoints_sender: &mut watch::Sender<(Address, Vec<Address>)>,
+) {
+    match local_address {
+        // An "ANY" address, aka "unspecified".
+        Address::Tcp {
+            address: local_socket_address,
+            ssl,
+        } if local_socket_address.ip().is_unspecified() => {
+            // Watch network interfaces changes to list all IP addresses of the host.
+            let mut networks = sysinfo::Networks::new();
+            loop {
+                networks.refresh_list();
+                let new_endpoints: Vec<_> = networks
+                    .values()
+                    .flat_map(|net| net.ip_networks())
+                    .map(|ip_net| Address::Tcp {
+                        address: SocketAddr::new(ip_net.addr, local_socket_address.port()),
+                        ssl,
+                    })
+                    .collect();
+                endpoints_sender.send_if_modified(move |(_, endpoints)| {
+                    if endpoints != &new_endpoints {
+                        *endpoints = new_endpoints;
+                        true
+                    } else {
+                        false
+                    }
+                });
+                time::sleep(NETWORK_INTERFACES_REFRESH_INTERVAL).await;
+            }
+        }
+        // Not an any address, update endpoints and terminate.
+        _ => endpoints_sender.send_modify(|(_, endpoints)| *endpoints = vec![local_address]),
     }
 }
