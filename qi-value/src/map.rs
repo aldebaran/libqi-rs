@@ -134,7 +134,7 @@ pub struct OccupiedEntry<'a, K, V> {
     idx: usize,
 }
 
-impl<'a, K, V> OccupiedEntry<'a, K, V> {
+impl<K, V> OccupiedEntry<'_, K, V> {
     pub fn key(&self) -> &K {
         &self.vec[self.idx].0
     }

@@ -64,7 +64,7 @@ fn socket_addr_from_url(url: &Url) -> Result<SocketAddr, Error> {
     .map_err(|err| Error::ResolveHost(Some(err)))?
     .first()
     .copied()
-    .ok_or_else(|| Error::ResolveHost(None))
+    .ok_or(Error::ResolveHost(None))
 }
 
 #[derive(Debug)]

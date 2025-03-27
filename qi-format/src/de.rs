@@ -635,7 +635,7 @@ impl<'slice_de, 'data> SequenceAccess<'slice_de, 'data> {
     }
 }
 
-impl<'slice_de, 'data> serde::de::SeqAccess<'data> for SequenceAccess<'slice_de, 'data> {
+impl<'data> serde::de::SeqAccess<'data> for SequenceAccess<'_, 'data> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
@@ -665,7 +665,7 @@ impl<'slice_de, 'data> serde::de::SeqAccess<'data> for SequenceAccess<'slice_de,
     }
 }
 
-impl<'slice_de, 'data> serde::de::MapAccess<'data> for SequenceAccess<'slice_de, 'data> {
+impl<'data> serde::de::MapAccess<'data> for SequenceAccess<'_, 'data> {
     type Error = Error;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>

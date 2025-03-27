@@ -307,7 +307,7 @@ impl<'t> OptionVisitor<'t> {
     }
 }
 
-impl<'de, 't> serde::de::Visitor<'de> for OptionVisitor<'t> {
+impl<'de> serde::de::Visitor<'de> for OptionVisitor<'_> {
     type Value = Option<Value<'de>>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -338,7 +338,7 @@ impl<'t> ListVisitor<'t> {
     }
 }
 
-impl<'de, 't> serde::de::Visitor<'de> for ListVisitor<'t> {
+impl<'de> serde::de::Visitor<'de> for ListVisitor<'_> {
     type Value = Vec<Value<'de>>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -371,7 +371,7 @@ impl<'t> MapVisitor<'t> {
     }
 }
 
-impl<'de, 't> serde::de::Visitor<'de> for MapVisitor<'t> {
+impl<'de> serde::de::Visitor<'de> for MapVisitor<'_> {
     type Value = Map<Value<'de>, Value<'de>>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -405,7 +405,7 @@ impl<'t> TupleVisitor<'t> {
     }
 }
 
-impl<'de, 't> serde::de::Visitor<'de> for TupleVisitor<'t> {
+impl<'de> serde::de::Visitor<'de> for TupleVisitor<'_> {
     type Value = Vec<Value<'de>>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

@@ -12,7 +12,7 @@ impl<T> Dynamic<T> {
     }
 }
 
-impl<'a> Dynamic<Value<'a>> {
+impl Dynamic<Value<'_>> {
     pub fn into_owned(self) -> Dynamic<Value<'static>> {
         Dynamic(self.0.into_owned())
     }

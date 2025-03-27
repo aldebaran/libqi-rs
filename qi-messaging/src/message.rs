@@ -305,7 +305,7 @@ where
             Type::Cancel => Self::Cancel {
                 id,
                 address,
-                call_id: body.deserialize().map_err(Into::into)?,
+                call_id: body.deserialize()?,
             },
             Type::Canceled => Self::Canceled { id, address },
         };

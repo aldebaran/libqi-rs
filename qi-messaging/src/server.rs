@@ -18,7 +18,7 @@ pub(super) struct CallFutures<'a, T, E> {
     call_futures: FuturesUnordered<CallFuture<'a, T, E>>,
 }
 
-impl<'a, T, E> Default for CallFutures<'a, T, E> {
+impl<T, E> Default for CallFutures<'_, T, E> {
     fn default() -> Self {
         Self {
             call_futures: Default::default(),
@@ -44,7 +44,7 @@ impl<'a, T, E> CallFutures<'a, T, E> {
     }
 }
 
-impl<'a, T, E> Stream for CallFutures<'a, T, E>
+impl<T, E> Stream for CallFutures<'_, T, E>
 where
     E: handler::Error,
 {
@@ -56,7 +56,7 @@ where
     }
 }
 
-impl<'a, T, E> FusedStream for CallFutures<'a, T, E>
+impl<T, E> FusedStream for CallFutures<'_, T, E>
 where
     E: handler::Error,
 {
@@ -91,7 +91,7 @@ impl<'a, T, E> CallFuture<'a, T, E> {
     }
 }
 
-impl<'a, T, E> Future for CallFuture<'a, T, E>
+impl<T, E> Future for CallFuture<'_, T, E>
 where
     E: handler::Error,
 {
@@ -168,7 +168,7 @@ enum CallResponseFutureState<'a, T, E> {
     Terminated,
 }
 
-impl<'a, T, E> std::fmt::Debug for CallResponseFutureState<'a, T, E> {
+impl<T, E> std::fmt::Debug for CallResponseFutureState<'_, T, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Running { waker, .. } => f.debug_struct("Running").field("waker", waker).finish(),

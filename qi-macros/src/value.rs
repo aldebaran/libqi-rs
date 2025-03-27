@@ -396,7 +396,7 @@ struct WithValueLifetimeImplGenerics<'a> {
     generics: &'a Generics,
 }
 
-impl<'a> ToTokens for WithValueLifetimeImplGenerics<'a> {
+impl ToTokens for WithValueLifetimeImplGenerics<'_> {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let mut generics = self.generics.clone();
         generics

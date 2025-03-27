@@ -136,13 +136,15 @@ where
     (client, outgoing)
 }
 
+pub type DispatchResult<E1, E2> = Result<(), Either<E1, E2>>;
+
 pub fn start<MsgStream, MsgSink, Handler, Body>(
     messages_stream: MsgStream,
     messages_sink: MsgSink,
     handler: Handler,
 ) -> (
     Client<Body>,
-    impl Future<Output = Result<(), Either<MsgStream::Error, MsgSink::Error>>>,
+    impl Future<Output = DispatchResult<MsgStream::Error, MsgSink::Error>>,
 )
 where
     MsgStream: TryStream<Ok = Message<Body>>,
