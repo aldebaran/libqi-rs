@@ -2,20 +2,20 @@
 name = "qi-format"
 description = "The `qi` binary format for values of the `qi` type system"
 
-license-file = "../LICENSE.txt"
-version = "0.1.0-dev"
-edition = "2021"
-rust-version = "1.75"
+edition.workspace = true
+license-file.workspace = true
+authors.workspace = true
+version.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-bytes = { version = "1.6.0", features = ["serde"] }
-serde = { version = "1.0.203", features = ["derive"] }
-thiserror = "1.0.61"
-sealed = "0.5.0"
+bytes = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
-assert_matches = "1.5.0"
-pretty_assertions = "1.4.0"
-serde-value = "0.7.0"
+assert_matches = { workspace = true }
+pretty_assertions = { workspace = true }
 qi-value = { path = "../qi-value" }
-serde_with = "3.11.0"
+serde-value = { workspace = true }
+serde_with = { workspace = true }

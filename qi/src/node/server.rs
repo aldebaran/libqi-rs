@@ -1,7 +1,7 @@
 use crate::{
     error::HandlerError,
     messaging::{self, Address},
-    session::{authentication::Authenticator, Session},
+    session::{auth::Authenticator, Session},
 };
 use std::collections::HashMap;
 use tokio::{sync::watch, task};

@@ -65,21 +65,21 @@ impl Default for Version {
 )]
 pub enum Type {
     #[default]
-    #[display(fmt = "call")]
+    #[display("call")]
     Call,
-    #[display(fmt = "reply")]
+    #[display("reply")]
     Reply,
-    #[display(fmt = "error")]
+    #[display("error")]
     Error,
-    #[display(fmt = "post")]
+    #[display("post")]
     Post,
-    #[display(fmt = "event")]
+    #[display("event")]
     Event,
-    #[display(fmt = "capabilities")]
+    #[display("capabilities")]
     Capabilities,
-    #[display(fmt = "cancel")]
+    #[display("cancel")]
     Cancel,
-    #[display(fmt = "canceled")]
+    #[display("canceled")]
     Canceled,
 }
 
@@ -101,7 +101,7 @@ impl Type {
     serde::Serialize,
     serde::Deserialize,
 )]
-#[display(fmt = "{{{_0}.{_1}.{_2}}}")]
+#[display("{{{_0}.{_1}.{_2}}}")]
 pub struct Address(pub Service, pub Object, pub Action);
 
 impl Address {
@@ -327,7 +327,7 @@ where
     serde::Serialize,
     serde::Deserialize,
 )]
-#[display(fmt = "{id}:{ty}@{address}")]
+#[display("{id}:{ty}@{address}")]
 pub struct MetaData {
     pub(crate) id: Id,
     pub(crate) address: Address,

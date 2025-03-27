@@ -9,7 +9,7 @@ use crate::{
     service_directory::{self, ServiceDirectory},
     session::{
         self,
-        authentication::{Authenticator, PermissiveAuthenticator},
+        auth::{Authenticator, PermissiveAuthenticator},
     },
     value::{self, os::MachineId},
     Address, Error,

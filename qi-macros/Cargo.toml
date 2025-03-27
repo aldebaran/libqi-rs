@@ -1,23 +1,24 @@
 [package]
 name = "qi-macros"
 
-license-file = "../LICENSE.txt"
-version = "0.1.0-dev"
-edition = "2021"
-rust-version = "1.75"
+edition.workspace = true
+license-file.workspace = true
+authors.workspace = true
+version.workspace = true
+rust-version.workspace = true
 
 [lib]
 proc-macro = true
 
 [dependencies]
-quote = "1.0.36"
-syn = "2.0.66"
-proc-macro2 = "1.0.85"
+quote = "1.0.40"
+syn = "2.0.100"
+proc-macro2 = "1.0.94"
 convert_case = "0.6.0"
 
 [dev-dependencies]
-assert_matches = "1.5.0"
-syn = { version = "2.0.66", features = ["full", "extra-traits"] }
-pretty_assertions = "1.4.0"
+assert_matches = { workspace = true }
+syn = { version = "2.0.100", features = ["full", "extra-traits"] }
+pretty_assertions = { workspace = true }
 qi-macros = { path = "../qi-macros" }
 qi-value = { path = "../qi-value" }

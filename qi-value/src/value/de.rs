@@ -6,6 +6,7 @@ use crate::{
     IntoValue, Map, Object, Type,
 };
 use serde::{de::DeserializeSeed, Deserialize};
+use serde_with::{Bytes, DeserializeAs};
 use std::string::String as StdString;
 
 impl<'de: 'v, 'v> serde::Deserialize<'de> for Value<'v> {
@@ -13,7 +14,7 @@ impl<'de: 'v, 'v> serde::Deserialize<'de> for Value<'v> {
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_any(ValueVisitor)
+        deserializer.deserialize_any(AnyValueVisitor)
     }
 }
 
@@ -51,21 +52,21 @@ impl<'de> serde::de::DeserializeSeed<'de> for ValueType<'_> {
         }
         use serde::Deserialize;
         match self.0 {
-            Some(Type::Unit) => deserializer.deserialize_unit(ValueVisitor),
-            Some(Type::Bool) => deserializer.deserialize_bool(ValueVisitor),
-            Some(Type::Int8) => deserializer.deserialize_i8(ValueVisitor),
-            Some(Type::UInt8) => deserializer.deserialize_u8(ValueVisitor),
-            Some(Type::Int16) => deserializer.deserialize_i16(ValueVisitor),
-            Some(Type::UInt16) => deserializer.deserialize_u16(ValueVisitor),
-            Some(Type::Int32) => deserializer.deserialize_i32(ValueVisitor),
-            Some(Type::UInt32) => deserializer.deserialize_u32(ValueVisitor),
-            Some(Type::Int64) => deserializer.deserialize_i64(ValueVisitor),
-            Some(Type::UInt64) => deserializer.deserialize_u64(ValueVisitor),
-            Some(Type::Float32) => deserializer.deserialize_f32(ValueVisitor),
-            Some(Type::Float64) => deserializer.deserialize_f64(ValueVisitor),
+            Some(Type::Unit) => <()>::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::Bool) => bool::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::Int8) => i8::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::UInt8) => u8::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::Int16) => i16::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::UInt16) => u16::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::Int32) => i32::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::UInt32) => u32::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::Int64) => i64::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::UInt64) => u64::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::Float32) => f32::deserialize(deserializer).map(IntoValue::into_value),
+            Some(Type::Float64) => f64::deserialize(deserializer).map(IntoValue::into_value),
             Some(Type::String) => String::deserialize(deserializer).map(Into::into),
-            Some(Type::Raw) => deserializer.deserialize_bytes(ValueVisitor),
-            Some(Type::Object) => Ok(Object::deserialize(deserializer)?.into_value()),
+            Some(Type::Raw) => Bytes::deserialize_as(deserializer).map(Value::Raw),
+            Some(Type::Object) => Object::deserialize(deserializer).map(IntoValue::into_value),
             Some(Type::Option(value)) => {
                 let opt = deserializer.deserialize_option(OptionVisitor::new(value.as_deref()))?;
                 Ok(Value::Option(opt.map(Box::new)))
@@ -100,9 +101,9 @@ impl<'de> serde::de::DeserializeSeed<'de> for ValueType<'_> {
 }
 
 /// A visitor that maps exactly what it receives to a value.
-struct ValueVisitor;
+struct AnyValueVisitor;
 
-impl<'de> serde::de::Visitor<'de> for ValueVisitor {
+impl<'de> serde::de::Visitor<'de> for AnyValueVisitor {
     type Value = Value<'de>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

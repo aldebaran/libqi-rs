@@ -2,10 +2,11 @@
 name = "qi-tools"
 description = ""
 
-license-file = "../LICENSE.txt"
-version = "0.1.0-dev"
-edition = "2021"
-rust-version = "1.75"
+edition.workspace = true
+license-file.workspace = true
+authors.workspace = true
+version.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 anyhow = "1.0.69"

@@ -1,4 +1,17 @@
-use crate::{value::de::ValueType, Signature, Value};
+use super::{AsDynamic, AsDynamicOwned, Fields, SERDE_STRUCT_NAME};
+use crate::{value::de::ValueType, Dynamic, FromValue, Signature, Value};
+
+impl<'de, T> serde::Deserialize<'de> for Dynamic<T>
+where
+    T: FromValue<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserialize(deserializer).map(Self)
+    }
+}
 
 pub(crate) struct DynamicVisitor;
 
@@ -51,5 +64,59 @@ impl<'de> serde::de::Visitor<'de> for DynamicVisitor {
             _ => Err(Error::missing_field("value")),
         }?;
         Ok(value)
+    }
+}
+
+impl<'de, T> serde_with::DeserializeAs<'de, T> for AsDynamic
+where
+    T: FromValue<'de>,
+{
+    fn deserialize_as<D>(deserializer: D) -> Result<T, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        self::deserialize(deserializer)
+    }
+}
+
+impl<'de> serde_with::DeserializeAs<'de, Value<'static>> for AsDynamicOwned {
+    fn deserialize_as<D>(deserializer: D) -> Result<Value<'static>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserialize_value(deserializer).map(Value::into_owned)
+    }
+}
+
+fn deserialize_value<'de, D>(deserializer: D) -> Result<Value<'de>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserializer.deserialize_struct(SERDE_STRUCT_NAME, &Fields::KEYS, DynamicVisitor)
+}
+
+pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+where
+    T: FromValue<'de>,
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    deserialize_value(deserializer)?
+        .cast_into()
+        .map_err(|err| D::Error::custom(err.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn u32_from_json_number() {
+        let value: u32 = deserialize_value(json!({ "signature": "I", "value": 42 }))
+            .unwrap()
+            .cast_into()
+            .expect("value is not a u32");
+        assert_eq!(value, 42)
     }
 }

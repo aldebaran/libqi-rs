@@ -2,28 +2,31 @@
 name = "qi-value"
 description = "Values of the `qi` type system"
 
-license-file = "../LICENSE.txt"
-version = "0.1.0-dev"
-edition = "2021"
-rust-version = "1.75"
+edition.workspace = true
+license-file.workspace = true
+authors.workspace = true
+version.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-qi-macros = { path = "../qi-macros" }
-derive_more = "0.99.18"
-serde = { version = "1.0.203", features = ["derive"] }
-thiserror = "1.0.61"
-seq-macro = "0.3.5"
-ordered-float = { version = "4.2.0", features = ["serde"] }
-bytes = { version = "1.6.0", features = ["serde"] }
-serde_with = "3.11.0"
-once_cell = "1.20.2"
-uuid = { version = "1.11.0", features = ["v4", "v5"] }
+bytes = { workspace = true }
+derive_more = { workspace = true }
+dirs = { workspace = true }
 machine-uid = { version = "0.5.3", optional = true }
-dirs = "5.0.1"
-sha1_smol = "1.0.1"
+once_cell = { workspace = true }
+ordered-float = { workspace = true }
+qi-macros = { path = "../qi-macros" }
+seq-macro = { workspace = true }
+serde = { workspace = true }
+serde_with = { workspace = true }
+sha1_smol = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
-serde_test = "1.0.177"
+serde_test = { workspace = true }
+serde-value = { workspace = true }
+serde_json = { workspace = true }
 
 [features]
 default = ["machine-uid"]

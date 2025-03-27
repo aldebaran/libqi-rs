@@ -1,5 +1,5 @@
 use super::{
-    authentication::{self, Authenticator},
+    auth::{self, Authenticator},
     capabilities,
 };
 use crate::{
@@ -20,7 +20,7 @@ fn is_control_address(address: message::Address) -> bool {
     address.service() == SERVICE_ID && address.object() == OBJECT_ID
 }
 
-pub const AUTHENTICATE_ADDRESS: message::Address =
+pub(crate) const AUTHENTICATE_ADDRESS: message::Address =
     message::Address(SERVICE_ID, OBJECT_ID, AUTHENTICATE_ACTION_ID);
 
 #[derive(Clone)]
@@ -43,7 +43,7 @@ impl Controller {
         self.capabilities
             .send_replace(Some(shared_capabilities.clone()));
         self.remote_authorized.send_replace(true);
-        Ok(authentication::state_done_map(shared_capabilities))
+        Ok(auth::state_done_map(shared_capabilities))
     }
 
     pub(super) async fn authenticate_to_server<Body>(
@@ -55,7 +55,8 @@ impl Controller {
         Body: messaging::Body + Send,
         Body::Error: Send + Sync + 'static,
     {
-        self.capabilities.send_replace(None); // Reset the capabilities
+        // Reset the current capabilities
+        self.capabilities.send_replace(None);
         let mut request = capabilities::local_map().clone();
         request.extend(parameters);
         let authenticate_result = client
@@ -67,7 +68,7 @@ impl Controller {
         let mut shared_capabilities = authenticate_result
             .deserialize()
             .map_err(FormatError::MethodReturnValueDeserialization)?;
-        authentication::extract_state_result(&mut shared_capabilities)
+        auth::extract_state_result(&mut shared_capabilities)
             .map_err(AuthenticateToServerError::ResultState)?;
         capabilities::check_required(&shared_capabilities)
             .map_err(AuthenticateToServerError::UnexpectedServerCapabilityValue)?;
@@ -177,7 +178,7 @@ pub(super) enum AuthenticateClientError {
     UnexpectedclientCapabilityValue(#[from] capabilities::KeyValueExpectError),
 
     #[error("failure to verify authentication request")]
-    AuthenticationVerification(#[source] authentication::Error),
+    AuthenticationVerification(#[source] auth::Error),
 }
 
 impl From<AuthenticateClientError> for Error {
@@ -189,7 +190,7 @@ impl From<AuthenticateClientError> for Error {
 #[derive(Debug, thiserror::Error)]
 pub(super) enum AuthenticateToServerError {
     #[error("the authentication state sent back by the server is invalid")]
-    ResultState(#[from] authentication::StateError),
+    ResultState(#[from] auth::StateError),
 
     #[error("the server sent an unexpected capability value")]
     UnexpectedServerCapabilityValue(#[from] capabilities::KeyValueExpectError),

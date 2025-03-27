@@ -42,7 +42,7 @@ impl messaging::Body for BinaryFormattedValue {
 #[derive(Debug, thiserror::Error)]
 pub(super) enum Error {
     #[error(transparent)]
-    FromValue(#[from] value::FromValueError),
+    Conversion(#[from] value::FromValueError),
 
     #[error(transparent)]
     Format(#[from] format::Error),

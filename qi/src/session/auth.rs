@@ -19,14 +19,20 @@ pub struct UserTokenAuthenticator {
     token: String,
 }
 
+impl UserTokenAuthenticator {
+    pub fn new(user: String, token: String) -> Self {
+        Self { user, token }
+    }
+}
+
 impl Authenticator for UserTokenAuthenticator {
     fn verify(&self, mut parameters: KeyDynValueMap) -> Result<(), Error> {
-        let user: &str = parameters
+        let user: String = parameters
             .remove(USER_KEY)
             .ok_or_else(|| Error::UserValue("missing".to_owned()))?
             .cast_into()
             .map_err(|err| Error::UserValue(err.to_string()))?;
-        let token: &str = parameters
+        let token: String = parameters
             .remove(TOKEN_KEY)
             .ok_or_else(|| Error::TokenValue("missing".to_owned()))?
             .cast_into()
@@ -45,7 +51,7 @@ pub(super) fn state_done_map(mut capabilities: KeyDynValueMap) -> KeyDynValueMap
 pub(super) fn extract_state_result(capabilities: &mut KeyDynValueMap) -> Result<(), StateError> {
     let state = capabilities
         .remove(STATE_KEY)
-        .ok_or_else(|| StateError::Missing)?
+        .ok_or(StateError::Missing)?
         .clone();
     match state {
         Value::UInt32(STATE_DONE) => Ok(()),
@@ -82,10 +88,10 @@ pub(crate) enum StateError {
 
 macro_rules! declare_prefixed_key {
     (qi: $name:ident, $suffix:literal) => {
-        const $name: &str = concat!("__qi_auth_", $suffix);
+        pub(super) const $name: &str = concat!("__qi_auth_", $suffix);
     };
     (user: $name:ident, $suffix:literal) => {
-        const $name: &str = concat!("auth_", $suffix);
+        pub(super) const $name: &str = concat!("auth_", $suffix);
     };
 }
 
@@ -94,4 +100,4 @@ declare_prefixed_key!(qi: STATE_KEY, "state");
 declare_prefixed_key!(user: USER_KEY, "user");
 declare_prefixed_key!(user: TOKEN_KEY, "token");
 
-const STATE_DONE: u32 = 3;
+pub(super) const STATE_DONE: u32 = 3;

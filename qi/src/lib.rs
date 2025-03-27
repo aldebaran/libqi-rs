@@ -42,21 +42,20 @@
 #![doc = include_str!("../README.md")]
 
 mod error;
-mod never;
 pub mod node;
 pub mod object;
 pub mod service;
 pub(crate) mod service_directory;
-pub mod session;
+pub(crate) mod session;
 pub mod signal;
 pub mod value;
 
 pub use self::{
     error::{BoxError, Error, HandlerError},
-    never::Never,
     node::Node,
     object::{Object, ObjectExt},
     service_directory::ServiceDirectory,
+    session::auth,
     value::Value,
 };
 pub use qi_format as format;

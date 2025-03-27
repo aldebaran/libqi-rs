@@ -100,7 +100,9 @@ where
         address: messaging::Address,
         credentials: KeyDynValueMap,
     ) -> Result<Session<Body>, Error> {
-        let session = Session::connect(address, credentials, self.handler.clone()).await?;
+        let (messages_in, messages_out) = messaging::channel::connect(address).await?;
+        let session =
+            Session::connect(messages_in, messages_out, credentials, self.handler.clone()).await?;
         let service_name = service_name.to_owned();
         self.sessions
             .lock()

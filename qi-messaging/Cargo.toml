@@ -2,28 +2,28 @@
 name = "qi-messaging"
 description = ""
 
-license-file = "../LICENSE.txt"
-version = "0.1.0-dev"
-edition = "2021"
-rust-version = "1.75"
+edition.workspace = true
+license-file.workspace = true
+authors.workspace = true
+version.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-bytes = { version = "1.6.0", features = ["serde"] }
-derive_more = "0.99.18"
-futures = "0.3.30"
-serde = { version = "1.0.203", features = ["derive"] }
-thiserror = "1.0.61"
-tokio = { version = "1.41.1", features = ["io-util", "macros", "net"] }
-tracing = "0.1.40"
-tokio-util = { version = "0.7.12", features = ["codec"] }
+async-stream = { workspace = true }
+bytes = { workspace = true }
+derive_more = { workspace = true }
+either = { workspace = true }
+futures= { workspace = true }
 qi-value = { path = "../qi-value" }
-pin-project-lite = "0.2.14"
-serde_with = "3.8.1"
-url = { version = "2.5.2", features = ["serde"] }
-async-stream = "0.3.5"
-either = "1.13.0"
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
-assert_matches = "1.5.0"
-serde_json = "1.0.117"
-tokio-test = "0.4.4"
+assert_matches = { workspace = true }
+serde_json = { workspace = true }
+serde-value = { workspace = true }
+tokio-test = { workspace = true }

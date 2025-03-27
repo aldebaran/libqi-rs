@@ -1,15 +1,14 @@
-pub mod authentication;
+pub mod auth;
 mod capabilities;
-pub mod control;
+pub(crate) mod control;
 mod map;
 mod target;
 
-pub(crate) use self::map::Map;
-pub use self::target::Target;
+use self::auth::PermissiveAuthenticator;
+pub(crate) use self::{auth::Authenticator, map::Map, target::Target};
 use crate::{
     error::{Error, FormatError, HandlerError},
     messaging::{self, message},
-    session::authentication::{Authenticator, PermissiveAuthenticator},
     value::{self, KeyDynValueMap},
 };
 use control::Control;
@@ -18,7 +17,7 @@ use qi_messaging::Address;
 use std::{net::SocketAddr, pin::pin};
 use tokio::{select, sync::watch, task, time};
 
-pub struct Session<Body> {
+pub(crate) struct Session<Body> {
     capabilities: watch::Receiver<Option<KeyDynValueMap>>,
     client: messaging::Client<Body>,
 }
@@ -28,12 +27,16 @@ where
     Body: messaging::Body + Send + 'static,
     Body::Error: Send + Sync + 'static,
 {
-    pub(crate) async fn connect<Handler>(
-        address: messaging::Address,
+    pub(crate) async fn connect<MsgStream, MsgSink, Handler>(
+        messages_stream: MsgStream,
+        messages_sink: MsgSink,
         credentials: KeyDynValueMap,
         handler: Handler,
     ) -> Result<Self, Error>
     where
+        MsgStream: TryStream<Ok = messaging::Message<Body>> + Send + 'static,
+        MsgStream::Error: Send,
+        MsgSink: Sink<messaging::Message<Body>> + Send + 'static,
         Handler: messaging::Handler<Body, Error = HandlerError> + Send + Sync + 'static,
     {
         let Control {
@@ -42,7 +45,6 @@ where
             handler,
             ..
         } = control::make(handler, PermissiveAuthenticator, true);
-        let (messages_stream, messages_sink) = messaging::channel::connect(address).await?;
         let (mut client, connection) =
             messaging::endpoint::start(messages_stream, messages_sink, handler);
         task::spawn(async move {
@@ -117,7 +119,7 @@ where
         })
     }
 
-    pub async fn serve_client<Auth, MsgStream, MsgSink, Handler>(
+    pub(crate) async fn serve_client<Auth, MsgStream, MsgSink, Handler>(
         messages_stream: MsgStream,
         messages_sink: MsgSink,
         authenticator: Auth,
@@ -270,8 +272,8 @@ const NETWORK_INTERFACES_REFRESH_INTERVAL: std::time::Duration = std::time::Dura
 /// If the local address is not an "ANY" IP address, then the endpoints are updated immediately with
 /// the local address and only that address and the future terminates.
 ///
-/// In the tuple value, only the list of endpoints is updated. The first value (he local address) is
-/// never set by this function. It is the responsibility of the caller to set it.
+/// In the endpoints tuple value, only the list of endpoints (the second element) is updated. The
+/// first value (the local address) is never set by this function.
 async fn update_address_endpoints(
     local_address: Address,
     endpoints_sender: &mut watch::Sender<(Address, Vec<Address>)>,
@@ -307,5 +309,289 @@ async fn update_address_endpoints(
         }
         // Not an any address, update endpoints and terminate.
         _ => endpoints_sender.send_modify(|(_, endpoints)| *endpoints = vec![local_address]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::messaging::Message;
+    use assert_matches::assert_matches;
+    use futures::{channel::mpsc, SinkExt, StreamExt};
+    use qi_messaging::Body;
+    use serde_json as json;
+    use std::{
+        collections::VecDeque,
+        convert::Infallible,
+        future::{ready, Future},
+    };
+    use tokio::spawn;
+
+    #[derive(Clone, Copy)]
+    struct DummyHandler;
+
+    impl messaging::Handler<JsonBody> for DummyHandler {
+        type Error = HandlerError;
+
+        async fn call(
+            &self,
+            _address: message::Address,
+            value: JsonBody,
+        ) -> Result<JsonBody, Self::Error> {
+            Ok(value)
+        }
+
+        fn fire_and_forget(
+            &self,
+            _address: message::Address,
+            _request: message::FireAndForget<JsonBody>,
+        ) -> impl Future<Output = ()> + Send {
+            ready(())
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct JsonBody(json::Value);
+
+    impl messaging::Body for JsonBody {
+        type Error = json::Error;
+        type Data = VecDeque<u8>;
+
+        fn from_bytes(bytes: bytes::Bytes) -> Result<Self, Self::Error> {
+            json::from_slice(&bytes).map(Self)
+        }
+
+        fn into_data(self) -> Result<Self::Data, Self::Error> {
+            json::to_vec(&self.0).map(Into::into)
+        }
+
+        fn serialize<T>(value: &T) -> Result<Self, Self::Error>
+        where
+            T: serde::Serialize,
+        {
+            json::to_value(value).map(Self)
+        }
+
+        fn deserialize_seed<'de, T>(&'de self, seed: T) -> Result<T::Value, Self::Error>
+        where
+            T: serde::de::DeserializeSeed<'de>,
+        {
+            seed.deserialize(self.0.clone())
+        }
+    }
+
+    /// The server session receives an authentication request with incompatible capabilities.
+    ///
+    /// It is expected that:
+    ///   1. the server replies to the request with an error.
+    ///   2. the connection is closed.
+    #[tokio::test]
+    async fn server_sends_back_error_on_client_bad_capabilities() {
+        // 0.1: start the server session
+        let (mut send_to_server, server_recv) = mpsc::unbounded();
+        let (server_send, mut recv_from_server) = mpsc::unbounded();
+        let task = spawn(Session::serve_client(
+            server_recv.map(Ok::<_, Infallible>),
+            server_send.sink_map_err(qi_messaging::Error::link_lost),
+            auth::PermissiveAuthenticator,
+            DummyHandler,
+        ));
+
+        // 0.2: start the request
+        send_to_server
+            .send(Message::Call {
+                id: message::Id(0),
+                address: control::AUTHENTICATE_ADDRESS,
+                value: JsonBody::serialize(&{
+                    let mut map = KeyDynValueMap::new();
+                    map.set("RemoteCancelableCalls", true);
+                    map.set("ObjectPtrUID", true);
+                    map.set("RelativeEndpointURI", false); // A required capabilities is set to false.
+                    map
+                })
+                .unwrap(),
+            })
+            .await
+            .unwrap();
+
+        // 1.
+        let response = recv_from_server.next().await.unwrap();
+        assert_matches!(
+            response,
+            Message::Error {
+                address: control::AUTHENTICATE_ADDRESS,
+                error,
+                ..
+            } => {
+                assert!(error.contains("unexpected capability value"), "error is not an unexpected capability value: {error}")
+            }
+        );
+
+        // 2.
+        let () = task.await.unwrap();
+    }
+
+    /// The client session receives an authentication response with incompatible capabilities.
+    ///
+    /// It is expected that:
+    ///   1. the connection is closed.
+    ///   2. the error is reported back to the client user.
+    #[tokio::test]
+    async fn client_receives_bad_capabilities() {
+        // 0.1: start the client session
+        let (mut send_to_client, client_recv) = mpsc::unbounded();
+        let (client_send, mut recv_from_client) = mpsc::unbounded();
+        let task = spawn(Session::connect(
+            client_recv.map(Ok::<_, Infallible>),
+            client_send.sink_map_err(qi_messaging::Error::link_lost),
+            Default::default(),
+            DummyHandler,
+        ));
+
+        // 0.2: receive the request
+        let request = recv_from_client.next().await.unwrap();
+        assert_matches!(
+            request,
+            Message::Call {
+                id: message::Id(1),
+                address: control::AUTHENTICATE_ADDRESS,
+                ..
+            }
+        );
+
+        // 1: send the reply containing the capabilities
+        send_to_client
+            .send(Message::Reply {
+                id: message::Id(1),
+                address: control::AUTHENTICATE_ADDRESS,
+                value: JsonBody::serialize(&{
+                    let mut map = KeyDynValueMap::new();
+                    map.set("RemoteCancelableCalls", true);
+                    map.set("ObjectPtrUID", true);
+                    map.set("RelativeEndpointURI", false); // A required capabilities is set to false.
+                    map
+                })
+                .unwrap(),
+            })
+            .await
+            .unwrap();
+
+        // 1. task terminates succesfully with a result in error.
+        assert!(task.await.unwrap().is_err());
+    }
+
+    /// The server expects authentication parameters, the client sends correct ones.
+    ///
+    /// It is expected that:
+    ///   1. the authentication succeeds.
+    #[tokio::test]
+    async fn client_sends_good_auth_parameters() {
+        let auth = auth::UserTokenAuthenticator::new("myuser".to_owned(), "mytoken".to_owned());
+
+        // 0.1: start the server session
+        let (mut send_to_server, server_recv) = mpsc::unbounded();
+        let (server_send, mut recv_from_server) = mpsc::unbounded();
+        spawn(Session::serve_client(
+            server_recv.map(Ok::<_, Infallible>),
+            server_send.sink_map_err(qi_messaging::Error::link_lost),
+            auth,
+            DummyHandler,
+        ));
+
+        // 0.2: start the request
+        send_to_server
+            .send(Message::Call {
+                id: message::Id(0),
+                address: control::AUTHENTICATE_ADDRESS,
+                value: JsonBody::serialize(&{
+                    let mut map = KeyDynValueMap::new();
+                    map.set("RemoteCancelableCalls", true);
+                    map.set("ObjectPtrUID", true);
+                    map.set("RelativeEndpointURI", true);
+                    map.set(auth::USER_KEY, "myuser");
+                    map.set(auth::TOKEN_KEY, "mytoken");
+                    map
+                })
+                .unwrap(),
+            })
+            .await
+            .unwrap();
+
+        // 1.
+        let response = recv_from_server.next().await.unwrap();
+        let body = assert_matches!(
+            response,
+            Message::Reply {
+                address: control::AUTHENTICATE_ADDRESS,
+                id: message::Id(0),
+                value: body
+            } => body
+        );
+
+        let mut map: KeyDynValueMap = body.deserialize().unwrap();
+        let state: u32 = map
+            .remove(auth::STATE_KEY)
+            .unwrap_or_else(|| panic!("missing state key in map {map:?}"))
+            .cast_into()
+            .expect("state value is not a u32");
+        assert_eq!(state, auth::STATE_DONE);
+    }
+
+    /// The client sends bad authentication parameters.
+    ///
+    /// It is expected that:
+    ///   1. the server replies with an error.
+    ///   3. the error is reported back to the user of the client.
+    ///   2. the connection is closed.
+    #[tokio::test]
+    async fn client_send_bad_auth_parameters() {
+        let auth = auth::UserTokenAuthenticator::new("myuser".to_owned(), "mytoken".to_owned());
+
+        // 0.1: start the server session
+        let (mut send_to_server, server_recv) = mpsc::unbounded();
+        let (server_send, mut recv_from_server) = mpsc::unbounded();
+        let task = spawn(Session::serve_client(
+            server_recv.map(Ok::<_, Infallible>),
+            server_send.sink_map_err(qi_messaging::Error::link_lost),
+            auth,
+            DummyHandler,
+        ));
+
+        // 0.2: start the request
+        send_to_server
+            .send(Message::Call {
+                id: message::Id(0),
+                address: control::AUTHENTICATE_ADDRESS,
+                value: JsonBody::serialize(&{
+                    let mut map = KeyDynValueMap::new();
+                    map.set("RemoteCancelableCalls", true);
+                    map.set("ObjectPtrUID", true);
+                    map.set("RelativeEndpointURI", true);
+                    map.set(auth::USER_KEY, "myuser");
+                    map.set(auth::TOKEN_KEY, "badtoken"); // token is not correct
+                    map
+                })
+                .unwrap(),
+            })
+            .await
+            .unwrap();
+
+        // 1.
+        let response = recv_from_server.next().await.unwrap();
+        let error = assert_matches!(
+            response,
+            Message::Error {
+                address: control::AUTHENTICATE_ADDRESS,
+                error,
+                ..
+            } => error
+        );
+        assert!(
+            error.contains("failure to verify authentication request"),
+            "error is not an authentication failure: {error}"
+        );
+
+        // 2.
+        let () = task.await.unwrap();
     }
 }
