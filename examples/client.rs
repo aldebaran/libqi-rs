@@ -18,17 +18,6 @@ struct Args {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    // Wait for interruption
-    let interrupt = tokio::spawn(async {
-        match tokio::signal::ctrl_c().await {
-            Ok(()) => {}
-            Err(err) => {
-                eprintln!("Unable to listen for shutdown signal: {}", err);
-                // we also shut down in case of error
-            }
-        }
-    });
-
     let args = Args::parse();
 
     // Activate traces to the console.
@@ -48,9 +37,6 @@ async fn main() -> Result<()> {
 
     info!("creating node");
     let node = qi::node::Builder::new()
-        // You can add services to the node and make them accessible to other nodes of joined spaces.
-        .add_service("AudioPlayer", audio::Player::new())
-        // Connect the node to a space at the given address.
         .connect_to_space(args.address, None)
         .start()
         .await
@@ -71,11 +57,6 @@ async fn main() -> Result<()> {
     let () = calculator.call("div", 2).await?; // => 64
     let result: i32 = calculator.call("ans", ()).await?;
     info!(%result, "calculation is done"); // result = 64
-
-    // You can send local objects to remote nodes for them to call methods on.
-    // TODO
-
-    let _res = interrupt.await;
 
     Ok(())
 }

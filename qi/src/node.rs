@@ -73,8 +73,8 @@ impl<Auth, Method, Body> Builder<Auth, Method, Body> {
         self
     }
 
-    /// Binds the node to an address, accepting incoming connections on an
-    /// endpoint at this address.
+    /// Binds the node to an address so that it may accept incoming connections on an endpoint at
+    /// that address.
     pub fn bind(mut self, address: Address) -> Self {
         self.bind_addresses.push(address);
         self

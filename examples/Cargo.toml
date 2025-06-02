@@ -11,7 +11,7 @@ publish = false
 
 [dev-dependencies]
 qi = { path = "../qi" }
-tokio = { workspace = true, features = ["rt", "signal"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal"] }
 clap = { version = "4.5.32", features = ["derive"] }
 tracing-subscriber = "0.3.19"
 tracing = { workspace = true }

@@ -82,8 +82,6 @@ pub fn proc_macro_derive_from_value(input: TokenStream) -> TokenStream {
 /// This code declares the trait `Motion` and and a type `MotionClient`
 /// that implements `Motion`.
 #[proc_macro_attribute]
-pub fn object(_attr: TokenStream, _item: TokenStream) -> TokenStream {
-    todo!()
-    // let input = parse_macro_input!(input as object::Object);
-    // input.derive().into()
+pub fn object(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    parse_macro_input!(item as object::Object).generate().into()
 }

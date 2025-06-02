@@ -116,8 +116,6 @@ where
                         },
                         false,
                     )),
-                    // TODO: Check if error corresponds to a "cancelled" request, so that we may
-                    // make a Canceled message instead.
                     Err(error) => {
                         let message_stop_pair = if error.is_canceled() {
                             (
