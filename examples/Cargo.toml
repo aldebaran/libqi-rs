@@ -12,12 +12,12 @@ publish = false
 [dev-dependencies]
 qi = { path = "../qi" }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "signal"] }
-clap = { version = "4.5.32", features = ["derive"] }
-tracing-subscriber = "0.3.19"
+clap = { version = "4.5.51", features = ["derive"] }
+tracing-subscriber = "0.3.20"
 tracing = { workspace = true }
 bytes = { workspace = true }
 async-trait = { workspace = true }
-anyhow = "1.0.97"
+anyhow = "1.0.100"
 
 [[example]]
 name = "client"

@@ -12,7 +12,7 @@ rust-version.workspace = true
 bytes = { workspace = true }
 derive_more = { workspace = true }
 dirs = { workspace = true }
-machine-uid = { version = "0.5.3", optional = true }
+machine-uid = { version = "0.5.4", optional = true }
 once_cell = { workspace = true }
 ordered-float = { workspace = true }
 qi-macros = { path = "../qi-macros" }

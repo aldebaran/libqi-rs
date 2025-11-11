@@ -287,7 +287,7 @@ async fn update_address_endpoints(
             // Watch network interfaces changes to list all IP addresses of the host.
             let mut networks = sysinfo::Networks::new();
             loop {
-                networks.refresh_list();
+                networks.refresh(true);
                 let new_endpoints: Vec<_> = networks
                     .values()
                     .flat_map(|net| net.ip_networks())

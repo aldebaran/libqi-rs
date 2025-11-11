@@ -80,8 +80,8 @@ pub(crate) enum StateError {
     Missing,
 
     #[error(
-        "expected a \"Done\" state value of \"{}u32\", found \"{0}\" instead",
-        STATE_DONE
+        "expected a \"Done\" state value of \"{done}u32\", found \"{0}\" instead",
+        done = STATE_DONE
     )]
     UnknownValue(Value<'static>),
 }

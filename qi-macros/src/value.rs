@@ -412,7 +412,7 @@ impl ToTokens for WithValueLifetimeImplGenerics<'_> {
 struct DeriveAttributes {
     crate_path: Path,
     transparent: bool,
-    case: Option<Case>,
+    case: Option<Case<'static>>,
 }
 
 impl DeriveAttributes {
@@ -468,7 +468,7 @@ enum ContainerData {
 }
 
 impl ContainerData {
-    fn new_struct(data: DataStruct, case: Option<Case>) -> syn::Result<Self> {
+    fn new_struct(data: DataStruct, case: Option<Case<'static>>) -> syn::Result<Self> {
         Ok(match data.fields {
             Fields::Named(fields) => {
                 let fields = fields
@@ -514,7 +514,7 @@ struct Field {
 }
 
 impl Field {
-    fn new(src: syn::Field, index: usize, rename: Option<Case>) -> syn::Result<Self> {
+    fn new(src: syn::Field, index: usize, rename: Option<Case<'static>>) -> syn::Result<Self> {
         let index = syn::Index::from(index);
         let attrs = FieldAttributes::new(rename, &src.attrs)?;
         Ok(Self { src, index, attrs })
@@ -602,13 +602,13 @@ impl Field {
 struct FieldAttributes {
     as_raw: bool,
     name_override: Option<String>,
-    case: Option<Case>,
+    case: Option<Case<'static>>,
 }
 
 impl FieldAttributes {
     /// Parses attributes with syntax:
     /// #[qi(value(case = "...", name = "...", as_raw))].
-    fn new(mut case: Option<Case>, attrs: &[Attribute]) -> syn::Result<Self> {
+    fn new(mut case: Option<Case<'static>>, attrs: &[Attribute]) -> syn::Result<Self> {
         let mut as_raw = false;
         let mut name_override = None;
         for attr in attrs {
@@ -691,7 +691,7 @@ fn parse_name_attribute(meta: &syn::meta::ParseNestedMeta) -> syn::Result<String
     Ok(value_lit_str.value())
 }
 
-fn parse_case_attribute(meta: &syn::meta::ParseNestedMeta) -> syn::Result<Case> {
+fn parse_case_attribute(meta: &syn::meta::ParseNestedMeta) -> syn::Result<Case<'static>> {
     const CASES: [(&str, Case); 9] = [
         ("lowercase", Case::Lower),
         ("UPPERCASE", Case::Upper),
@@ -699,7 +699,7 @@ fn parse_case_attribute(meta: &syn::meta::ParseNestedMeta) -> syn::Result<Case> 
         ("camelCase", Case::Camel),
         ("snake_case", Case::Snake),
         ("UPPER_SNAKE", Case::UpperSnake),
-        ("SCREAMING_SNAKE", Case::ScreamingSnake),
+        ("SCREAMING_SNAKE", Case::UpperSnake),
         ("kebab-case", Case::Kebab),
         ("SCREAMING-KEBAB-CASE", Case::UpperKebab),
     ];

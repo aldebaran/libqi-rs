@@ -12,7 +12,7 @@ impl Object {
 
 impl syn::parse::Parse for Object {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let item = syn::ItemTrait::parse(input)?;
+        let _item = syn::ItemTrait::parse(input)?;
         todo!()
     }
 }
@@ -20,7 +20,7 @@ impl syn::parse::Parse for Object {
 struct Method {}
 
 impl syn::parse::Parse for Method {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+    fn parse(_input: syn::parse::ParseStream) -> syn::Result<Self> {
         Ok(Self {})
     }
 }

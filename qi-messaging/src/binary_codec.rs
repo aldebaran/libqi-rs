@@ -75,8 +75,8 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum EncodeError<E> {
     #[error(
-        "message body size {0} cannot be represented as an u32 (the maximum for this system is {})",
-        u32::MAX
+        "message body size {0} cannot be represented as an u32 (the maximum for this system is {max})",
+        max = u32::MAX
     )]
     BodySizeCannotBeRepresentedAsU32(usize),
 
@@ -165,8 +165,8 @@ pub enum DecodeError<E> {
     InvalidMagicCookieValue(u32),
 
     #[error(
-        "message body size {0} cannot be represented as an usize (the maximum for this system is {})",
-        usize::MAX
+        "message body size {0} cannot be represented as an usize (the maximum for this system is {max})",
+        max = usize::MAX
     )]
     BodySizeCannotBeRepresentedAsUSize(u32),
 
