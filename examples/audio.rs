@@ -1,3 +1,2 @@
 #[qi::object]
-trait Player {
-}
+pub trait Player {}

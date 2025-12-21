@@ -1,20 +1,12 @@
+mod args;
+mod audio;
+
 use anyhow::{Context, Result};
+use args::Args;
 use clap::Parser;
 use qi::ObjectExt;
 use tracing::info;
 use tracing_subscriber::fmt;
-
-mod audio;
-
-#[derive(Debug, clap::Parser)]
-#[clap()]
-struct Args {
-    #[clap(short, long, default_value = "tcp://[::1]:9559")]
-    address: qi::Address,
-
-    #[clap(short, long, action = clap::ArgAction::Count)]
-    verbose: u8,
-}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {

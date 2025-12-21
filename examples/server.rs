@@ -1,22 +1,11 @@
+mod audio;
+mod config;
+
+use self::config::{Args, UserAndToken};
 use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::info;
 use tracing_subscriber::fmt;
-
-mod audio;
-
-#[derive(Debug, clap::Parser)]
-#[clap()]
-struct Args {
-    #[clap(short, long, default_value = "tcp://[::1]:9559")]
-    address: qi::Address,
-
-    #[clap(short, long, action = clap::ArgAction::Count)]
-    verbose: u8,
-
-    #[clap(short, long)]
-    user_and_token: Option<(String, String)>,
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -56,9 +45,8 @@ async fn main() -> Result<()> {
         .bind(args.address)
         .host_space();
 
-    if let Some((user, token)) = args.user_and_token {
-        node_builder =
-            node_builder.with_authenticator(qi::auth::UserTokenAuthenticator::new(user, token));
+    if let Some(UserAndToken { user, token }) = args.user_and_token {
+        node_builder.with_authenticator(qi::auth::UserTokenAuthenticator::new(user, token));
     }
 
     let _node = node_builder

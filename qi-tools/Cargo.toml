@@ -9,13 +9,13 @@ version.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-anyhow = "1.0.69"
-clap = { version = "4.5.7", features = ["derive"] }
-colored = "2.0.0"
+anyhow = { workspace = true }
+clap = { workspace = true }
+colored = { workspace = true }
 qi = { path = "../qi" }
-tokio = { version = "1.38.0", features = ["rt-multi-thread", "macros"] }
-tracing = "0.1.37"
-tracing-subscriber = "0.3.16"
+tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [[bin]]
 name = "qi-cli"
