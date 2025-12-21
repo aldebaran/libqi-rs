@@ -3,6 +3,7 @@ mod object;
 mod value;
 
 use proc_macro::TokenStream;
+use quote::ToTokens;
 use syn::{parse_macro_input, DeriveInput, Error};
 
 #[proc_macro_derive(Valuable, attributes(qi))]
@@ -60,14 +61,15 @@ pub fn proc_macro_derive_from_value(input: TokenStream) -> TokenStream {
 /// #[qi::object]
 /// trait Motion {
 ///     /// Go to some position.
+///     #[qi::method]
 ///     async fn go_to(&self, position: Position) -> Result<(), Error>;
 ///
 ///     /// The current position.
-///     #[property]
+///     #[qi::property]
 ///     fn position() -> Position;
 ///
 ///     /// The moving state.
-///     #[signal]
+///     #[qi::signal]
 ///     fn moving() -> bool;
 /// }
 ///
@@ -83,5 +85,7 @@ pub fn proc_macro_derive_from_value(input: TokenStream) -> TokenStream {
 /// that implements `Motion`.
 #[proc_macro_attribute]
 pub fn object(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    parse_macro_input!(item as object::Object).generate().into()
+    parse_macro_input!(item as object::Object)
+        .to_token_stream()
+        .into()
 }
