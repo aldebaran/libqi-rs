@@ -43,45 +43,40 @@
 //!  The total header size is therefore 28 bytes.
 
 use crate::{
+    format,
     message::{Address, Id, Message, MetaData, Type, Version},
-    // Error,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use std::marker::PhantomData;
 use tracing::instrument;
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
 pub struct Encoder;
 
-impl<Body> tokio_util::codec::Encoder<Message<Body>> for Encoder
-where
-    Body: crate::Body,
-{
-    type Error = EncodeError<Body::Error>;
+impl tokio_util::codec::Encoder<Message> for Encoder {
+    type Error = EncodeError;
 
     #[instrument(level = "trace", skip_all, err)]
-    fn encode(&mut self, msg: Message<Body>, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let (meta, body) = msg.into_parts().map_err(EncodeError::BodyConversion)?;
-        let body_data = body.into_data().map_err(EncodeError::BodyConversion)?;
-        let body_size = body_data.remaining();
+    fn encode(&mut self, msg: Message, dst: &mut BytesMut) -> Result<(), Self::Error> {
+        let (meta, body) = msg.into_parts().map_err(EncodeError::BodySerialization)?;
+        let body_size = body.remaining();
         let msg_size = HEADER_SIZE + body_size;
         dst.reserve(msg_size);
         put_header(meta, body_size, dst)?;
-        dst.put(body_data);
+        dst.put(body);
         Ok(())
     }
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum EncodeError<E> {
+pub enum EncodeError {
     #[error(
         "message body size {0} cannot be represented as an u32 (the maximum for this system is {max})",
         max = u32::MAX
     )]
     BodySizeCannotBeRepresentedAsU32(usize),
 
-    #[error("body conversion error")]
-    BodyConversion(#[source] E),
+    #[error("message body failed to serialize")]
+    BodySerialization(#[source] format::Error),
 
     #[error(transparent)]
     Write(#[from] std::io::Error),
@@ -97,46 +92,30 @@ pub enum EncodeError<E> {
 // }
 
 #[derive(Default, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash, Debug)]
-pub struct Decoder<T> {
+pub struct Decoder {
     state: DecoderState,
-    phantom: PhantomData<fn() -> T>,
 }
 
-impl<Body> Decoder<Body>
-where
-    Body: crate::Body,
-{
-    pub fn new() -> Self {
-        Self {
-            state: DecoderState::default(),
-            phantom: PhantomData,
-        }
-    }
-
+impl Decoder {
     fn decode_body(
         &mut self,
         meta: &MetaData,
         body_size: usize,
         src: &mut BytesMut,
-    ) -> Result<Option<Message<Body>>, DecodeError<Body::Error>> {
+    ) -> Result<Option<Message>, DecodeError> {
         if src.len() < body_size {
             src.reserve(body_size - src.len());
             return Ok(None);
         }
-        let body_bytes = src.split_to(body_size).freeze();
-        let message = Body::from_bytes(body_bytes)
-            .and_then(|body| Message::from_parts(*meta, body))
-            .map_err(DecodeError::BodyConversion)?;
+        let body = src.split_to(body_size).freeze();
+        let message = Message::from_parts(*meta, body).map_err(DecodeError::BodyDeserialization)?;
         Ok(Some(message))
     }
 }
 
-impl<Body> tokio_util::codec::Decoder for Decoder<Body>
-where
-    Body: crate::Body,
-{
-    type Item = Message<Body>;
-    type Error = DecodeError<Body::Error>;
+impl tokio_util::codec::Decoder for Decoder {
+    type Item = Message;
+    type Error = DecodeError;
 
     #[instrument(level = "trace", skip_all, err)]
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -160,7 +139,7 @@ where
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum DecodeError<E> {
+pub enum DecodeError {
     #[error("invalid message magic cookie value {0:x}")]
     InvalidMagicCookieValue(u32),
 
@@ -179,8 +158,8 @@ pub enum DecodeError<E> {
     #[error("invalid message flags value {0}")]
     InvalidFlagsValue(u8),
 
-    #[error("body conversion error")]
-    BodyConversion(#[source] E),
+    #[error("message body failed to deserialize")]
+    BodyDeserialization(#[source] format::Error),
 
     #[error(transparent)]
     Read(#[from] std::io::Error),
@@ -195,7 +174,7 @@ pub enum DecodeError<E> {
 //     }
 // }
 
-fn decode_header<E>(src: &mut BytesMut) -> Result<Option<(usize, MetaData)>, DecodeError<E>> {
+fn decode_header(src: &mut BytesMut) -> Result<Option<(usize, MetaData)>, DecodeError> {
     if src.len() < HEADER_SIZE {
         src.reserve(HEADER_SIZE - src.len());
         return Ok(None);
@@ -207,7 +186,7 @@ fn decode_header<E>(src: &mut BytesMut) -> Result<Option<(usize, MetaData)>, Dec
     let version = get_version(src);
 
     // The only supported version of messages at the moment is the current.
-    if version != Version::ZERO {
+    if version != Version::default() {
         return Err(DecodeError::UnsupportedVersion(version));
     }
 
@@ -218,15 +197,11 @@ fn decode_header<E>(src: &mut BytesMut) -> Result<Option<(usize, MetaData)>, Dec
     Ok(Some((body_size, meta)))
 }
 
-fn put_header<E>(
-    meta: MetaData,
-    body_size: usize,
-    dst: &mut BytesMut,
-) -> Result<(), EncodeError<E>> {
+fn put_header(meta: MetaData, body_size: usize, dst: &mut BytesMut) -> Result<(), EncodeError> {
     put_magic_cookie(dst);
     put_id(meta.id, dst);
     put_body_size(body_size, dst)?;
-    put_version(Version::ZERO, dst);
+    put_version(Version::default(), dst);
     put_type(meta.ty, dst);
     dst.put_u8(0); // Flags
     put_address(meta.address, dst);
@@ -261,7 +236,7 @@ const HEADER_SIZE: usize = ADDRESS_OFFSET + ADDRESS_SIZE;
 
 const MAGIC_COOKIE_VALUE: u32 = 0x42dead42;
 
-fn get_magic_cookie<ErrDeserBody>(src: &mut BytesMut) -> Result<(), DecodeError<ErrDeserBody>> {
+fn get_magic_cookie(src: &mut BytesMut) -> Result<(), DecodeError> {
     let value = src.get_u32();
     if value == MAGIC_COOKIE_VALUE {
         Ok(())
@@ -282,7 +257,7 @@ fn put_id(id: Id, dst: &mut BytesMut) {
     dst.put_u32_le(id.0)
 }
 
-fn get_body_size<ErrDeserBody>(src: &mut BytesMut) -> Result<usize, DecodeError<ErrDeserBody>> {
+fn get_body_size(src: &mut BytesMut) -> Result<usize, DecodeError> {
     let size = src.get_u32_le();
     if size > (usize::MAX as u32) {
         return Err(DecodeError::BodySizeCannotBeRepresentedAsUSize(size));
@@ -291,10 +266,7 @@ fn get_body_size<ErrDeserBody>(src: &mut BytesMut) -> Result<usize, DecodeError<
     Ok(size)
 }
 
-fn put_body_size<ErrSerBody>(
-    size: usize,
-    dst: &mut BytesMut,
-) -> Result<(), EncodeError<ErrSerBody>> {
+fn put_body_size(size: usize, dst: &mut BytesMut) -> Result<(), EncodeError> {
     if size > (u32::MAX as usize) {
         return Err(EncodeError::BodySizeCannotBeRepresentedAsU32(size));
     }
@@ -320,7 +292,7 @@ fn put_version(version: Version, dst: &mut BytesMut) {
 ///   - Capabilities = 6
 ///   - Cancel = 7
 ///   - Canceled = 8
-fn get_type<ErrDeserBody>(src: &mut BytesMut) -> Result<Type, DecodeError<ErrDeserBody>> {
+fn get_type(src: &mut BytesMut) -> Result<Type, DecodeError> {
     let byte = src.get_u8();
     match byte {
         1 => Ok(Type::Call),

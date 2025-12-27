@@ -3,6 +3,7 @@ use crate::{
     message::{Address, Id},
     Message,
 };
+use bytes::Bytes;
 use futures::{
     future::BoxFuture,
     stream::{FusedStream, FuturesUnordered},
@@ -14,11 +15,12 @@ use std::{
     task::{ready, Context, Poll, Waker},
 };
 
-pub(super) struct CallFutures<'a, T, E> {
-    call_futures: FuturesUnordered<CallFuture<'a, T, E>>,
+#[derive(Debug)]
+pub(super) struct CallFutures<E> {
+    call_futures: FuturesUnordered<CallFuture<E>>,
 }
 
-impl<T, E> Default for CallFutures<'_, T, E> {
+impl<E> Default for CallFutures<E> {
     fn default() -> Self {
         Self {
             call_futures: Default::default(),
@@ -26,16 +28,16 @@ impl<T, E> Default for CallFutures<'_, T, E> {
     }
 }
 
-impl<'a, T, E> CallFutures<'a, T, E> {
+impl<E> CallFutures<E> {
     pub(super) fn push<F>(&mut self, id: Id, address: Address, future: F)
     where
-        F: Future<Output = Result<T, E>> + Send + 'a,
+        F: Future<Output = Result<Bytes, E>> + Send + 'static,
     {
         self.call_futures
             .push(CallFuture::new(id, address, future.boxed()));
     }
 
-    pub(crate) fn cancel(&mut self, id: &Id) {
+    pub(super) fn cancel(&mut self, id: &Id) {
         for call_future in self.call_futures.iter_mut() {
             if &call_future.id == id {
                 call_future.cancel()
@@ -44,21 +46,20 @@ impl<'a, T, E> CallFutures<'a, T, E> {
     }
 }
 
-impl<T, E> Stream for CallFutures<'_, T, E>
+impl<E> Stream for CallFutures<E>
 where
-    E: handler::Error,
+    E: handler::CallError,
 {
-    /// Message x StopDispatch
-    type Item = (Message<T>, bool);
+    type Item = (Message, DispatchFlow);
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.call_futures.poll_next_unpin(cx)
     }
 }
 
-impl<T, E> FusedStream for CallFutures<'_, T, E>
+impl<E> FusedStream for CallFutures<E>
 where
-    E: handler::Error,
+    E: handler::CallError,
 {
     fn is_terminated(&self) -> bool {
         self.call_futures.is_terminated()
@@ -66,14 +67,14 @@ where
 }
 
 #[derive(Debug)]
-struct CallFuture<'a, T, E> {
+struct CallFuture<E> {
     id: Id,
     address: Address,
-    state: CallResponseFutureState<'a, T, E>,
+    state: CallResponseFutureState<E>,
 }
 
-impl<'a, T, E> CallFuture<'a, T, E> {
-    fn new(id: Id, address: Address, inner: BoxFuture<'a, Result<T, E>>) -> Self {
+impl<E> CallFuture<E> {
+    fn new(id: Id, address: Address, inner: BoxFuture<'static, Result<Bytes, E>>) -> Self {
         Self {
             id,
             address,
@@ -91,12 +92,11 @@ impl<'a, T, E> CallFuture<'a, T, E> {
     }
 }
 
-impl<T, E> Future for CallFuture<'_, T, E>
+impl<E> Future for CallFuture<E>
 where
-    E: handler::Error,
+    E: handler::CallError,
 {
-    /// Message x StopDispatch
-    type Output = (Message<T>, bool);
+    type Output = (Message, DispatchFlow);
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.state {
@@ -112,9 +112,9 @@ where
                         Message::Reply {
                             id: self.id,
                             address: self.address,
-                            value: reply,
+                            payload: reply,
                         },
-                        false,
+                        DispatchFlow::Continue,
                     )),
                     Err(error) => {
                         let message_stop_pair = if error.is_canceled() {
@@ -123,7 +123,7 @@ where
                                     id: self.id,
                                     address: self.address,
                                 },
-                                false,
+                                DispatchFlow::Continue,
                             )
                         } else {
                             (
@@ -132,7 +132,11 @@ where
                                     address: self.address,
                                     error: error.to_string(),
                                 },
-                                error.is_fatal(),
+                                if error.is_fatal() {
+                                    DispatchFlow::Stop
+                                } else {
+                                    DispatchFlow::Continue
+                                },
                             )
                         };
                         Poll::Ready(message_stop_pair)
@@ -146,7 +150,7 @@ where
                         id: self.id,
                         address: self.address,
                     },
-                    false,
+                    DispatchFlow::Continue,
                 ))
             }
             CallResponseFutureState::Terminated => {
@@ -157,16 +161,16 @@ where
     }
 }
 
-enum CallResponseFutureState<'a, T, E> {
+enum CallResponseFutureState<E> {
     Running {
-        inner: BoxFuture<'a, Result<T, E>>,
+        inner: BoxFuture<'static, Result<Bytes, E>>,
         waker: Option<Waker>,
     },
     Canceled,
     Terminated,
 }
 
-impl<T, E> std::fmt::Debug for CallResponseFutureState<'_, T, E> {
+impl<E> std::fmt::Debug for CallResponseFutureState<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Running { waker, .. } => f.debug_struct("Running").field("waker", waker).finish(),
@@ -174,4 +178,10 @@ impl<T, E> std::fmt::Debug for CallResponseFutureState<'_, T, E> {
             Self::Terminated => write!(f, "Terminated"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum DispatchFlow {
+    Continue,
+    Stop,
 }

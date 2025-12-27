@@ -1,3 +1,5 @@
+use crate::format;
+use bytes::Bytes;
 use qi_value::Dynamic;
 pub use qi_value::{ActionId as Action, KeyDynValueMap, ObjectId as Object, ServiceId as Service};
 
@@ -20,11 +22,8 @@ pub use qi_value::{ActionId as Action, KeyDynValueMap, ObjectId as Object, Servi
 #[serde(transparent)]
 pub struct Id(pub u32);
 
-impl Id {
-    pub const DEFAULT: Self = Self(0);
-}
-
 #[derive(
+    Default,
     Debug,
     Hash,
     PartialEq,
@@ -38,16 +37,6 @@ impl Id {
     serde::Deserialize,
 )]
 pub struct Version(pub u16);
-
-impl Version {
-    pub const ZERO: Self = Self(0);
-}
-
-impl Default for Version {
-    fn default() -> Self {
-        Self::ZERO
-    }
-}
 
 #[derive(
     Default,
@@ -105,8 +94,6 @@ impl Type {
 pub struct Address(pub Service, pub Object, pub Action);
 
 impl Address {
-    pub const DEFAULT: Self = Self(Service::DEFAULT, Object::DEFAULT, Action::DEFAULT);
-
     pub const fn service(&self) -> Service {
         self.0
     }
@@ -133,16 +120,16 @@ impl Address {
 }
 
 #[derive(Debug, Clone)]
-pub enum Message<Body> {
+pub enum Message {
     Call {
         id: Id,
         address: Address,
-        value: Body,
+        payload: Bytes,
     },
     Reply {
         id: Id,
         address: Address,
-        value: Body,
+        payload: Bytes,
     },
     Error {
         id: Id,
@@ -152,12 +139,12 @@ pub enum Message<Body> {
     Post {
         id: Id,
         address: Address,
-        value: Body,
+        payload: Bytes,
     },
     Event {
         id: Id,
         address: Address,
-        value: Body,
+        payload: Bytes,
     },
     Capabilities {
         id: Id,
@@ -175,40 +162,42 @@ pub enum Message<Body> {
     },
 }
 
-impl<T> Default for Message<T>
-where
-    T: Default,
-{
+impl Default for Message {
     fn default() -> Self {
         Self::Call {
-            id: Id::DEFAULT,
-            address: Address::DEFAULT,
-            value: T::default(),
+            id: Default::default(),
+            address: Default::default(),
+            payload: Default::default(),
         }
     }
 }
 
-impl<Body> Message<Body>
-where
-    Body: crate::Body,
-{
-    pub(crate) fn into_parts(self) -> Result<(MetaData, Body), Body::Error> {
+impl Message {
+    pub(crate) fn into_parts(self) -> Result<(MetaData, Bytes), format::Error> {
         match self {
-            Message::Call { id, address, value } => Ok((
+            Message::Call {
+                id,
+                address,
+                payload,
+            } => Ok((
                 MetaData {
                     id,
                     address,
                     ty: Type::Call,
                 },
-                value,
+                payload,
             )),
-            Message::Reply { id, address, value } => Ok((
+            Message::Reply {
+                id,
+                address,
+                payload,
+            } => Ok((
                 MetaData {
                     id,
                     address,
                     ty: Type::Reply,
                 },
-                value,
+                payload,
             )),
             Message::Error { id, address, error } => Ok((
                 MetaData {
@@ -216,23 +205,31 @@ where
                     address,
                     ty: Type::Error,
                 },
-                Body::serialize(&Dynamic(error))?,
+                format::to_bytes(&Dynamic(error))?,
             )),
-            Message::Post { id, address, value } => Ok((
+            Message::Post {
+                id,
+                address,
+                payload,
+            } => Ok((
                 MetaData {
                     id,
                     address,
                     ty: Type::Post,
                 },
-                value,
+                payload,
             )),
-            Message::Event { id, address, value } => Ok((
+            Message::Event {
+                id,
+                address,
+                payload,
+            } => Ok((
                 MetaData {
                     id,
                     address,
                     ty: Type::Event,
                 },
-                value,
+                payload,
             )),
             Message::Capabilities {
                 id,
@@ -244,7 +241,7 @@ where
                     address,
                     ty: Type::Capabilities,
                 },
-                Body::serialize(&capabilities)?,
+                format::to_bytes(&capabilities)?,
             )),
             Message::Cancel {
                 id,
@@ -256,7 +253,7 @@ where
                     address,
                     ty: Type::Cancel,
                 },
-                Body::serialize(&call_id)?,
+                format::to_bytes(&call_id)?,
             )),
             Message::Canceled { id, address } => Ok((
                 MetaData {
@@ -264,48 +261,48 @@ where
                     address,
                     ty: Type::Canceled,
                 },
-                Body::serialize(&())?,
+                format::to_bytes(&())?,
             )),
         }
     }
 
-    pub(crate) fn from_parts(meta: MetaData, body: Body) -> Result<Self, Body::Error> {
+    pub(crate) fn from_parts(meta: MetaData, payload: Bytes) -> Result<Self, format::Error> {
         let MetaData { id, address, ty } = meta;
         let msg = match ty {
             Type::Call => Self::Call {
                 id,
                 address,
-                value: body,
+                payload,
             },
             Type::Reply => Self::Reply {
                 id,
                 address,
-                value: body,
+                payload,
             },
             Type::Error => Self::Error {
                 id,
                 address,
-                error: body.deserialize::<Dynamic<String>>()?.into_inner(),
+                error: format::from_slice::<Dynamic<String>>(&payload)?.into_inner(),
             },
             Type::Post => Self::Post {
                 id,
                 address,
-                value: body,
+                payload,
             },
             Type::Event => Self::Event {
                 id,
                 address,
-                value: body,
+                payload,
             },
             Type::Capabilities => Self::Capabilities {
                 id,
                 address,
-                capabilities: body.deserialize()?,
+                capabilities: format::from_slice(&payload)?,
             },
             Type::Cancel => Self::Cancel {
                 id,
                 address,
-                call_id: body.deserialize()?,
+                call_id: format::from_slice(&payload)?,
             },
             Type::Canceled => Self::Canceled { id, address },
         };
@@ -334,37 +331,9 @@ pub struct MetaData {
     pub(crate) ty: Type,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum FireAndForget<Body> {
-    Post(Body),
-    Event(Body),
-    Capabilities(KeyDynValueMap),
-}
-
-impl<Body> FireAndForget<Body> {
-    pub fn ty(&self) -> Type {
-        match self {
-            Self::Post(_) => Type::Post,
-            Self::Event(_) => Type::Event,
-            Self::Capabilities(_) => Type::Capabilities,
-        }
-    }
-
-    pub fn try_map<F, U, E>(self, f: F) -> Result<FireAndForget<U>, E>
-    where
-        F: FnOnce(Body) -> Result<U, E>,
-    {
-        Ok(match self {
-            Self::Post(value) => FireAndForget::Post(f(value)?),
-            Self::Event(value) => FireAndForget::Event(f(value)?),
-            Self::Capabilities(capabilities) => FireAndForget::Capabilities(capabilities),
-        })
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
-pub(crate) enum Response<T> {
-    Reply(T),
+pub(crate) enum Response {
+    Reply(Bytes),
     Error(String),
     Canceled,
 }
