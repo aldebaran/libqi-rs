@@ -1,9 +1,5 @@
-#[qi::object]
-trait MyObject {
-    fn my_method(&self, a: i32, b: Vec<f64>) -> String;
-}
-
 #[test]
-fn test_object() {
-    let meta = MyObject::meta_object();
+fn test_object_compile_fail() {
+    let t = trybuild::TestCases::new();
+    t.compile_fail("tests/object/fail.rs");
 }

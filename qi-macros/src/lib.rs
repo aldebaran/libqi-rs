@@ -48,44 +48,43 @@ pub fn proc_macro_derive_from_value(input: TokenStream) -> TokenStream {
 
 /// Declares an object type.
 ///
-/// This macro declares a new trait and implements `qi::Object` for any
-/// type that implements that trait. It also declares a client type that
-/// implements that trait to call the object interface remotely.
+/// Checks `#[qi::method]`, `#[qi::property]`, and `#[qi::signal]` members,
+/// emits the trait with those attributes removed, defines
+/// `<TRAIT>_META_OBJECT` as `once_cell::sync::Lazy<qi::object::MetaObject>`,
+/// and implements `qi::Object` for types that implement the trait.
+///
+/// `#[qi::object(client)]` implements `Object` only for the generated client,
+/// by delegating to its `ObjectClient`. A crate can emit only one blanket
+/// `impl<T: Trait> Object for T`.
 ///
 /// # Example
 ///
-/// ```
-/// # mod qi {
-/// #   pub(super) use qi_macros::{object, Valuable};
-/// # }
+/// ```ignore
 /// #[qi::object]
 /// trait Motion {
 ///     /// Go to some position.
-///     #[qi::method]
+///     #[qi::method(name = "goTo")]
 ///     async fn go_to(&self, position: Position) -> Result<(), Error>;
 ///
 ///     /// The current position.
 ///     #[qi::property]
-///     fn position() -> Position;
+///     fn position(&self) -> qi::Property<Position>;
 ///
 ///     /// The moving state.
 ///     #[qi::signal]
-///     fn moving() -> bool;
+///     fn moving(&self) -> qi::Signal<bool>;
 /// }
 ///
 /// #[derive(qi::Valuable)]
-/// ##[qi(value(crate = "qi_value"))]
+/// #[qi(value(crate = "qi_value"))]
 /// struct Position {
 ///     x: u32,
 ///     y: u32,
 /// }
 /// ```
-///
-/// This code declares the trait `Motion` and and a type `MotionClient`
-/// that implements `Motion`.
 #[proc_macro_attribute]
-pub fn object(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    parse_macro_input!(item as object::Object)
-        .to_token_stream()
-        .into()
+pub fn object(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut parsed = parse_macro_input!(item as object::Object);
+    parsed.mode = parse_macro_input!(attr as object::ObjectMode);
+    parsed.to_token_stream().into()
 }

@@ -97,7 +97,7 @@ impl<Auth> Builder<Auth, ConnectToSpace>
 where
     Auth: Authenticator + Send + Sync + Clone + 'static,
 {
-    pub async fn start(self) -> Result<Node<service_directory::Client>, Error> {
+    pub async fn start(self) -> Result<Node<service_directory::ServiceDirectoryClient>, Error> {
         let services = Arc::default();
         let handler = ArcRouterHandler::new(Arc::clone(&services));
         let server_set =
@@ -110,7 +110,7 @@ where
                 self.method.credentials.unwrap_or_default(),
             )
             .await?;
-        let service_directory = service_directory::Client::new(session);
+        let service_directory = service_directory::ServiceDirectoryClient::new(session);
         let mut node = Node {
             uid: self.uid,
             services,
@@ -236,7 +236,7 @@ where
                 Default::default(),
             )
             .await?;
-        let object = object::Proxy::connect(
+        let object = object::ObjectClient::connect(
             service.id(),
             service::MAIN_OBJECT_ID,
             service.object_uid(),

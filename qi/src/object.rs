@@ -17,11 +17,18 @@ pub use value::object::{Uid, *};
 // const ACTION_ID_UNREGISTER_EVENT: ActionId = ActionId(1);
 const ACTION_ID_METAOBJECT: ActionId = ActionId(2);
 // const ACTION_ID_TERMINATE: ActionId = ActionId(3);
-const ACTION_ID_PROPERTY: ActionId = ActionId(5); // not a typo, there is no action 4
-const ACTION_ID_SET_PROPERTY: ActionId = ActionId(6);
+pub const ACTION_ID_PROPERTY: ActionId = ActionId(5); // not a typo, there is no action 4
+pub const ACTION_ID_SET_PROPERTY: ActionId = ActionId(6);
 // const ACTION_ID_PROPERTIES: ActionId = ActionId(7);
 // const ACTION_ID_REGISTER_EVENT_WITH_SIGNATURE: ActionId = ActionId(8);
 pub const ACTION_START_ID: ActionId = ActionId(100);
+
+pub fn block_on<F>(future: F) -> F::Output
+where
+    F: std::future::Future,
+{
+    tokio::runtime::Handle::current().block_on(future)
+}
 
 pub(crate) struct BoxObject(Box<dyn Object + Send + Sync>);
 
@@ -123,7 +130,7 @@ pub trait ObjectExt: Object {
 #[async_trait]
 impl<O> ObjectExt for O where O: Object + Sync + ?Sized {}
 
-pub struct Proxy {
+pub struct ObjectClient {
     service_id: ServiceId,
     id: Id,
     uid: Uid,
@@ -131,7 +138,7 @@ pub struct Proxy {
     session: Session,
 }
 
-impl Proxy {
+impl ObjectClient {
     pub(super) fn new(
         service_id: ServiceId,
         id: Id,
@@ -181,9 +188,28 @@ impl Proxy {
             .cast_into()
             .map_err(ValueConversionError::MethodReturnValue)?)
     }
+
+    fn builtin_return_type(
+        &self,
+        action: ActionId,
+        args: &Value<'_>,
+    ) -> Result<Option<value::Type>, Error> {
+        if action == ACTION_ID_SET_PROPERTY {
+            return Ok(<() as value::Reflect>::signature().into_type());
+        }
+        let prop_ident: Dynamic<MemberIdent> = args
+            .clone()
+            .cast_into()
+            .map_err(|err| Error::from(crate::BoxError::from(err)))?;
+        let property = self
+            .meta
+            .property(&prop_ident.0)
+            .ok_or_else(|| Error::MethodNotFound(prop_ident.0))?;
+        Ok(property.signature.clone().into_type())
+    }
 }
 
-impl Clone for Proxy {
+impl Clone for ObjectClient {
     fn clone(&self) -> Self {
         Self {
             service_id: self.service_id,
@@ -195,9 +221,9 @@ impl Clone for Proxy {
     }
 }
 
-impl std::fmt::Debug for Proxy {
+impl std::fmt::Debug for ObjectClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Proxy")
+        f.debug_struct("ObjectClient")
             .field("service_id", &self.service_id)
             .field("id", &self.id)
             .field("uid", &self.uid)
@@ -208,7 +234,7 @@ impl std::fmt::Debug for Proxy {
 }
 
 #[async_trait]
-impl Object for Proxy {
+impl Object for ObjectClient {
     fn meta(&self) -> &MetaObject {
         &self.meta
     }
@@ -218,6 +244,17 @@ impl Object for Proxy {
         ident: MemberIdent,
         args: Value<'_>,
     ) -> Result<Value<'static>, Error> {
+        if let MemberIdent::Id(action @ (ACTION_ID_PROPERTY | ACTION_ID_SET_PROPERTY)) = ident {
+            let return_type = self.builtin_return_type(action, &args)?;
+            return self
+                .session
+                .call(
+                    message::Address(self.service_id, self.id, action),
+                    args,
+                    return_type.as_ref(),
+                )
+                .await;
+        }
         let method = self
             .meta
             .method(&ident)
@@ -324,6 +361,12 @@ pub(super) trait HandlerExt: Object {
     async fn handler_meta_call(&self, action: ActionId, args: Bytes) -> Result<Bytes, Error> {
         // Get the targeted method so that we can get the expected parameters type and know what
         // type of value we're supposed to deserialize.
+        if action == ACTION_ID_METAOBJECT {
+            let reply = self.meta().clone().into_value();
+            return Ok(
+                format::to_bytes(&reply).map_err(FormatError::MethodReturnValueSerialization)?
+            );
+        }
         let action_ident = MemberIdent::Id(action);
         let method = self
             .meta()
@@ -331,7 +374,7 @@ pub(super) trait HandlerExt: Object {
             .ok_or_else(|| Error::MethodNotFound(action_ident.clone()))?;
         let args = value::deserialize(method.parameters_signature.to_type(), &args)
             .map_err(FormatError::ArgumentsDeserialization)?;
-        let reply = self.meta_call(action_ident, args).await?;
+        let reply = self.meta_call(action_ident, call_arguments(args)).await?;
         Ok(format::to_bytes(&reply).map_err(FormatError::MethodReturnValueSerialization)?)
     }
 
@@ -381,59 +424,75 @@ pub(super) trait HandlerExt: Object {
 
 impl<O> HandlerExt for O where O: Object + Sync + ?Sized {}
 
+/// Wire parameters are a tuple. Dispatch matches a local call: `()` , one value, or the tuple.
+fn call_arguments(value: Value<'_>) -> Value<'_> {
+    match value {
+        Value::Tuple(mut elements) if elements.len() == 1 => elements.pop().unwrap(),
+        Value::Tuple(elements) if elements.is_empty() => {
+            let _ = elements;
+            Value::Unit
+        }
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::Reflect;
     use assert_matches::assert_matches;
     use async_trait::async_trait;
-    use once_cell::sync::Lazy;
-    use qi_value::{
-        object::{MetaMethod, MetaObject},
-        ActionId, Type, Value,
-    };
+    use futures::FutureExt;
+    use std::sync::Arc;
     use tokio::sync::Mutex;
 
-    #[derive(Debug)]
-    struct Calculator {
-        a: i32,
+    #[allow(dead_code)]
+    #[qi::object]
+    trait Calculator {
+        /// Go to some position.
+        #[qi::method(name = "goTo")]
+        async fn go_to(&self, position: i32) -> Result<(), Error>;
+
+        /// The current position.
+        #[qi::property]
+        fn position(&self) -> crate::Property<i32>;
+
+        /// The moving state.
+        #[qi::signal]
+        fn moving(&self) -> crate::Signal<bool>;
+
+        #[qi::method]
+        async fn add(&self, b: i32) -> i32;
+
+        #[qi::method]
+        async fn sub(&self, b: i32) -> i32;
+
+        #[qi::method]
+        async fn mul(&self, b: i32) -> i32;
+
+        #[qi::method]
+        async fn div(&self, b: i32) -> std::result::Result<i32, DivisionByZeroError>;
+
+        #[qi::method]
+        async fn clamp(&self, min: i32, max: i32) -> i32;
+
+        #[qi::method]
+        async fn ans(&self) -> i32;
     }
 
-    impl Calculator {
+    struct Calc {
+        a: Mutex<i32>,
+        position: crate::Property<i32>,
+        moving: crate::Signal<bool>,
+    }
+
+    impl Calc {
         fn new(a: i32) -> Self {
-            Self { a }
-        }
-
-        fn add(&mut self, b: i32) -> i32 {
-            self.a += b;
-            self.a
-        }
-
-        fn sub(&mut self, b: i32) -> i32 {
-            self.a -= b;
-            self.a
-        }
-
-        fn mul(&mut self, b: i32) -> i32 {
-            self.a *= b;
-            self.a
-        }
-
-        fn div(&mut self, b: i32) -> std::result::Result<i32, DivisionByZeroError> {
-            if b == 0 {
-                Err(DivisionByZeroError)
-            } else {
-                self.a /= b;
-                Ok(self.a)
+            Self {
+                a: Mutex::new(a),
+                position: crate::Property::new(0),
+                moving: crate::Signal::new(),
             }
-        }
-
-        fn clamp(&mut self, min: i32, max: i32) -> i32 {
-            self.a = self.a.clamp(min, max);
-            self.a
-        }
-
-        fn ans(&self) -> i32 {
-            self.a
         }
     }
 
@@ -441,186 +500,74 @@ mod tests {
     #[error("division by zero")]
     struct DivisionByZeroError;
 
-    #[derive(Debug)]
-    struct Meta {
-        object: MetaObject,
-        methods: MethodIds,
-    }
-
-    impl Meta {
-        fn get() -> &'static Self {
-            static META: Lazy<Meta> = Lazy::new(|| {
-                let mut method_id = ActionId(0);
-                let mut builder = MetaObject::builder();
-                let add;
-                let sub;
-                let mul;
-                let div;
-                let clamp;
-                let ans;
-                builder
-                    .add_method({
-                        add = method_id.wrapping_next();
-                        let mut builder = MetaMethod::builder(add);
-                        builder.set_name("add");
-                        builder.parameter(0).set_type(Type::Int32);
-                        builder.return_value().set_type(Type::Int32);
-                        builder.build()
-                    })
-                    .add_method({
-                        sub = method_id.wrapping_next();
-                        let mut builder = MetaMethod::builder(sub);
-                        builder.set_name("sub");
-                        builder.parameter(0).set_type(Type::Int32);
-                        builder.build()
-                    })
-                    .add_method({
-                        mul = method_id.wrapping_next();
-                        let mut builder = MetaMethod::builder(mul);
-                        builder.set_name("mul");
-                        builder.parameter(0).set_type(Type::Int32);
-                        builder.build()
-                    })
-                    .add_method({
-                        div = method_id.wrapping_next();
-                        let mut builder = MetaMethod::builder(div);
-                        builder.set_name("div");
-                        builder.parameter(0).set_type(Type::Int32);
-                        builder.build()
-                    })
-                    .add_method({
-                        clamp = method_id.wrapping_next();
-                        let mut builder = MetaMethod::builder(clamp);
-                        builder.set_name("clamp");
-                        builder.parameter(0).set_type(Type::Int32);
-                        builder.parameter(1).set_type(Type::Int32);
-                        builder.build()
-                    })
-                    .add_method({
-                        ans = method_id.wrapping_next();
-                        let mut builder = MetaMethod::builder(ans);
-                        builder.set_name("ans");
-                        builder.build()
-                    });
-                let object = builder.build();
-                let methods = MethodIds {
-                    add,
-                    sub,
-                    mul,
-                    div,
-                    clamp,
-                    ans,
-                };
-                Meta { object, methods }
-            });
-            &META
+    impl From<DivisionByZeroError> for Error {
+        fn from(err: DivisionByZeroError) -> Self {
+            Self::Other(err.into())
         }
     }
 
-    #[derive(Debug)]
-    struct MethodIds {
-        add: ActionId,
-        sub: ActionId,
-        mul: ActionId,
-        div: ActionId,
-        clamp: ActionId,
-        ans: ActionId,
-    }
-
-    #[derive(Debug)]
-    enum Method {
-        Add,
-        Sub,
-        Mul,
-        Div,
-        Clamp,
-        Ans,
-    }
-
-    impl Method {
-        fn from_ident(ident: &MemberIdent) -> Option<Self> {
-            let Meta { object, methods } = Meta::get();
-            object.method(ident).and_then(|method| {
-                let id = method.uid;
-                if id == methods.add {
-                    Some(Method::Add)
-                } else if id == methods.sub {
-                    Some(Method::Sub)
-                } else if id == methods.mul {
-                    Some(Method::Mul)
-                } else if id == methods.div {
-                    Some(Method::Div)
-                } else if id == methods.clamp {
-                    Some(Method::Clamp)
-                } else if id == methods.ans {
-                    Some(Method::Ans)
-                } else {
-                    None
-                }
-            })
-        }
-
-        fn call(self, calc: &mut Calculator, args: Value<'_>) -> Result<Value<'static>, Error> {
-            Ok(match &self {
-                Self::Add => {
-                    let arg = args.cast_into().map_err(ValueConversionError::Arguments)?;
-                    calc.add(arg).into_value()
-                }
-                Self::Sub => {
-                    let arg = args.cast_into().map_err(ValueConversionError::Arguments)?;
-                    calc.sub(arg).into_value()
-                }
-                Self::Mul => {
-                    let arg = args.cast_into().map_err(ValueConversionError::Arguments)?;
-                    calc.mul(arg).into_value()
-                }
-                Self::Div => {
-                    let arg = args.cast_into().map_err(ValueConversionError::Arguments)?;
-                    calc.div(arg)
-                        .map_err(Into::into)
-                        .map_err(Error::Other)?
-                        .into_value()
-                }
-                Self::Clamp => {
-                    let (arg1, arg2) = args.cast_into().map_err(ValueConversionError::Arguments)?;
-                    calc.clamp(arg1, arg2).into_value()
-                }
-                Self::Ans => {
-                    let () = args.cast_into().map_err(ValueConversionError::Arguments)?;
-                    calc.ans().into_value()
-                }
-            })
+    impl From<Error> for DivisionByZeroError {
+        fn from(_err: Error) -> Self {
+            Self
         }
     }
 
     #[async_trait]
-    impl Object for Mutex<Calculator> {
-        fn meta(&self) -> &MetaObject {
-            &Meta::get().object
+    impl Calculator for Calc {
+        async fn go_to(&self, _position: i32) -> Result<(), Error> {
+            Ok(())
         }
 
-        async fn meta_call(
-            &self,
-            ident: MemberIdent,
-            args: Value<'_>,
-        ) -> Result<Value<'static>, Error> {
-            Method::from_ident(&ident)
-                .ok_or_else(|| Error::MethodNotFound(ident))?
-                .call(&mut *self.lock().await, args)
+        fn position(&self) -> crate::Property<i32> {
+            self.position.clone()
         }
 
-        async fn meta_post(&self, ident: MemberIdent, args: Value<'_>) {
-            let _res = self.meta_call(ident, args).await;
+        fn moving(&self) -> crate::Signal<bool> {
+            self.moving.clone()
         }
 
-        async fn meta_event(&self, _ident: MemberIdent, _value: Value<'_>) {
-            // no signal
+        async fn add(&self, b: i32) -> i32 {
+            let mut a = self.a.lock().await;
+            *a += b;
+            *a
+        }
+
+        async fn sub(&self, b: i32) -> i32 {
+            let mut a = self.a.lock().await;
+            *a -= b;
+            *a
+        }
+
+        async fn mul(&self, b: i32) -> i32 {
+            let mut a = self.a.lock().await;
+            *a *= b;
+            *a
+        }
+
+        async fn div(&self, b: i32) -> std::result::Result<i32, DivisionByZeroError> {
+            let mut a = self.a.lock().await;
+            if b == 0 {
+                Err(DivisionByZeroError)
+            } else {
+                *a /= b;
+                Ok(*a)
+            }
+        }
+
+        async fn clamp(&self, min: i32, max: i32) -> i32 {
+            let mut a = self.a.lock().await;
+            *a = (*a).clamp(min, max);
+            *a
+        }
+
+        async fn ans(&self) -> i32 {
+            *self.a.lock().await
         }
     }
 
     #[tokio::test]
     async fn test_calculator_object_call_methods() {
-        let calc = Mutex::new(Calculator::new(42));
+        let calc = Calc::new(42);
         let res: i32 = calc.call("add", 100).await.unwrap();
         assert_eq!(res, 142);
         let res: i32 = calc.call("add", 50).await.unwrap();
@@ -644,5 +591,177 @@ mod tests {
         );
         let res: i32 = calc.call("ans", ()).await.unwrap();
         assert_eq!(res, 127);
+    }
+
+    #[tokio::test]
+    async fn property_set_emits_and_signal_event_reaches_subscriber() {
+        let calc = Calc::new(0);
+        let property_updates = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let property_slot = std::sync::Arc::clone(&property_updates);
+        calc.position().subscribe(move |value| {
+            *property_slot.lock().unwrap() = Some(value);
+        });
+        let signal_updates = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let signal_slot = std::sync::Arc::clone(&signal_updates);
+        calc.moving().subscribe(move |value| {
+            *signal_slot.lock().unwrap() = Some(value);
+        });
+
+        let position: i32 = calc.property("position").await.unwrap();
+        assert_eq!(position, 0);
+        calc.set_property("position", 4).await.unwrap();
+        let position: i32 = calc.property("position").await.unwrap();
+        assert_eq!(position, 4);
+        assert_eq!(*property_updates.lock().unwrap(), Some(4));
+
+        calc.meta_event(MemberIdent::from("moving"), true.into_value())
+            .await;
+        assert_eq!(*signal_updates.lock().unwrap(), Some(true));
+    }
+
+    #[test]
+    fn emits_meta_object() {
+        let meta = &*CALCULATOR_META_OBJECT;
+
+        let go_to = meta
+            .method(&MemberIdent::from("goTo"))
+            .expect("method goTo");
+        assert_eq!(go_to.uid, ACTION_START_ID);
+        assert_eq!(go_to.name, "goTo");
+        assert_eq!(go_to.description, "Go to some position.");
+        assert_eq!(go_to.parameters[0].name, "position");
+        assert_eq!(go_to.parameters_signature, <(i32,) as Reflect>::signature());
+        assert_eq!(go_to.return_signature, <() as Reflect>::signature());
+
+        let position = meta
+            .property(&MemberIdent::from("position"))
+            .expect("property position");
+        assert_eq!(position.uid, ActionId(101));
+        assert_eq!(position.signature, <i32 as Reflect>::signature());
+
+        let moving = meta
+            .signal(&MemberIdent::from("moving"))
+            .expect("signal moving");
+        assert_eq!(moving.uid, ActionId(102));
+        assert_eq!(moving.signature, <bool as Reflect>::signature());
+    }
+
+    #[tokio::test]
+    async fn client_rejects_meta_object_missing_go_to() {
+        let (_server, session) = host(Arc::new(Calc::new(0))).await;
+        let mut meta = CALCULATOR_META_OBJECT.clone();
+        let go_to = meta
+            .method(&MemberIdent::from("goTo"))
+            .expect("method goTo")
+            .uid;
+        meta.methods.retain(|id, _| *id != go_to);
+        let client = ObjectClient::new(ServiceId(2), Id(1), Uid::default(), meta, session);
+        let err = CalculatorClient::try_from(client).unwrap_err();
+        assert_matches!(err, Error::MethodNotFound(ident) => assert_eq!(ident, "goTo"));
+    }
+
+    #[tokio::test]
+    async fn client_calls_method_over_localhost() {
+        let calc = Arc::new(Calc::new(42));
+        let (_server, session) = host(Arc::clone(&calc)).await;
+        let client = ObjectClient::connect(ServiceId(2), Id(1), Uid::default(), session)
+            .await
+            .unwrap();
+        let client = CalculatorClient::try_from(client).unwrap();
+        let sum: i32 = client.add(100).await;
+        assert_eq!(sum, 142);
+    }
+
+    async fn host(calc: Arc<Calc>) -> (crate::session::Server, crate::session::Session) {
+        let mut server = crate::session::Session::server(
+            "tcp://127.0.0.1:0".parse().unwrap(),
+            crate::session::auth::PermissiveAuthenticator,
+            Host(calc),
+        )
+        .await
+        .unwrap();
+        let address = server.endpoints_receiver().borrow().0;
+        let (incoming, outgoing) = crate::messaging::channel::connect(address).await.unwrap();
+        let session =
+            crate::session::Session::connect(incoming, outgoing, Default::default(), Idle)
+                .await
+                .unwrap();
+        (server, session)
+    }
+
+    #[derive(Clone)]
+    struct Host(Arc<Calc>);
+
+    impl crate::messaging::CallHandler for Host {
+        type Error = crate::HandlerError;
+        type Future = futures::future::BoxFuture<'static, Result<bytes::Bytes, Self::Error>>;
+
+        fn handle_call(
+            &self,
+            address: crate::messaging::message::Address,
+            args: bytes::Bytes,
+        ) -> Self::Future {
+            let object = Arc::clone(&self.0);
+            async move {
+                if address.service() != ServiceId(2) || address.object() != Id(1) {
+                    return Err(crate::HandlerError::non_fatal("no handler"));
+                }
+                object
+                    .handler_meta_call(address.action(), args)
+                    .await
+                    .map_err(crate::HandlerError::non_fatal)
+            }
+            .boxed()
+        }
+    }
+
+    impl crate::messaging::EventHandler for Host {
+        fn handle_event(&self, _address: crate::messaging::message::Address, _args: bytes::Bytes) {}
+    }
+
+    impl crate::messaging::PostHandler for Host {
+        fn handle_post(&self, _address: crate::messaging::message::Address, _args: bytes::Bytes) {}
+    }
+
+    impl crate::messaging::CapabilitiesHandler for Host {
+        fn handle_capabilities(
+            &self,
+            _address: crate::messaging::message::Address,
+            _data: crate::value::KeyDynValueMap,
+        ) {
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct Idle;
+
+    impl crate::messaging::CallHandler for Idle {
+        type Error = crate::HandlerError;
+        type Future = futures::future::Ready<Result<bytes::Bytes, Self::Error>>;
+
+        fn handle_call(
+            &self,
+            _address: crate::messaging::message::Address,
+            _args: bytes::Bytes,
+        ) -> Self::Future {
+            futures::future::ready(Err(crate::HandlerError::non_fatal("no handler")))
+        }
+    }
+
+    impl crate::messaging::EventHandler for Idle {
+        fn handle_event(&self, _address: crate::messaging::message::Address, _args: bytes::Bytes) {}
+    }
+
+    impl crate::messaging::PostHandler for Idle {
+        fn handle_post(&self, _address: crate::messaging::message::Address, _args: bytes::Bytes) {}
+    }
+
+    impl crate::messaging::CapabilitiesHandler for Idle {
+        fn handle_capabilities(
+            &self,
+            _address: crate::messaging::message::Address,
+            _data: crate::value::KeyDynValueMap,
+        ) {
+        }
     }
 }

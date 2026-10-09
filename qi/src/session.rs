@@ -13,7 +13,7 @@ use crate::{
     value::{self, KeyDynValueMap},
 };
 use control::{Control, SessionHandler};
-use futures::{stream::FusedStream, Sink, StreamExt, TryStream};
+use futures::{future::FusedFuture, stream::FusedStream, FutureExt, Sink, StreamExt, TryStream};
 use qi_messaging::Address;
 use std::{net::SocketAddr, pin::pin};
 use tokio::{select, sync::watch, task, time};
@@ -84,10 +84,8 @@ impl Session {
             watch::channel((local_address, Vec::new()));
         let task = task::spawn(async move {
             let mut clients = pin!(clients.fuse());
-            let mut update_endpoints = pin!(update_address_endpoints(
-                local_address,
-                &mut endpoints_sender
-            ));
+            let mut update_endpoints =
+                pin!(update_address_endpoints(local_address, &mut endpoints_sender).fuse());
             // Use a join set so that when this task is dropped, all spawned client session tasks are aborted.
             let mut client_tasks = task::JoinSet::new();
             loop {
@@ -100,9 +98,9 @@ impl Session {
                             handler.clone(),
                         ));
                     }
-                    () = &mut update_endpoints => {
-                        // nothing, if this future terminates it means that the address was not an
-                        // "ANY" IP address. The endpoints sender must not be dropped.
+                    () = &mut update_endpoints, if !update_endpoints.is_terminated() => {
+                        // A concrete address finishes this future immediately. Leave it out of
+                        // later polls so the server task keeps accepting clients.
                     }
                     else => {
                         break;

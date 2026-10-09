@@ -1,0 +1,53 @@
+error: `#[qi::property]` requires a `&self` receiver, not `&mut self`
+ --> tests/object/fail.rs:4:17
+  |
+4 |     fn position(&mut self) -> i32;
+  |                 ^^^^^^^^^
+
+error: `#[qi::method]` requires a `&self` receiver
+  --> tests/object/fail.rs:10:5
+   |
+10 |     fn bar(position: i32);
+   |     ^^^^^^^^^^^^^^^^^^^^^
+
+error: `#[qi::signal]` requires a `&self` receiver, not `self` by value
+  --> tests/object/fail.rs:16:15
+   |
+16 |     fn moving(self) -> bool;
+   |               ^^^^
+
+error: qi object traits cannot be generic
+  --> tests/object/fail.rs:20:14
+   |
+20 | trait Generic<T> {}
+   |              ^^^
+
+error: unknown qi attribute `bogus`
+  --> tests/object/fail.rs:24:5
+   |
+24 |     #[qi::bogus]
+   |     ^^^^^^^^^^^^
+
+error: unknown qi attribute argument `bogus`
+  --> tests/object/fail.rs:30:18
+   |
+30 |     #[qi::method(bogus = "x")]
+   |                  ^^^^^
+
+error: `name` must be a string literal
+  --> tests/object/fail.rs:36:25
+   |
+36 |     #[qi::method(name = 1)]
+   |                         ^
+
+error: `#[qi::method]` requires a function
+  --> tests/object/fail.rs:42:5
+   |
+42 |     #[qi::method]
+   |     ^^^^^^^^^^^^^
+
+error: `#[qi::method]` takes `name = "..."` in parentheses
+  --> tests/object/fail.rs:48:5
+   |
+48 |     #[qi::method = "goTo"]
+   |     ^^^^^^^^^^^^^^^^^^^^^^

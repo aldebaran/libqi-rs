@@ -41,9 +41,13 @@
 #![doc(test(attr(deny(warnings))))]
 #![doc = include_str!("../README.md")]
 
+// Generated `::qi::…` paths from `#[qi::object]` resolve inside this crate.
+extern crate self as qi;
+
 mod error;
 pub mod node;
 pub mod object;
+mod property;
 pub mod service;
 pub(crate) mod service_directory;
 pub(crate) mod session;
@@ -53,9 +57,11 @@ pub mod value;
 pub use self::{
     error::{BoxError, Error, HandlerError},
     node::Node,
-    object::{Object, ObjectExt},
+    object::{Object, ObjectClient, ObjectExt},
+    property::Property,
     service_directory::ServiceDirectory,
     session::auth,
+    signal::Signal,
     value::Value,
 };
 pub use qi_format as format;
